@@ -62,6 +62,11 @@ namespace TacticalCombat.Editor
             // ═══════════════════════════════════════════════════════════
             
             TacticalCombat.Combat.Health health = player.AddComponent<TacticalCombat.Combat.Health>();
+            
+            // ⭐ PROFESSIONAL COMBAT SYSTEM
+            TacticalCombat.Combat.WeaponSystem weaponSystem = player.AddComponent<TacticalCombat.Combat.WeaponSystem>();
+            
+            // Legacy SimpleGun (backup)
             TacticalCombat.Combat.SimpleGun simpleGun = player.AddComponent<TacticalCombat.Combat.SimpleGun>();
             
             // Configure gun
@@ -77,7 +82,13 @@ namespace TacticalCombat.Editor
             if (fireRateProp != null && fireRateProp.propertyType == SerializedPropertyType.Float) 
                 fireRateProp.floatValue = 0.5f;
             
-            // ⭐ Create Muzzle Transform
+            // ⭐ Create Weapon Holder (Professional Combat System)
+            GameObject weaponHolder = new GameObject("WeaponHolder");
+            weaponHolder.transform.SetParent(player.transform);
+            weaponHolder.transform.localPosition = new Vector3(0.3f, 1.4f, 0.5f); // Sağ el pozisyonu
+            weaponHolder.transform.localRotation = Quaternion.identity;
+            
+            // ⭐ Create Muzzle Transform (Legacy)
             GameObject muzzleTransform = new GameObject("MuzzleTransform");
             muzzleTransform.transform.SetParent(player.transform);
             muzzleTransform.transform.localPosition = new Vector3(0.3f, 1.4f, 0.5f); // Sağ el pozisyonu
@@ -110,6 +121,16 @@ namespace TacticalCombat.Editor
             
             serializedGun.ApplyModifiedProperties();
             Debug.Log("✅ Muzzle transform created and assigned to SimpleGun");
+            
+            // ⭐ Configure WeaponSystem (Professional Combat System)
+            SerializedObject serializedWeaponSystem = new SerializedObject(weaponSystem);
+            var weaponHolderProp = serializedWeaponSystem.FindProperty("weaponHolder");
+            if (weaponHolderProp != null)
+            {
+                weaponHolderProp.objectReferenceValue = weaponHolder.transform;
+                serializedWeaponSystem.ApplyModifiedProperties();
+                Debug.Log("✅ WeaponHolder assigned to WeaponSystem");
+            }
             
             // ═══════════════════════════════════════════════════════════
             // BUILDING SYSTEM (Valheim style!)
