@@ -53,6 +53,12 @@ namespace TacticalCombat.Vision
             if (!isServer) return;
 
             // Only active during Combat phase
+            if (MatchManager.Instance == null)
+            {
+                Debug.LogWarning("⚠️ MatchManager.Instance is null in ControlPoint!");
+                return;
+            }
+            
             if (MatchManager.Instance.GetCurrentPhase() != Phase.Combat)
                 return;
 

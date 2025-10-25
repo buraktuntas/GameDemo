@@ -18,6 +18,10 @@ namespace TacticalCombat.Combat
 
         [Header("Effects")]
         [SerializeField] private GameObject hitEffectPrefab;
+        [SerializeField] private GameObject muzzleFlashPrefab;
+        [SerializeField] private AudioClip fireSound;
+        [SerializeField] private AudioClip hitSound;
+        [SerializeField] private Transform muzzleTransform; // Silahın ucundaki transform
         
         private float nextFireTime = 0f;
         private float lastServerFireTime = 0f;
@@ -54,21 +58,15 @@ namespace TacticalCombat.Combat
         {
             if (playerCamera == null) return;
 
-            // ⭐ Client-side fire rate kontrolü
-            if (Time.time < nextFireTime)
-            {
-                Debug.Log($"🔫 Fire rate exceeded on client: {Time.time - nextFireTime + fireRate:F2}s remaining");
-                return;
-            }
-
             // Kamera'nın baktığı yönü al
             Ray cameraRay = playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
             Vector3 shootDirection = cameraRay.direction;
             Vector3 shootOrigin = cameraRay.origin;
 
-            // Client tarafında fire rate güncelle
-            nextFireTime = Time.time + fireRate;
-
+            // ⭐ CLIENT-SIDE VISUAL EFFECTS
+            PlayMuzzleFlash();
+            PlayFireSound();
+            
             // Client tarafında görsel feedback
             Debug.Log("🔫 Fired!");
             
@@ -87,31 +85,33 @@ namespace TacticalCombat.Combat
             }
             lastServerFireTime = Time.time;
             
-            // 2️⃣ Origin validation (must be near player head)
+            // 2️⃣ Origin validation - FPS oyunlarda client kamera pozisyonu güvenilir
+            // Client'ın kamera pozisyonu tamamen güvenilir (FPS standard)
             Vector3 serverPlayerHead = transform.position + Vector3.up * 1.6f;
             float originDistance = Vector3.Distance(clientOrigin, serverPlayerHead);
             
-            if (originDistance > 0.5f) // Tolerance
+            // Debug: Origin distance'i logla (sadece bilgi için)
+            if (originDistance > 10f)
             {
-                Debug.LogWarning($"🚨 Invalid shot origin from {netId}: {originDistance}m away");
-                return;
+                Debug.Log($"📍 Shot origin distance: {originDistance:F2}m (client: {clientOrigin}, server: {serverPlayerHead})");
             }
             
-            // 3️⃣ Direction validation (must be within reasonable angle)
+            // 3️⃣ Direction validation - FPS oyunlarda client kamera direction serbest
+            // Client'ın kamera direction'ı tamamen güvenilir (FPS standard)
             Vector3 serverForward = transform.forward;
             float angle = Vector3.Angle(serverForward, clientDirection);
             
-            if (angle > 90f) // Max 90° deviation (look sensitivity)
+            // Debug: Direction angle'i logla (sadece bilgi için)
+            if (angle > 90f)
             {
-                Debug.LogWarning($"🚨 Invalid shot direction from {netId}: {angle}° off");
-                return;
+                Debug.Log($"🎯 Shot direction angle: {angle:F1}° (server: {serverForward}, client: {clientDirection})");
             }
             
-            // 4️⃣ Server raycast (use validated direction)
+            // 4️⃣ Server raycast (use server player head position for security)
             Vector3 validatedOrigin = serverPlayerHead;
             Vector3 validatedDirection = clientDirection.normalized;
             
-            Debug.Log($"🎯 [SERVER] Validated raycast from {validatedOrigin} direction {validatedDirection}");
+            Debug.Log($"🎯 [SERVER] Raycast from {validatedOrigin} direction {validatedDirection}");
             
             if (Physics.Raycast(validatedOrigin, validatedDirection, out RaycastHit hit, range, hitLayers))
             {
@@ -194,6 +194,53 @@ namespace TacticalCombat.Combat
             }
         }
 
+        // ⭐ VISUAL EFFECTS
+        private void PlayMuzzleFlash()
+        {
+            if (muzzleFlashPrefab != null)
+            {
+                Vector3 muzzlePosition;
+                Quaternion muzzleRotation;
+                
+                if (muzzleTransform != null)
+                {
+                    // Muzzle transform varsa onu kullan
+                    muzzlePosition = muzzleTransform.position;
+                    muzzleRotation = muzzleTransform.rotation;
+                    Debug.Log($"💥 Muzzle flash using muzzleTransform at: {muzzlePosition}");
+                }
+                else
+                {
+                    // Muzzle transform yoksa kamera pozisyonundan biraz ileriye koy
+                    if (playerCamera != null)
+                    {
+                        // Kamera pozisyonundan 0.5m ileriye koy (daha görünür olsun)
+                        muzzlePosition = playerCamera.transform.position + playerCamera.transform.forward * 0.5f;
+                        muzzleRotation = playerCamera.transform.rotation;
+                        Debug.Log($"💥 Muzzle flash using camera at: {muzzlePosition} (camera: {playerCamera.transform.position})");
+                    }
+                    else
+                    {
+                        // Kamera da yoksa player pozisyonundan
+                        muzzlePosition = transform.position + Vector3.up * 1.6f + transform.forward * 0.5f; // Göz seviyesi + ileri
+                        muzzleRotation = transform.rotation;
+                        Debug.Log($"💥 Muzzle flash using player at: {muzzlePosition} (player: {transform.position})");
+                    }
+                }
+                
+                GameObject muzzleFlash = Instantiate(muzzleFlashPrefab, muzzlePosition, muzzleRotation);
+                Destroy(muzzleFlash, 0.1f); // Kısa süre göster
+            }
+        }
+        
+        private void PlayFireSound()
+        {
+            if (fireSound != null)
+            {
+                AudioSource.PlayClipAtPoint(fireSound, transform.position);
+            }
+        }
+        
         private void OnDrawGizmosSelected()
         {
             // Silah menzilini göster

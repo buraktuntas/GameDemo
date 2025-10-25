@@ -70,11 +70,46 @@ namespace TacticalCombat.Editor
             var rangeProp = serializedGun.FindProperty("range");
             var fireRateProp = serializedGun.FindProperty("fireRate");
             
-            if (damageProp != null) damageProp.floatValue = 25f;
-            if (rangeProp != null) rangeProp.floatValue = 100f;
-            if (fireRateProp != null) fireRateProp.floatValue = 0.5f;
+            if (damageProp != null && damageProp.propertyType == SerializedPropertyType.Float) 
+                damageProp.floatValue = 25f;
+            if (rangeProp != null && rangeProp.propertyType == SerializedPropertyType.Float) 
+                rangeProp.floatValue = 100f;
+            if (fireRateProp != null && fireRateProp.propertyType == SerializedPropertyType.Float) 
+                fireRateProp.floatValue = 0.5f;
+            
+            // ⭐ Create Muzzle Transform
+            GameObject muzzleTransform = new GameObject("MuzzleTransform");
+            muzzleTransform.transform.SetParent(player.transform);
+            muzzleTransform.transform.localPosition = new Vector3(0.3f, 1.4f, 0.5f); // Sağ el pozisyonu
+            muzzleTransform.transform.localRotation = Quaternion.identity;
+            
+            // ⭐ Assign effect prefabs, muzzle transform, and sounds
+            var hitEffectProp = serializedGun.FindProperty("hitEffectPrefab");
+            var muzzleFlashProp = serializedGun.FindProperty("muzzleFlashPrefab");
+            var muzzleTransformProp = serializedGun.FindProperty("muzzleTransform");
+            var fireSoundProp = serializedGun.FindProperty("fireSound");
+            var hitSoundProp = serializedGun.FindProperty("hitSound");
+            
+            GameObject hitEffectPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Effects/HitEffect.prefab");
+            GameObject muzzleFlashPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Effects/MuzzleFlash.prefab");
+            
+            // Create simple audio clips (if they don't exist)
+            AudioClip fireSound = CreateSimpleAudioClip("FireSound", 0.1f, 440f); // 440Hz, 0.1s
+            AudioClip hitSound = CreateSimpleAudioClip("HitSound", 0.2f, 220f); // 220Hz, 0.2s
+            
+            if (hitEffectProp != null && hitEffectPrefab != null) 
+                hitEffectProp.objectReferenceValue = hitEffectPrefab;
+            if (muzzleFlashProp != null && muzzleFlashPrefab != null) 
+                muzzleFlashProp.objectReferenceValue = muzzleFlashPrefab;
+            if (muzzleTransformProp != null) 
+                muzzleTransformProp.objectReferenceValue = muzzleTransform.transform;
+            if (fireSoundProp != null && fireSound != null) 
+                fireSoundProp.objectReferenceValue = fireSound;
+            if (hitSoundProp != null && hitSound != null) 
+                hitSoundProp.objectReferenceValue = hitSound;
             
             serializedGun.ApplyModifiedProperties();
+            Debug.Log("✅ Muzzle transform created and assigned to SimpleGun");
             
             // ═══════════════════════════════════════════════════════════
             // BUILDING SYSTEM (Valheim style!)
@@ -168,6 +203,21 @@ namespace TacticalCombat.Editor
             serializedFPS.FindProperty("useFOVKick").boolValue = true;
             serializedFPS.ApplyModifiedProperties();
             
+            // ⭐ Assign camera to SimpleGun (for muzzle flash positioning)
+            // Re-create serializedGun to assign camera
+            SerializedObject serializedGunForCamera = new SerializedObject(simpleGun);
+            var playerCameraProp = serializedGunForCamera.FindProperty("playerCamera");
+            if (playerCameraProp != null && playerCameraProp.propertyType == SerializedPropertyType.ObjectReference)
+            {
+                playerCameraProp.objectReferenceValue = cam;
+                serializedGunForCamera.ApplyModifiedProperties();
+                Debug.Log("✅ Camera assigned to SimpleGun for proper muzzle flash positioning");
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ playerCamera property not found in SimpleGun! Camera assignment skipped.");
+            }
+            
             // Prefab olarak kaydet
             string prefabDir = "Assets/Prefabs";
             if (!AssetDatabase.IsValidFolder(prefabDir))
@@ -220,6 +270,24 @@ namespace TacticalCombat.Editor
             
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+        }
+
+        private static AudioClip CreateSimpleAudioClip(string name, float duration, float frequency)
+        {
+            // Create a simple sine wave audio clip
+            int sampleRate = 44100;
+            int sampleCount = Mathf.RoundToInt(sampleRate * duration);
+            float[] samples = new float[sampleCount];
+            
+            for (int i = 0; i < sampleCount; i++)
+            {
+                samples[i] = Mathf.Sin(2 * Mathf.PI * frequency * i / sampleRate) * 0.1f; // Low volume
+            }
+            
+            AudioClip clip = AudioClip.Create(name, sampleCount, 1, sampleRate, false);
+            clip.SetData(samples, 0);
+            
+            return clip;
         }
     }
 }
