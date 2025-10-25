@@ -2,50 +2,48 @@ using UnityEngine;
 using Mirror;
 using TacticalCombat.Core;
 using TacticalCombat.Player;
+using TacticalCombat.Combat;
 
 namespace TacticalCombat.Building
 {
     /// <summary>
-    /// Valheim-style build system with structural integrity preview
+    /// ✅ BUG FIX VERSION - Input çakışması çözüldü
+    /// Build moduna girişte silah devre dışı kalıyor
     /// </summary>
     public class SimpleBuildMode : NetworkBehaviour
     {
-    [Header("Prefabs")]
-    public GameObject wallPrefab;
-    public GameObject floorPrefab;
-    public GameObject roofPrefab;
-    public GameObject doorPrefab;
-    public GameObject windowPrefab;
-    public GameObject stairsPrefab;
+        [Header("Prefabs")]
+        public GameObject wallPrefab;
+        public GameObject floorPrefab;
+        public GameObject roofPrefab;
+        public GameObject doorPrefab;
+        public GameObject windowPrefab;
+        public GameObject stairsPrefab;
         
         [Header("Materials")]
-        public Material validPlacementMaterial;   // Green ghost
-        public Material invalidPlacementMaterial; // Red ghost
+        public Material validPlacementMaterial;
+        public Material invalidPlacementMaterial;
         
         [Header("Settings")]
         public LayerMask groundLayer;
-        public LayerMask obstacleLayer; // For overlap detection
+        public LayerMask obstacleLayer;
         public float placementDistance = 5f;
-        public float rotationSpeed = 90f; // Degrees per second
+        public float rotationSpeed = 90f;
         public KeyCode buildModeKey = KeyCode.B;
         public KeyCode rotateKey = KeyCode.R;
         public KeyCode cycleStructureKey = KeyCode.Tab;
         public float gridSize = 1f;
         
         [Header("Build Mode Behavior")]
-        [Tooltip("Valheim style: Camera rotates freely while building")]
         public bool allowCameraInBuildMode = true;
-        [Tooltip("Fortnite style: Movement allowed while building")]
-        public bool allowMovementInBuildMode = true; // Grid snapping size
-        
-        [Header("Structure Selection")]
-        public int currentStructureIndex = 0;
-        private GameObject[] availableStructures;
-        
+        public bool allowMovementInBuildMode = true;
         
         [Header("Structural Integrity Preview")]
         [SerializeField] private bool showStabilityPreview = true;
         [SerializeField] private float maxSupportDistance = 10f;
+        
+        // ✅ FIX: Weapon system reference
+        private WeaponSystem weaponSystem;
         
         // State
         private bool isBuildModeActive = false;
@@ -55,17 +53,37 @@ namespace TacticalCombat.Building
         private Vector3 placementPosition;
         private Quaternion placementRotation;
         private float currentRotationY = 0f;
-        private Material lastMaterial; // Cache material to avoid reassignment
+        private Material lastMaterial;
         
-        // ⭐ PERFORMANCE OPTIMIZATION: Cache renderers and materials
+        // Performance optimization
         private Renderer[] ghostRenderers;
         private Material[] ghostOriginalMaterials;
         private bool lastCanPlaceState = false;
         private Color lastStabilityColor;
-
+        
+        [Header("Structure Selection")]
+        public int currentStructureIndex = 0;
+        private GameObject[] availableStructures;
+        
+        // Performance throttling
+        private float lastUpdateTime;
+        private const float UPDATE_INTERVAL = 0.05f;
+        
+        // Stability caching
+        private float lastStabilityCheckTime;
+        private Color cachedStabilityColor;
+        private Vector3 lastStabilityPosition;
+        
         private void Start()
         {
             if (!isLocalPlayer) return;
+            
+            // ✅ FIX: Get weapon system reference
+            weaponSystem = GetComponent<WeaponSystem>();
+            if (weaponSystem == null)
+            {
+                Debug.LogWarning("⚠️ [SimpleBuildMode] WeaponSystem not found!");
+            }
             
             // Get FPSController and camera
             var fpsController = GetComponent<FPSController>();
@@ -81,7 +99,7 @@ namespace TacticalCombat.Building
             
             if (playerCamera == null)
             {
-                Debug.LogError("❌ Player camera not found!");
+                Debug.LogError("❌ [SimpleBuildMode] Player camera not found!");
             }
             
             CreateDefaultMaterials();
@@ -90,8 +108,7 @@ namespace TacticalCombat.Building
         
         private void InitializeAvailableStructures()
         {
-            // Debug: Prefab durumlarını kontrol et
-            Debug.Log($"🏗️ Prefab durumları:");
+            Debug.Log($"🏗️ [SimpleBuildMode] Initializing structures...");
             Debug.Log($"  Wall: {(wallPrefab != null ? wallPrefab.name : "NULL")}");
             Debug.Log($"  Floor: {(floorPrefab != null ? floorPrefab.name : "NULL")}");
             Debug.Log($"  Roof: {(roofPrefab != null ? roofPrefab.name : "NULL")}");
@@ -99,7 +116,6 @@ namespace TacticalCombat.Building
             Debug.Log($"  Window: {(windowPrefab != null ? windowPrefab.name : "NULL")}");
             Debug.Log($"  Stairs: {(stairsPrefab != null ? stairsPrefab.name : "NULL")}");
             
-            // Mevcut yapıları listele
             availableStructures = new GameObject[]
             {
                 wallPrefab,
@@ -110,7 +126,7 @@ namespace TacticalCombat.Building
                 stairsPrefab
             };
             
-            // Null olanları filtrele
+            // Filter null entries
             int validCount = 0;
             for (int i = 0; i < availableStructures.Length; i++)
             {
@@ -121,16 +137,15 @@ namespace TacticalCombat.Building
                 }
             }
             
-            // Array'i yeniden boyutlandır
             System.Array.Resize(ref availableStructures, validCount);
             
             if (availableStructures.Length == 0)
             {
-                Debug.LogWarning("⚠️ Hiç yapı prefab'ı atanmamış!");
+                Debug.LogWarning("⚠️ [SimpleBuildMode] No structure prefabs assigned!");
             }
             else
             {
-                Debug.Log($"✅ {availableStructures.Length} yapı türü yüklendi");
+                Debug.Log($"✅ [SimpleBuildMode] {availableStructures.Length} structure types loaded");
             }
         }
         
@@ -148,22 +163,10 @@ namespace TacticalCombat.Building
                 invalidPlacementMaterial.color = new Color(1, 0, 0, 0.5f);
             }
         }
-
-        // ⭐ PERFORMANCE: Throttle için
-        private float lastUpdateTime;
-        private const float UPDATE_INTERVAL = 0.05f; // 20 FPS yeterli
         
         private void Update()
         {
-            if (!isLocalPlayer) 
-            {
-                // Debug: isLocalPlayer false ise log at
-                if (Time.frameCount % 300 == 0) // Her 5 saniyede bir
-                {
-                    Debug.Log($"🏗️ SimpleBuildMode Update - isLocalPlayer: {isLocalPlayer}");
-                }
-                return;
-            }
+            if (!isLocalPlayer) return;
             
             HandleBuildModeToggle();
             
@@ -173,18 +176,12 @@ namespace TacticalCombat.Building
                 HandleRotation();
                 HandlePlacement();
                 
-                // ⭐ THROTTLE: UpdateGhostPreview sadece belirli aralıklarla
+                // Throttled update
                 if (Time.time - lastUpdateTime >= UPDATE_INTERVAL)
                 {
                     UpdateGhostPreview();
                     lastUpdateTime = Time.time;
                 }
-            }
-            
-            // Debug: Tab tuşu her zaman çalışsın
-            if (Input.GetKeyDown(KeyCode.Tab))
-            {
-                Debug.Log("🏗️ Tab tuşu algılandı - Build mode: " + isBuildModeActive);
             }
         }
         
@@ -192,16 +189,14 @@ namespace TacticalCombat.Building
         {
             if (Input.GetKeyDown(buildModeKey))
             {
-                Debug.Log($"🏗️ B tuşu basıldı - Mevcut durum: {isBuildModeActive}");
+                Debug.Log($"🏗️ [SimpleBuildMode] B key pressed - Current state: {isBuildModeActive}");
                 
                 if (isBuildModeActive)
                 {
-                    Debug.Log("🏗️ Build mode kapatılıyor...");
                     ExitBuildMode();
                 }
                 else
                 {
-                    Debug.Log("🏗️ Build mode açılıyor...");
                     EnterBuildMode();
                 }
             }
@@ -217,26 +212,20 @@ namespace TacticalCombat.Building
         {
             if (Input.GetKeyDown(cycleStructureKey))
             {
-                Debug.Log("🏗️ Tab tuşu basıldı - Yapı değiştiriliyor...");
                 CycleStructure();
             }
         }
         
         private void CycleStructure()
         {
-            if (availableStructures == null || availableStructures.Length == 0) 
+            if (availableStructures == null || availableStructures.Length == 0)
             {
-                Debug.LogWarning("⚠️ availableStructures is null or empty! Cannot cycle structures.");
+                Debug.LogWarning("⚠️ [SimpleBuildMode] Cannot cycle - no structures available");
                 return;
             }
             
-            Debug.Log($"🏗️ Önceki index: {currentStructureIndex}, Toplam yapı: {availableStructures.Length}");
-            
             currentStructureIndex = (currentStructureIndex + 1) % availableStructures.Length;
             
-            Debug.Log($"🏗️ Yeni index: {currentStructureIndex}");
-            
-            // Ghost preview'ı yeniden oluştur
             if (ghostPreview != null)
             {
                 DestroyGhostPreview();
@@ -244,7 +233,7 @@ namespace TacticalCombat.Building
             }
             
             string structureName = availableStructures[currentStructureIndex].name;
-            Debug.Log($"🏗️ Yapı seçildi: {structureName}");
+            Debug.Log($"🏗️ [SimpleBuildMode] Structure selected: {structureName}");
         }
         
         private void HandleRotation()
@@ -258,105 +247,128 @@ namespace TacticalCombat.Building
         
         private void HandlePlacement()
         {
-            if (Input.GetMouseButtonDown(0) && canPlace) // Left click
+            // ✅ FIX: Sadece build modunda placement'e izin ver
+            if (!isBuildModeActive) return;
+            
+            if (Input.GetMouseButtonDown(0) && canPlace)
             {
                 PlaceStructure();
             }
         }
-
+        
+        /// <summary>
+        /// ✅ FIX: Build moduna giriş - silahı devre dışı bırak
+        /// </summary>
         private void EnterBuildMode()
         {
-            Debug.Log($"🏗️ EnterBuildMode çağrıldı - wallPrefab: {(wallPrefab != null ? wallPrefab.name : "NULL")}");
+            Debug.Log($"🏗️ [SimpleBuildMode] Entering build mode...");
             
             if (availableStructures == null || availableStructures.Length == 0)
             {
-                Debug.LogWarning("⚠️ No structures available!");
+                Debug.LogWarning("⚠️ [SimpleBuildMode] No structures available!");
                 return;
             }
             
             isBuildModeActive = true;
             currentRotationY = 0f;
             
-            // ✅ Configure input based on build mode behavior
+            // ✅ FIX: InputManager configuration
             if (InputManager.Instance != null)
             {
                 InputManager.Instance.IsInBuildMode = true;
+                InputManager.Instance.BlockShootInput = true; // ← Silah kullanımını engelle
                 
-                // ⭐ KEY DECISION POINT
                 if (allowCameraInBuildMode && allowMovementInBuildMode)
                 {
-                    // VALHEIM STYLE: Full movement + camera
+                    // VALHEIM STYLE
                     Cursor.lockState = CursorLockMode.Confined;
                     Cursor.visible = true;
                     InputManager.Instance.BlockCameraInput = false;
                     InputManager.Instance.BlockMovementInput = false;
-                    
-                    Debug.Log("🏗️ BUILD MODE (Valheim): Movement + Camera enabled");
+                    Debug.Log("🏗️ [SimpleBuildMode] Build mode: Valheim style (Movement + Camera)");
                 }
                 else if (allowMovementInBuildMode && !allowCameraInBuildMode)
                 {
-                    // FORTNITE STYLE: Movement but no camera
+                    // FORTNITE STYLE
                     Cursor.lockState = CursorLockMode.None;
                     Cursor.visible = true;
                     InputManager.Instance.BlockCameraInput = true;
                     InputManager.Instance.BlockMovementInput = false;
-                    
-                    Debug.Log("🏗️ BUILD MODE (Fortnite): Movement only");
+                    Debug.Log("🏗️ [SimpleBuildMode] Build mode: Fortnite style (Movement only)");
                 }
                 else
                 {
-                    // STATIC BUILD: No movement, no camera
+                    // STATIC BUILD
                     Cursor.lockState = CursorLockMode.None;
                     Cursor.visible = true;
                     InputManager.Instance.BlockCameraInput = true;
                     InputManager.Instance.BlockMovementInput = true;
-                    
-                    Debug.Log("🏗️ BUILD MODE (Static): No movement");
+                    Debug.Log("🏗️ [SimpleBuildMode] Build mode: Static (No movement)");
                 }
+            }
+            
+            // ✅ FIX: Silahı devre dışı bırak
+            if (weaponSystem != null)
+            {
+                weaponSystem.DisableWeapon();
+                Debug.Log("🔫 [SimpleBuildMode] Weapon disabled");
             }
             
             CreateGhostPreview();
             
-            Debug.Log("🏗️ BUILD MODE: ON | LMB=Place | ESC=Exit | R=Rotate | Tab=Change");
+            Debug.Log("🏗️ [SimpleBuildMode] BUILD MODE ACTIVE | Controls: LMB=Place | ESC=Exit | R=Rotate | Tab=Switch");
         }
         
+        /// <summary>
+        /// ✅ FIX: Build modundan çıkış - silahı aktif et
+        /// </summary>
         private void ExitBuildMode()
         {
+            Debug.Log("❌ [SimpleBuildMode] Exiting build mode...");
+            
             isBuildModeActive = false;
             
-            // ✅ Restore FPS mode
+            // ✅ FIX: InputManager restoration
             if (InputManager.Instance != null)
             {
                 InputManager.Instance.IsInBuildMode = false;
+                InputManager.Instance.BlockShootInput = false; // ← Silah kullanımını aç
                 InputManager.Instance.SetCursorMode(InputManager.CursorMode.Locked);
+            }
+            
+            // ✅ FIX: Silahı aktif et
+            if (weaponSystem != null)
+            {
+                weaponSystem.EnableWeapon();
+                Debug.Log("✅ [SimpleBuildMode] Weapon enabled");
             }
             
             DestroyGhostPreview();
             
-            Debug.Log("❌ BUILD MODE: OFF");
+            Debug.Log("✅ [SimpleBuildMode] BUILD MODE DEACTIVATED");
         }
-
+        
         private void CreateGhostPreview()
         {
             if (availableStructures == null || availableStructures.Length == 0)
             {
-                Debug.LogWarning("⚠️ Hiç yapı prefab'ı atanmamış!");
+                Debug.LogWarning("⚠️ [SimpleBuildMode] No structures available for ghost!");
                 return;
             }
             
             if (currentStructureIndex >= availableStructures.Length)
             {
-                Debug.LogWarning("⚠️ Geçersiz yapı indeksi!");
+                Debug.LogWarning("⚠️ [SimpleBuildMode] Invalid structure index!");
                 return;
             }
             
             GameObject selectedStructure = availableStructures[currentStructureIndex];
             if (selectedStructure == null)
             {
-                Debug.LogWarning("⚠️ Seçili yapı prefab'ı null!");
+                Debug.LogWarning("⚠️ [SimpleBuildMode] Selected structure is null!");
                 return;
             }
-
+            
             ghostPreview = Instantiate(selectedStructure);
             
             // Disable colliders
@@ -365,11 +377,10 @@ namespace TacticalCombat.Building
                 collider.enabled = false;
             }
             
-            // ⭐ CACHE RENDERERS FOR PERFORMANCE
+            // Cache renderers
             ghostRenderers = ghostPreview.GetComponentsInChildren<Renderer>();
             ghostOriginalMaterials = new Material[ghostRenderers.Length];
             
-            // Initialize with valid material
             for (int i = 0; i < ghostRenderers.Length; i++)
             {
                 ghostOriginalMaterials[i] = ghostRenderers[i].material;
@@ -379,7 +390,7 @@ namespace TacticalCombat.Building
             lastCanPlaceState = true;
             lastStabilityColor = Color.clear;
         }
-
+        
         private void DestroyGhostPreview()
         {
             if (ghostPreview != null)
@@ -390,18 +401,17 @@ namespace TacticalCombat.Building
                 ghostOriginalMaterials = null;
             }
         }
-
+        
         private void UpdateGhostPreview()
         {
             if (ghostPreview == null || playerCamera == null) return;
-
+            
             Ray ray = playerCamera.ScreenPointToRay(Input.mousePosition);
             
             if (Physics.Raycast(ray, out RaycastHit hit, placementDistance, groundLayer))
             {
-                // Grid snapping
                 Vector3 snappedPosition = SnapToGrid(hit.point);
-                snappedPosition.y = 0.5f; // Wall height/2
+                snappedPosition.y = 0.5f;
                 
                 placementPosition = snappedPosition;
                 placementRotation = Quaternion.Euler(0, currentRotationY, 0);
@@ -409,10 +419,8 @@ namespace TacticalCombat.Building
                 ghostPreview.transform.position = placementPosition;
                 ghostPreview.transform.rotation = placementRotation;
                 
-                // Validation
                 canPlace = IsValidPlacement(placementPosition, placementRotation);
                 
-                // ⭐ UPDATE MATERIALS ONLY IF STATE CHANGED
                 UpdateGhostMaterials();
                 
                 if (!ghostPreview.activeSelf)
@@ -430,21 +438,16 @@ namespace TacticalCombat.Building
             }
         }
         
-        /// <summary>
-        /// ⭐ OPTIMIZED: Only update materials when state changes
-        /// </summary>
         private void UpdateGhostMaterials()
         {
             if (ghostRenderers == null) return;
             
             if (canPlace)
             {
-                // Get stability color
                 Color stabilityColor = showStabilityPreview 
                     ? GetStabilityPreviewColor(placementPosition) 
                     : validPlacementMaterial.color;
                 
-                // ⭐ Only update if color changed
                 if (lastCanPlaceState != canPlace || !ColorsEqual(lastStabilityColor, stabilityColor))
                 {
                     foreach (var renderer in ghostRenderers)
@@ -459,7 +462,6 @@ namespace TacticalCombat.Building
             }
             else
             {
-                // ⭐ Only update if state changed
                 if (lastCanPlaceState != canPlace)
                 {
                     foreach (var renderer in ghostRenderers)
@@ -489,12 +491,10 @@ namespace TacticalCombat.Building
         
         private bool IsValidPlacement(Vector3 position, Quaternion rotation)
         {
-            // Distance check
             float distanceToPlayer = Vector3.Distance(transform.position, position);
             if (distanceToPlayer > placementDistance)
                 return false;
             
-            // Overlap check
             Vector3 boxSize = new Vector3(1.8f, 0.9f, 0.18f);
             Collider[] overlaps = Physics.OverlapBox(position, boxSize / 2f, rotation);
             
@@ -503,11 +503,9 @@ namespace TacticalCombat.Building
                 if (overlap.transform == transform) continue;
                 if (overlap.gameObject.layer == LayerMask.NameToLayer("Default")) continue;
                 
-                // Structure check
                 if (overlap.GetComponent<Structure>() != null)
                     return false;
                 
-                // Networked object check
                 if (overlap.GetComponent<NetworkIdentity>() != null)
                 {
                     if (overlap.GetComponent<PlayerController>() == null)
@@ -518,16 +516,12 @@ namespace TacticalCombat.Building
             return true;
         }
         
-        // Overload for GameObject parameter
         private bool IsValidPlacement(Vector3 position, GameObject structure)
         {
             if (structure == null) return false;
-            
-            // Use default rotation for GameObject check
-            Quaternion rotation = Quaternion.identity;
-            return IsValidPlacement(position, rotation);
+            return IsValidPlacement(position, Quaternion.identity);
         }
-
+        
         private void PlaceStructure()
         {
             if (availableStructures == null || currentStructureIndex >= availableStructures.Length) return;
@@ -535,94 +529,77 @@ namespace TacticalCombat.Building
             GameObject selectedStructure = availableStructures[currentStructureIndex];
             string structureName = selectedStructure.name;
             
-            Debug.Log($"🏗️ Placing {structureName} at {placementPosition}");
+            Debug.Log($"🏗️ [SimpleBuildMode] Placing {structureName} at {placementPosition}");
             CmdPlaceStructure(placementPosition, placementRotation, currentStructureIndex);
         }
-
+        
         [Command]
         private void CmdPlaceStructure(Vector3 position, Quaternion rotation, int structureIndex)
         {
-            // 1️⃣ Mesafe kontrolü
+            // Distance check
             float distance = Vector3.Distance(transform.position, position);
             if (distance > placementDistance + 0.5f)
             {
-                Debug.LogWarning($"🚨 Invalid placement distance: {distance}m");
+                Debug.LogWarning($"🚨 [SimpleBuildMode] Invalid placement distance: {distance}m");
                 return;
             }
             
-            // 2️⃣ Line of sight kontrolü
+            // Line of sight check
             Vector3 playerEye = transform.position + Vector3.up * 1.6f;
             if (Physics.Linecast(playerEye, position, out RaycastHit hit, obstacleLayer))
             {
                 if (Vector3.Distance(hit.point, position) > 0.5f)
                 {
-                    Debug.LogWarning($"🚨 No line of sight to placement position");
+                    Debug.LogWarning($"🚨 [SimpleBuildMode] No line of sight");
                     return;
                 }
             }
             
-            // 3️⃣ Ground check (server-side!)
+            // Ground check
             if (!Physics.Raycast(position, Vector3.down, 2f, groundLayer))
             {
-                Debug.LogWarning($"🚨 Invalid placement: not on ground");
+                Debug.LogWarning($"🚨 [SimpleBuildMode] Not on ground");
                 return;
             }
             
-            // 4️⃣ Structure index validation
-            if (availableStructures == null || structureIndex >= availableStructures.Length) 
+            // Structure index validation
+            if (availableStructures == null || structureIndex >= availableStructures.Length)
             {
-                Debug.LogWarning($"🚨 Invalid structure index: {structureIndex}");
+                Debug.LogWarning($"🚨 [SimpleBuildMode] Invalid structure index: {structureIndex}");
                 return;
             }
             
             GameObject selectedStructure = availableStructures[structureIndex];
-            if (selectedStructure == null) 
+            if (selectedStructure == null)
             {
-                Debug.LogWarning($"🚨 Selected structure is null at index {structureIndex}");
+                Debug.LogWarning($"🚨 [SimpleBuildMode] Selected structure is null");
                 return;
             }
-
-            // 5️⃣ Overlap check (server-side!)
+            
+            // Overlap check
             Collider[] overlaps = Physics.OverlapBox(
-                position, 
-                new Vector3(0.9f, 0.45f, 0.09f), 
-                rotation, 
+                position,
+                new Vector3(0.9f, 0.45f, 0.09f),
+                rotation,
                 obstacleLayer
             );
             
             if (overlaps.Length > 0)
             {
-                Debug.LogWarning($"🚨 Invalid placement: overlapping with {overlaps[0].name}");
+                Debug.LogWarning($"🚨 [SimpleBuildMode] Overlapping with {overlaps[0].name}");
                 return;
             }
-
-            // ✅ Tüm kontroller geçti - spawn et
+            
+            // Spawn structure
             GameObject structure = Instantiate(selectedStructure, position, rotation);
             NetworkServer.Spawn(structure);
             
-            Debug.Log($"✅ [SERVER] {selectedStructure.name} placed at {position} by {netId}");
+            Debug.Log($"✅ [SimpleBuildMode] {selectedStructure.name} placed at {position}");
         }
-
-        // ═══════════════════════════════════════════════════════════
-        // STRUCTURAL INTEGRITY PREVIEW SYSTEM
-        // ═══════════════════════════════════════════════════════════
         
-        // Performance optimization - cache stability calculations
-        private float lastStabilityCheckTime;
-        private Color cachedStabilityColor;
-        private Vector3 lastStabilityPosition;
-        
-        /// <summary>
-        /// Calculates stability color based on support distance
-        /// Blue = 100% stable (grounded)
-        /// Green = 80%+ stable
-        /// Yellow = 60%+ stable
-        /// Orange = 40%+ stable
-        /// Red = <40% or no support
-        /// </summary>
+        // Stability preview system
         private Color GetStabilityPreviewColor(Vector3 position)
         {
-            // ⚡ PERFORMANCE: Cache stability calculations - 0.1 saniyede bir hesapla
             if (Time.time - lastStabilityCheckTime < 0.1f && 
                 Vector3.Distance(position, lastStabilityPosition) < 0.5f)
             {
@@ -632,30 +609,27 @@ namespace TacticalCombat.Building
             lastStabilityCheckTime = Time.time;
             lastStabilityPosition = position;
             
-            // Check if grounded
             if (IsGrounded(position))
             {
-                cachedStabilityColor = new Color(0.3f, 0.6f, 1f, 0.5f); // Blue - 100% stable
+                cachedStabilityColor = new Color(0.3f, 0.6f, 1f, 0.5f);
                 return cachedStabilityColor;
             }
             
-            // Find nearest support
             float supportDistance = FindNearestSupportDistance(position);
             
             if (supportDistance < 0 || supportDistance > maxSupportDistance)
             {
-                cachedStabilityColor = new Color(1f, 0.2f, 0.2f, 0.5f); // Red - will collapse
+                cachedStabilityColor = new Color(1f, 0.2f, 0.2f, 0.5f);
                 return cachedStabilityColor;
             }
             
-            // Calculate stability based on distance
             float stabilityPercent = 1f - (supportDistance / maxSupportDistance);
             
-            if (stabilityPercent > 0.8f) cachedStabilityColor = new Color(0.3f, 0.6f, 1f, 0.5f);    // Blue
-            else if (stabilityPercent > 0.6f) cachedStabilityColor = new Color(0.3f, 1f, 0.3f, 0.5f);    // Green
-            else if (stabilityPercent > 0.4f) cachedStabilityColor = new Color(1f, 1f, 0.3f, 0.5f);      // Yellow
-            else if (stabilityPercent > 0.2f) cachedStabilityColor = new Color(1f, 0.6f, 0.2f, 0.5f);    // Orange
-            else cachedStabilityColor = new Color(1f, 0.2f, 0.2f, 0.5f);                                 // Red
+            if (stabilityPercent > 0.8f) cachedStabilityColor = new Color(0.3f, 0.6f, 1f, 0.5f);
+            else if (stabilityPercent > 0.6f) cachedStabilityColor = new Color(0.3f, 1f, 0.3f, 0.5f);
+            else if (stabilityPercent > 0.4f) cachedStabilityColor = new Color(1f, 1f, 0.3f, 0.5f);
+            else if (stabilityPercent > 0.2f) cachedStabilityColor = new Color(1f, 0.6f, 0.2f, 0.5f);
+            else cachedStabilityColor = new Color(1f, 0.2f, 0.2f, 0.5f);
             
             return cachedStabilityColor;
         }
@@ -683,7 +657,6 @@ namespace TacticalCombat.Building
                 StructuralIntegrity integrity = structure.GetComponent<StructuralIntegrity>();
                 if (integrity == null) continue;
                 
-                // Check if structure is stable enough to provide support
                 if (integrity.IsGrounded() || integrity.GetCurrentStability() > 50f)
                 {
                     float distance = Vector3.Distance(position, col.transform.position);
@@ -694,34 +667,27 @@ namespace TacticalCombat.Building
             
             return foundSupport ? nearestDistance : -1f;
         }
-
+        
         private void OnDisable()
         {
             if (isBuildModeActive)
             {
-                InputManager.Instance?.ExitBuildMode();
+                ExitBuildMode();
             }
             
             DestroyGhostPreview();
         }
         
-        // ═══════════════════════════════════════════════════════════
-        // DEBUG GIZMOS
-        // ═══════════════════════════════════════════════════════════
-        
-        // ⭐ Public method for other scripts
         public bool IsBuildModeActive() => isBuildModeActive;
         
         private void OnDrawGizmos()
         {
             if (!isBuildModeActive || ghostPreview == null) return;
             
-            // Draw placement box
             Gizmos.color = canPlace ? Color.green : Color.red;
             Gizmos.matrix = Matrix4x4.TRS(placementPosition, placementRotation, Vector3.one);
             Gizmos.DrawWireCube(Vector3.zero, new Vector3(1.8f, 0.9f, 0.18f));
             
-            // Draw support radius
             if (showStabilityPreview)
             {
                 Gizmos.color = new Color(0.5f, 0.5f, 1f, 0.3f);

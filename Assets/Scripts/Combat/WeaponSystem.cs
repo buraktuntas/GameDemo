@@ -6,13 +6,10 @@ using System.Collections;
 namespace TacticalCombat.Combat
 {
     /// <summary>
-    /// PROFESYONEL WEAPON SYSTEM
-    /// - Recoil
-    /// - Spread
-    /// - Ammo
-    /// - Reload
-    /// - Hit registration
-    /// - Visual & Audio feedback
+    /// PROFESYONEL WEAPON SYSTEM - BUG FIX VERSİYON
+    /// ✅ Silah sesi fix
+    /// ✅ Build modu input çakışması fix
+    /// ✅ Weapon state reset
     /// </summary>
     [RequireComponent(typeof(AudioSource))]
     public class WeaponSystem : NetworkBehaviour
@@ -49,16 +46,63 @@ namespace TacticalCombat.Combat
         private Quaternion originalWeaponRot;
         private bool isAiming;
         
+        // ✅ FIX: Audio debug flag
+        [Header("🐛 DEBUG")]
+        [SerializeField] private bool debugAudio = true;
+        [SerializeField] private bool debugInputs = false;
+        
         // Events
-        public System.Action<int, int> OnAmmoChanged; // current, reserve
+        public System.Action<int, int> OnAmmoChanged;
         public System.Action OnReloadStarted;
         public System.Action OnReloadComplete;
         public System.Action OnWeaponFired;
         
+        // ✅ FIX: Build mode awareness
+        private TacticalCombat.Player.InputManager inputManager;
+        
         private void Awake()
         {
+            // ✅ FIX: AudioSource'u garanti et
             if (audioSource == null)
+            {
                 audioSource = GetComponent<AudioSource>();
+                if (audioSource == null)
+                {
+                    audioSource = gameObject.AddComponent<AudioSource>();
+                    if (debugAudio)
+                    {
+                        Debug.Log("✅ [WeaponSystem] AudioSource component automatically added");
+                    }
+                }
+            }
+            
+            // ✅ AudioSource ayarlarını optimize et
+            audioSource.playOnAwake = false;
+            audioSource.spatialBlend = 0f; // 2D sound for local player
+            audioSource.volume = 1f;
+            audioSource.priority = 128; // Normal priority
+            
+            // ✅ Audio clip kontrolü
+            if (debugAudio)
+            {
+                if (fireSounds == null || fireSounds.Length == 0)
+                {
+                    Debug.LogError("❌ [WeaponSystem] NO FIRE SOUNDS ASSIGNED! Please assign audio clips in Inspector.");
+                }
+                else
+                {
+                    Debug.Log($"✅ [WeaponSystem] {fireSounds.Length} fire sounds loaded");
+                    
+                    // Her clip'i kontrol et
+                    for (int i = 0; i < fireSounds.Length; i++)
+                    {
+                        if (fireSounds[i] == null)
+                        {
+                            Debug.LogError($"❌ [WeaponSystem] Fire sound at index {i} is NULL!");
+                        }
+                    }
+                }
+            }
                 
             if (weaponHolder != null)
             {
@@ -71,7 +115,13 @@ namespace TacticalCombat.Combat
         {
             base.OnStartLocalPlayer();
             
-            Debug.Log($"🎯 WeaponSystem OnStartLocalPlayer - currentWeapon: {currentWeapon?.weaponName ?? "NULL"}");
+            // ✅ FIX: InputManager referansı
+            inputManager = TacticalCombat.Player.InputManager.Instance;
+            
+            if (debugInputs)
+            {
+                Debug.Log($"✅ [WeaponSystem] OnStartLocalPlayer - InputManager: {(inputManager != null ? "Found" : "NULL")}");
+            }
             
             // Find camera
             if (playerCamera == null)
@@ -83,11 +133,23 @@ namespace TacticalCombat.Combat
                 currentAmmo = currentWeapon.magazineSize;
                 reserveAmmo = currentWeapon.maxAmmo;
                 OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
-                Debug.Log($"✅ Ammo initialized: {currentAmmo}/{reserveAmmo}");
+                
+                Debug.Log($"✅ [WeaponSystem] Ammo initialized: {currentAmmo}/{reserveAmmo}");
+                Debug.Log($"✅ [WeaponSystem] Weapon: {currentWeapon.weaponName}");
             }
             else
             {
-                Debug.LogError("❌ currentWeapon is NULL! Weapon config not assigned!");
+                Debug.LogWarning("⚠️ [WeaponSystem] currentWeapon is NULL! Creating default weapon config...");
+                CreateDefaultWeaponConfig();
+                
+                if (currentWeapon != null)
+                {
+                    currentAmmo = currentWeapon.magazineSize;
+                    reserveAmmo = currentWeapon.maxAmmo;
+                    OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
+                    
+                    Debug.Log($"✅ [WeaponSystem] Default weapon created! Ammo: {currentAmmo}/{reserveAmmo}");
+                }
             }
         }
         
@@ -95,19 +157,38 @@ namespace TacticalCombat.Combat
         {
             if (!isLocalPlayer) return;
             
+            // ✅ FIX: Build modunda silah kullanımını engelle
+            if (inputManager != null && inputManager.IsInBuildMode)
+            {
+                if (debugInputs && Time.frameCount % 60 == 0)
+                {
+                    Debug.Log("🏗️ [WeaponSystem] Build mode active - weapon disabled");
+                }
+                return;
+            }
+            
             HandleInput();
             UpdateRecoil();
         }
         
         private void HandleInput()
         {
+            // ✅ FIX: Ekstra güvenlik kontrolü
+            if (inputManager != null && inputManager.BlockShootInput)
+            {
+                if (debugInputs && Time.frameCount % 60 == 0)
+                {
+                    Debug.Log("🚫 [WeaponSystem] Shoot input blocked");
+                }
+                return;
+            }
+            
             // Fire
             if (Input.GetButton("Fire1"))
             {
-                // ⭐ PERFORMANCE: Reduce debug spam
-                if (Time.frameCount % 10 == 0) // Only log every 10 frames
+                if (debugInputs && Time.frameCount % 30 == 0)
                 {
-                    Debug.Log($"🔫 Fire1 pressed - CanFire: {CanFire()}, FireMode: {currentWeapon?.fireMode}");
+                    Debug.Log($"🔫 [WeaponSystem] Fire1 pressed - CanFire: {CanFire()}, FireMode: {currentWeapon?.fireMode}");
                 }
                 
                 if (CanFire())
@@ -116,6 +197,11 @@ namespace TacticalCombat.Combat
                     {
                         Fire();
                     }
+                }
+                else if (currentAmmo <= 0)
+                {
+                    // Empty gun sound
+                    PlayEmptySound();
                 }
             }
             
@@ -153,11 +239,7 @@ namespace TacticalCombat.Combat
         
         private void Fire()
         {
-            // ⭐ PERFORMANCE: Reduce debug spam - only log every 5th shot
-            if (currentAmmo % 5 == 0)
-            {
-                Debug.Log($"🔥 FIRE() executing - Weapon: {currentWeapon?.weaponName}, Ammo: {currentAmmo}");
-            }
+            Debug.Log($"🔥 [WeaponSystem] FIRE() executing - Weapon: {currentWeapon?.weaponName}, Ammo: {currentAmmo}");
             
             nextFireTime = Time.time + (1f / currentWeapon.fireRate);
             currentAmmo--;
@@ -166,7 +248,7 @@ namespace TacticalCombat.Combat
             ApplyRecoil();
             PlayMuzzleFlash();
             
-            // Audio feedback
+            // ✅ Audio feedback - CRITICAL
             PlayFireSound();
             
             // Raycast
@@ -242,13 +324,13 @@ namespace TacticalCombat.Combat
                 damage = hitbox.CalculateDamage(Mathf.RoundToInt(damage));
                 isCritical = hitbox.IsCritical();
                 
-                Debug.Log($"🎯 HIT {hitbox.zone} - Damage: {damage} (Multiplier: {hitbox.damageMultiplier}x)");
+                Debug.Log($"🎯 [WeaponSystem] HIT {hitbox.zone} - Damage: {damage} (Multiplier: {hitbox.damageMultiplier}x)");
             }
             else
             {
                 // No hitbox - direct health component
                 health = hit.collider.GetComponent<Health>();
-                Debug.Log($"🎯 HIT (no hitbox) - Damage: {damage}");
+                Debug.Log($"🎯 [WeaponSystem] HIT (no hitbox) - Damage: {damage}");
             }
             
             if (health != null)
@@ -271,14 +353,13 @@ namespace TacticalCombat.Combat
                 // Visual feedback
                 if (isCritical)
                 {
-                    Debug.Log($"💥 CRITICAL HIT! Damage: {damage}");
-                    // TODO: Show special effect
+                    Debug.Log($"💥 [WeaponSystem] CRITICAL HIT! Damage: {damage}");
                 }
             }
             
             // Determine surface type for effects
             SurfaceType surface = DetermineSurfaceType(hit.collider);
-            Debug.Log($"🎯 HIT: {hit.collider.name} - Surface: {surface} - Distance: {hit.distance:F1}m");
+            Debug.Log($"🎯 [WeaponSystem] HIT: {hit.collider.name} - Surface: {surface} - Distance: {hit.distance:F1}m");
         }
         
         private SurfaceType DetermineSurfaceType(Collider collider)
@@ -297,11 +378,11 @@ namespace TacticalCombat.Combat
                 if (collider.CompareTag("Stone"))
                     return SurfaceType.Stone;
                 if (collider.CompareTag("Glass"))
-                    return SurfaceType.Generic; // Use generic for glass
+                    return SurfaceType.Generic;
             }
             catch (System.Exception)
             {
-                // Tag doesn't exist, continue with generic
+                // Tag doesn't exist
             }
                 
             return SurfaceType.Generic;
@@ -309,13 +390,12 @@ namespace TacticalCombat.Combat
         
         private void SpawnHitEffect(RaycastHit hit)
         {
-            // ⭐ PERFORMANCE: Only spawn effects for certain surfaces
             SurfaceType surface = DetermineSurfaceType(hit.collider);
             
-            // Skip bullet holes for ground/terrain to prevent spam
+            // Skip bullet holes for ground
             if (surface == SurfaceType.Generic && hit.collider.CompareTag("Ground"))
             {
-                return; // Don't spawn bullet holes on ground
+                return;
             }
             
             GameObject effectPrefab = null;
@@ -333,7 +413,6 @@ namespace TacticalCombat.Combat
                     effectPrefab = bulletHolePrefab;
                     break;
                 default:
-                    // Only spawn bullet holes on structures, not ground
                     if (hit.collider.CompareTag("Structure"))
                     {
                         effectPrefab = bulletHolePrefab;
@@ -377,7 +456,7 @@ namespace TacticalCombat.Combat
             
             health.ApplyDamage(damageInfo);
             
-            Debug.Log($"💥 DAMAGE: {damage:F0} to {hit.collider.name}");
+            Debug.Log($"💥 [WeaponSystem] DAMAGE: {damage:F0} to {hit.collider.name}");
         }
         
         private void ApplyRecoil()
@@ -426,38 +505,63 @@ namespace TacticalCombat.Combat
             Destroy(flash, 0.1f);
         }
         
+        /// <summary>
+        /// ✅ FIX: Daha güvenli ve debug-friendly audio playback
+        /// </summary>
         private void PlayFireSound()
         {
-            // ⭐ PERFORMANCE: Reduce debug spam
+            // ✅ Tüm kontrolleri yap
             if (fireSounds == null || fireSounds.Length == 0)
             {
-                if (Time.frameCount % 60 == 0) // Only log once per second
+                if (debugAudio)
                 {
-                    Debug.LogWarning("⚠️ fireSounds is null or empty!");
+                    Debug.LogError("❌ [WeaponSystem] PlayFireSound() - NO FIRE SOUNDS ASSIGNED! Assign audio clips in Inspector.");
                 }
                 return;
             }
             
             if (audioSource == null)
             {
-                if (Time.frameCount % 60 == 0) // Only log once per second
+                if (debugAudio)
                 {
-                    Debug.LogWarning("⚠️ audioSource is null!");
+                    Debug.LogError("❌ [WeaponSystem] PlayFireSound() - AUDIO SOURCE IS NULL! This should never happen.");
                 }
                 return;
             }
             
+            // Random clip seç
             AudioClip clip = fireSounds[Random.Range(0, fireSounds.Length)];
+            
             if (clip == null)
             {
-                if (Time.frameCount % 60 == 0) // Only log once per second
+                if (debugAudio)
                 {
-                    Debug.LogWarning("⚠️ Selected fire sound clip is null!");
+                    Debug.LogError("❌ [WeaponSystem] PlayFireSound() - SELECTED AUDIO CLIP IS NULL! Check your audio array.");
                 }
                 return;
             }
             
-            audioSource.PlayOneShot(clip, 0.5f);
+            // ✅ 3D spatial sound for realism
+            audioSource.spatialBlend = 1f;
+            audioSource.PlayOneShot(clip, 0.7f);
+            
+            if (debugAudio)
+            {
+                Debug.Log($"🔊 [WeaponSystem] FIRE SOUND PLAYED: {clip.name} (Volume: 0.7)");
+            }
+        }
+        
+        private void PlayEmptySound()
+        {
+            if (emptySound != null && audioSource != null)
+            {
+                audioSource.PlayOneShot(emptySound, 0.5f);
+                
+                if (debugAudio)
+                {
+                    Debug.Log("🔊 [WeaponSystem] EMPTY GUN SOUND PLAYED");
+                }
+            }
         }
         
         private void PlayHitSound()
@@ -465,7 +569,10 @@ namespace TacticalCombat.Combat
             if (hitSounds == null || hitSounds.Length == 0 || audioSource == null) return;
             
             AudioClip clip = hitSounds[Random.Range(0, hitSounds.Length)];
-            audioSource.PlayOneShot(clip, 0.3f);
+            if (clip != null)
+            {
+                audioSource.PlayOneShot(clip, 0.3f);
+            }
         }
         
         private IEnumerator CameraShake(float intensity, float duration)
@@ -503,7 +610,14 @@ namespace TacticalCombat.Combat
             
             // Play sound
             if (reloadSound != null && audioSource != null)
+            {
                 audioSource.PlayOneShot(reloadSound);
+                
+                if (debugAudio)
+                {
+                    Debug.Log("🔊 [WeaponSystem] RELOAD SOUND PLAYED");
+                }
+            }
                 
             // Play animation
             if (weaponAnimator != null)
@@ -523,7 +637,7 @@ namespace TacticalCombat.Combat
             OnReloadComplete?.Invoke();
             OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
             
-            Debug.Log($"🔄 RELOADED: {currentAmmo}/{currentWeapon.magazineSize} (Reserve: {reserveAmmo})");
+            Debug.Log($"🔄 [WeaponSystem] RELOADED: {currentAmmo}/{currentWeapon.magazineSize} (Reserve: {reserveAmmo})");
         }
         
         [Command]
@@ -535,11 +649,59 @@ namespace TacticalCombat.Combat
         [ClientRpc]
         private void RpcFire()
         {
-            if (isLocalPlayer) return; // Local player already handled
+            if (isLocalPlayer) return;
             
             // Play effects for other players
             PlayMuzzleFlash();
             PlayFireSound();
+        }
+        
+        // ═══════════════════════════════════════════════════════════
+        // ✅ FIX: WEAPON STATE MANAGEMENT
+        // ═══════════════════════════════════════════════════════════
+        
+        /// <summary>
+        /// Build moduna geçerken weapon state'ini reset et
+        /// </summary>
+        public void ResetWeaponState()
+        {
+            // Cooldown ekle
+            nextFireTime = Time.time + 1f;
+            
+            // Weapon position reset
+            if (weaponHolder != null)
+            {
+                weaponHolder.localPosition = originalWeaponPos;
+                weaponHolder.localRotation = originalWeaponRot;
+            }
+            
+            // Recoil reset
+            recoilAmount = 0f;
+            
+            // Camera reset (if needed)
+            if (playerCamera != null)
+            {
+                playerCamera.transform.localRotation = Quaternion.identity;
+            }
+            
+            Debug.Log("🔫 [WeaponSystem] Weapon state reset");
+        }
+        
+        /// <summary>
+        /// Build modundan çıkarken silahı aktif et
+        /// </summary>
+        public void EnableWeapon()
+        {
+            Debug.Log("✅ [WeaponSystem] Weapon enabled");
+        }
+        
+        /// <summary>
+        /// Build moduna girerken silahı devre dışı bırak
+        /// </summary>
+        public void DisableWeapon()
+        {
+            ResetWeaponState();
+            Debug.Log("🚫 [WeaponSystem] Weapon disabled");
         }
         
         // ═══════════════════════════════════════════════════════════
@@ -557,6 +719,31 @@ namespace TacticalCombat.Combat
         public int GetCurrentAmmo() => currentAmmo;
         public int GetReserveAmmo() => reserveAmmo;
         public bool IsReloading() => isReloading;
+        
+        /// <summary>
+        /// Create default weapon config if none assigned
+        /// </summary>
+        private void CreateDefaultWeaponConfig()
+        {
+            if (currentWeapon != null) return;
+            
+            // Create default weapon config
+            currentWeapon = ScriptableObject.CreateInstance<WeaponConfig>();
+            currentWeapon.weaponName = "Default Rifle";
+            currentWeapon.damage = 25f;
+            currentWeapon.range = 100f;
+            currentWeapon.fireRate = 10f;
+            currentWeapon.fireMode = FireMode.Auto;
+            currentWeapon.magazineSize = 30;
+            currentWeapon.maxAmmo = 120;
+            currentWeapon.reloadTime = 2f;
+            currentWeapon.hipSpread = 0.05f;
+            currentWeapon.aimSpread = 0.01f;
+            currentWeapon.recoilAmount = 2f;
+            currentWeapon.headshotMultiplier = 2f;
+            
+            Debug.Log("✅ [WeaponSystem] Default weapon config created!");
+        }
     }
     
     // ═══════════════════════════════════════════════════════════
@@ -588,7 +775,7 @@ namespace TacticalCombat.Combat
         public string weaponName = "Assault Rifle";
         public float damage = 25f;
         public float range = 100f;
-        public float fireRate = 10f; // rounds per second
+        public float fireRate = 10f;
         public FireMode fireMode = FireMode.Auto;
         
         [Header("🎯 ACCURACY")]

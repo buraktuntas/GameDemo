@@ -173,6 +173,15 @@ namespace TacticalCombat.Editor
                 float duration = 0.1f;
                 
                 sounds[i] = CreateSimpleAudioClip(name, duration, frequency);
+                
+                if (sounds[i] == null)
+                {
+                    Debug.LogError($"❌ Failed to create audio clip: {name}");
+                }
+                else
+                {
+                    Debug.Log($"✅ Created audio clip: {name}");
+                }
             }
             
             return sounds;

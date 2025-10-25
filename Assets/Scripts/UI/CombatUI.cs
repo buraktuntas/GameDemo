@@ -218,7 +218,18 @@ namespace TacticalCombat.UI
             }
             else
             {
-                Debug.LogWarning("⚠️ ammoText is null!");
+                // Try to find ammo text if not assigned
+                if (ammoText == null)
+                {
+                    ammoText = GameObject.Find("AmmoText")?.GetComponent<TextMeshProUGUI>();
+                    if (ammoText != null)
+                    {
+                        Debug.Log("✅ [CombatUI] Found ammoText automatically!");
+                        UpdateAmmoDisplay(current, reserve); // Recursive call with found text
+                        return;
+                    }
+                }
+                Debug.LogWarning("⚠️ ammoText is null! Please assign ammo text UI element.");
             }
             
             if (reserveAmmoText != null)

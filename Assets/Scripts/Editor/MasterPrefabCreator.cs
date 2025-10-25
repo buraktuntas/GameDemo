@@ -56,26 +56,5 @@ namespace TacticalCombat.Editor
                 "Tamam");
         }
         
-        [MenuItem("Tools/Tactical Combat/Quick Setup (Everything)", false, 1)]
-        public static void QuickSetupEverything()
-        {
-            Debug.Log("🚀 HIZLI KURULUM BAŞLIYOR...");
-            
-            // 1. Tüm prefab'ları oluştur
-            CreateAllPrefabs();
-            
-            // 2. Scene setup helper'ı aç
-            Debug.Log("🎬 Scene setup helper açılıyor...");
-            SceneSetupHelper.ShowWindow();
-            
-            Debug.Log("═══════════════════════════════════════════");
-            Debug.Log("✅ HIZLI KURULUM TAMAMLANDI!");
-            Debug.Log("═══════════════════════════════════════════");
-            Debug.Log("📋 Sonraki adımlar:");
-            Debug.Log("  1. Scene Setup Helper'da 'Setup Scene' butonuna bas");
-            Debug.Log("  2. Play mode'a gir ve test et");
-            Debug.Log("  3. Build & Run yap ve multiplayer test et");
-            Debug.Log("═══════════════════════════════════════════");
-        }
     }
 }

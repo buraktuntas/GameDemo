@@ -98,7 +98,7 @@ namespace TacticalCombat.Editor
 
             if (GUILayout.Button("Fix URP Cameras", GUILayout.Height(30)))
             {
-                URPCameraFixer.FixAllCameras();
+                Debug.Log("⚠️ URP Camera Fixer removed - cameras should work automatically");
             }
         }
 

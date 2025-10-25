@@ -152,26 +152,5 @@ namespace TacticalCombat.Editor
             Debug.Log("═══════════════════════════════════════════");
         }
         
-        [MenuItem("Tools/Tactical Combat/Quick Fix All")]
-        public static void QuickFixAll()
-        {
-            Debug.Log("🔧 QUICK FIX ALL BAŞLIYOR...");
-            
-            // 1. Combat System Setup
-            CombatSystemSetup.SetupCombatSystem();
-            
-            // 2. Player Prefab Recreate
-            PlayerPrefabRecreator.RecreatePlayerPrefab();
-            
-            // 3. WeaponSystem Fix
-            WeaponSystemFixer.FixWeaponSystemReferences();
-            
-            // 4. Hitbox Setup
-            HitboxSetup.AddHitboxesToPlayer();
-            
-            Debug.Log("═══════════════════════════════════════════");
-            Debug.Log("✅ QUICK FIX ALL TAMAMLANDI!");
-            Debug.Log("═══════════════════════════════════════════");
-        }
     }
 }
