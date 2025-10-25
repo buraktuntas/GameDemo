@@ -277,6 +277,9 @@ namespace TacticalCombat.Editor
 
             // ⭐ Try to assign spawn points to NetworkManager
             AssignSpawnPointsToNetworkManager();
+            
+            // ⭐ Assign spawn points to NetworkGameManager
+            AssignSpawnPointsToNetworkGameManager();
 
             EditorUtility.DisplayDialog("Setup Complete!", 
                 "✅ Scene setup tamamlandı!\n\n" +
@@ -523,6 +526,53 @@ namespace TacticalCombat.Editor
             else
             {
                 Debug.LogWarning("⚠️ Spawn points not found! Please create them first.");
+            }
+        }
+        
+        private static void AssignSpawnPointsToNetworkGameManager()
+        {
+            // Find NetworkGameManager
+            var networkGameManager = Object.FindFirstObjectByType<Network.NetworkGameManager>();
+            if (networkGameManager == null)
+            {
+                Debug.LogWarning("⚠️ NetworkGameManager not found!");
+                return;
+            }
+            
+            // Find spawn points
+            GameObject teamA = GameObject.Find("TeamA");
+            GameObject teamB = GameObject.Find("TeamB");
+            
+            if (teamA == null || teamB == null)
+            {
+                Debug.LogWarning("⚠️ Team spawn points not found!");
+                return;
+            }
+            
+            // Get spawn point transforms
+            Transform[] teamASpawns = teamA.GetComponentsInChildren<Transform>();
+            Transform[] teamBSpawns = teamB.GetComponentsInChildren<Transform>();
+            
+            // Filter out the parent transform
+            teamASpawns = System.Array.FindAll(teamASpawns, t => t != teamA.transform);
+            teamBSpawns = System.Array.FindAll(teamBSpawns, t => t != teamB.transform);
+            
+            // Assign to NetworkGameManager using reflection
+            var networkGameManagerType = typeof(Network.NetworkGameManager);
+            var teamAField = networkGameManagerType.GetField("teamASpawnPoints", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var teamBField = networkGameManagerType.GetField("teamBSpawnPoints", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            if (teamAField != null && teamBField != null)
+            {
+                teamAField.SetValue(networkGameManager, teamASpawns);
+                teamBField.SetValue(networkGameManager, teamBSpawns);
+                Debug.Log($"✅ Spawn points assigned to NetworkGameManager: TeamA({teamASpawns.Length}), TeamB({teamBSpawns.Length})");
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ Could not find spawn point fields in NetworkGameManager!");
             }
         }
     }

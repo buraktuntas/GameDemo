@@ -71,6 +71,8 @@ namespace TacticalCombat.Combat
         {
             base.OnStartLocalPlayer();
             
+            Debug.Log($"🎯 WeaponSystem OnStartLocalPlayer - currentWeapon: {currentWeapon?.weaponName ?? "NULL"}");
+            
             // Find camera
             if (playerCamera == null)
                 playerCamera = Camera.main;
@@ -81,6 +83,11 @@ namespace TacticalCombat.Combat
                 currentAmmo = currentWeapon.magazineSize;
                 reserveAmmo = currentWeapon.maxAmmo;
                 OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
+                Debug.Log($"✅ Ammo initialized: {currentAmmo}/{reserveAmmo}");
+            }
+            else
+            {
+                Debug.LogError("❌ currentWeapon is NULL! Weapon config not assigned!");
             }
         }
         
@@ -95,11 +102,20 @@ namespace TacticalCombat.Combat
         private void HandleInput()
         {
             // Fire
-            if (Input.GetButton("Fire1") && CanFire())
+            if (Input.GetButton("Fire1"))
             {
-                if (currentWeapon.fireMode == FireMode.Auto || Input.GetButtonDown("Fire1"))
+                // ⭐ PERFORMANCE: Reduce debug spam
+                if (Time.frameCount % 10 == 0) // Only log every 10 frames
                 {
-                    Fire();
+                    Debug.Log($"🔫 Fire1 pressed - CanFire: {CanFire()}, FireMode: {currentWeapon?.fireMode}");
+                }
+                
+                if (CanFire())
+                {
+                    if (currentWeapon.fireMode == FireMode.Auto || Input.GetButtonDown("Fire1"))
+                    {
+                        Fire();
+                    }
                 }
             }
             
@@ -137,6 +153,12 @@ namespace TacticalCombat.Combat
         
         private void Fire()
         {
+            // ⭐ PERFORMANCE: Reduce debug spam - only log every 5th shot
+            if (currentAmmo % 5 == 0)
+            {
+                Debug.Log($"🔥 FIRE() executing - Weapon: {currentWeapon?.weaponName}, Ammo: {currentAmmo}");
+            }
+            
             nextFireTime = Time.time + (1f / currentWeapon.fireRate);
             currentAmmo--;
             
@@ -206,9 +228,56 @@ namespace TacticalCombat.Combat
         
         private void ProcessHit(RaycastHit hit)
         {
-            // Determine surface type
-            SurfaceType surface = DetermineSurfaceType(hit.collider);
+            // ⭐ ÖNCELİKLE HITBOX KONTROL ET
+            var hitbox = hit.collider.GetComponent<Hitbox>();
             
+            Health health = null;
+            float damage = currentWeapon.damage;
+            bool isCritical = false;
+            
+            if (hitbox != null)
+            {
+                // Hitbox found - use multiplier
+                health = hitbox.GetParentHealth();
+                damage = hitbox.CalculateDamage(Mathf.RoundToInt(damage));
+                isCritical = hitbox.IsCritical();
+                
+                Debug.Log($"🎯 HIT {hitbox.zone} - Damage: {damage} (Multiplier: {hitbox.damageMultiplier}x)");
+            }
+            else
+            {
+                // No hitbox - direct health component
+                health = hit.collider.GetComponent<Health>();
+                Debug.Log($"🎯 HIT (no hitbox) - Damage: {damage}");
+            }
+            
+            if (health != null)
+            {
+                // Distance falloff
+                float distanceFactor = Mathf.Clamp01(1f - (hit.distance / currentWeapon.range));
+                damage *= distanceFactor;
+                
+                // Apply damage
+                DamageInfo damageInfo = new DamageInfo(
+                    Mathf.RoundToInt(damage),
+                    netId,
+                    DamageType.Bullet,
+                    hit.point,
+                    hit.normal
+                );
+                
+                health.ApplyDamage(damageInfo);
+                
+                // Visual feedback
+                if (isCritical)
+                {
+                    Debug.Log($"💥 CRITICAL HIT! Damage: {damage}");
+                    // TODO: Show special effect
+                }
+            }
+            
+            // Determine surface type for effects
+            SurfaceType surface = DetermineSurfaceType(hit.collider);
             Debug.Log($"🎯 HIT: {hit.collider.name} - Surface: {surface} - Distance: {hit.distance:F1}m");
         }
         
@@ -218,21 +287,38 @@ namespace TacticalCombat.Combat
             if (collider.GetComponent<Health>() != null)
                 return SurfaceType.Flesh;
                 
-            // Check tag
-            if (collider.CompareTag("Metal"))
-                return SurfaceType.Metal;
-            if (collider.CompareTag("Wood"))
-                return SurfaceType.Wood;
-            if (collider.CompareTag("Stone"))
-                return SurfaceType.Stone;
+            // Check tag (with null safety)
+            try
+            {
+                if (collider.CompareTag("Metal"))
+                    return SurfaceType.Metal;
+                if (collider.CompareTag("Wood"))
+                    return SurfaceType.Wood;
+                if (collider.CompareTag("Stone"))
+                    return SurfaceType.Stone;
+                if (collider.CompareTag("Glass"))
+                    return SurfaceType.Generic; // Use generic for glass
+            }
+            catch (System.Exception)
+            {
+                // Tag doesn't exist, continue with generic
+            }
                 
             return SurfaceType.Generic;
         }
         
         private void SpawnHitEffect(RaycastHit hit)
         {
-            GameObject effectPrefab = null;
+            // ⭐ PERFORMANCE: Only spawn effects for certain surfaces
             SurfaceType surface = DetermineSurfaceType(hit.collider);
+            
+            // Skip bullet holes for ground/terrain to prevent spam
+            if (surface == SurfaceType.Generic && hit.collider.CompareTag("Ground"))
+            {
+                return; // Don't spawn bullet holes on ground
+            }
+            
+            GameObject effectPrefab = null;
             
             switch (surface)
             {
@@ -242,15 +328,23 @@ namespace TacticalCombat.Combat
                 case SurfaceType.Metal:
                     effectPrefab = metalSparksPrefab;
                     break;
-                default:
+                case SurfaceType.Wood:
+                case SurfaceType.Stone:
                     effectPrefab = bulletHolePrefab;
+                    break;
+                default:
+                    // Only spawn bullet holes on structures, not ground
+                    if (hit.collider.CompareTag("Structure"))
+                    {
+                        effectPrefab = bulletHolePrefab;
+                    }
                     break;
             }
             
             if (effectPrefab != null)
             {
                 GameObject effect = Instantiate(effectPrefab, hit.point, Quaternion.LookRotation(hit.normal));
-                Destroy(effect, 5f);
+                // AutoDestroy script will handle cleanup
             }
         }
         
@@ -334,9 +428,35 @@ namespace TacticalCombat.Combat
         
         private void PlayFireSound()
         {
-            if (fireSounds == null || fireSounds.Length == 0 || audioSource == null) return;
+            // ⭐ PERFORMANCE: Reduce debug spam
+            if (fireSounds == null || fireSounds.Length == 0)
+            {
+                if (Time.frameCount % 60 == 0) // Only log once per second
+                {
+                    Debug.LogWarning("⚠️ fireSounds is null or empty!");
+                }
+                return;
+            }
+            
+            if (audioSource == null)
+            {
+                if (Time.frameCount % 60 == 0) // Only log once per second
+                {
+                    Debug.LogWarning("⚠️ audioSource is null!");
+                }
+                return;
+            }
             
             AudioClip clip = fireSounds[Random.Range(0, fireSounds.Length)];
+            if (clip == null)
+            {
+                if (Time.frameCount % 60 == 0) // Only log once per second
+                {
+                    Debug.LogWarning("⚠️ Selected fire sound clip is null!");
+                }
+                return;
+            }
+            
             audioSource.PlayOneShot(clip, 0.5f);
         }
         

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEditor;
+using TacticalCombat.Effects;
 
 namespace TacticalCombat.Editor
 {
@@ -146,6 +147,14 @@ namespace TacticalCombat.Editor
             ammoRT.anchoredPosition = new Vector2(-50, 50);
             ammoRT.sizeDelta = new Vector2(200, 100);
             
+            // ⭐ Assign ammoText to CombatUI
+            var combatUIComponent = canvasGO.GetComponent<TacticalCombat.UI.CombatUI>();
+            if (combatUIComponent != null)
+            {
+                combatUIComponent.ammoText = ammoText;
+                Debug.Log("✅ ammoText assigned to CombatUI");
+            }
+            
             Debug.Log("✅ CombatUI created in scene");
         }
         
@@ -165,6 +174,9 @@ namespace TacticalCombat.Editor
             
             // Metal Sparks
             CreateMetalSparksPrefab();
+            
+            // Bullet Hole
+            CreateBulletHolePrefab();
             
             Debug.Log("✅ Effect prefabs created");
         }
@@ -279,6 +291,50 @@ namespace TacticalCombat.Editor
             string path = "Assets/Prefabs/Effects/MetalSparks.prefab";
             PrefabUtility.SaveAsPrefabAsset(sparks, path);
             Object.DestroyImmediate(sparks);
+        }
+        
+        private static void CreateBulletHolePrefab()
+        {
+            GameObject bulletHole = new GameObject("BulletHole");
+            
+            // Simple quad for bullet hole
+            MeshRenderer renderer = bulletHole.AddComponent<MeshRenderer>();
+            MeshFilter filter = bulletHole.AddComponent<MeshFilter>();
+            
+            // Create simple quad mesh
+            Mesh quadMesh = new Mesh();
+            quadMesh.vertices = new Vector3[]
+            {
+                new Vector3(-0.05f, -0.05f, 0),
+                new Vector3(0.05f, -0.05f, 0),
+                new Vector3(0.05f, 0.05f, 0),
+                new Vector3(-0.05f, 0.05f, 0)
+            };
+            quadMesh.triangles = new int[] { 0, 1, 2, 0, 2, 3 };
+            quadMesh.uv = new Vector2[]
+            {
+                new Vector2(0, 0),
+                new Vector2(1, 0),
+                new Vector2(1, 1),
+                new Vector2(0, 1)
+            };
+            quadMesh.RecalculateNormals();
+            
+            filter.mesh = quadMesh;
+            
+            // Simple material
+            Material mat = new Material(Shader.Find("Standard"));
+            mat.color = new Color(0.2f, 0.2f, 0.2f, 0.8f);
+            renderer.material = mat;
+            
+            // Auto destroy
+            var autoDestroy = bulletHole.AddComponent<AutoDestroy>();
+            autoDestroy.lifetime = 10f;
+            
+            // Save
+            string path = "Assets/Prefabs/Effects/BulletHole.prefab";
+            PrefabUtility.SaveAsPrefabAsset(bulletHole, path);
+            Object.DestroyImmediate(bulletHole);
         }
         
         private static void CreateDefaultWeaponConfig()

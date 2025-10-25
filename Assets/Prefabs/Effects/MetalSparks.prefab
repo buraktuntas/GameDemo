@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 4751355201931086340}
   - component: {fileID: 780567991615985769}
   - component: {fileID: 2836401200685042584}
-  - component: {fileID: 1456828421448466308}
+  - component: {fileID: 6009658780218934497}
   m_Layer: 0
   m_Name: MetalSparks
   m_TagString: Untagged
@@ -4895,7 +4895,7 @@ ParticleSystemRenderer:
   m_MeshWeighting2: 1
   m_MeshWeighting3: 1
   m_MaskInteraction: 0
---- !u!114 &1456828421448466308
+--- !u!114 &6009658780218934497
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}

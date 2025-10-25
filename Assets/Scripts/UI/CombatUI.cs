@@ -40,9 +40,9 @@ namespace TacticalCombat.UI
         [SerializeField] private float hitMarkerDuration = 0.2f;
         
         [Header("📊 AMMO")]
-        [SerializeField] private TextMeshProUGUI ammoText;
-        [SerializeField] private TextMeshProUGUI reserveAmmoText;
-        [SerializeField] private Image reloadProgressBar;
+        [SerializeField] public TextMeshProUGUI ammoText;
+        [SerializeField] public TextMeshProUGUI reserveAmmoText;
+        [SerializeField] public Image reloadProgressBar;
         
         [Header("ℹ️ INFO")]
         [SerializeField] private TextMeshProUGUI weaponNameText;
@@ -201,9 +201,12 @@ namespace TacticalCombat.UI
         
         private void UpdateAmmoDisplay(int current, int reserve)
         {
+            Debug.Log($"📊 UpdateAmmoDisplay called: {current}/{reserve}");
+            
             if (ammoText != null)
             {
                 ammoText.text = current.ToString();
+                Debug.Log($"📊 Ammo text updated to: {current}");
                 
                 // Color feedback
                 if (current <= 0)
@@ -212,6 +215,10 @@ namespace TacticalCombat.UI
                     ammoText.color = Color.yellow;
                 else
                     ammoText.color = Color.white;
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ ammoText is null!");
             }
             
             if (reserveAmmoText != null)
