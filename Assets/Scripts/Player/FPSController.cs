@@ -195,23 +195,38 @@ namespace TacticalCombat.Player
         {
             if (!isLocalPlayer) return;
             
-            // Hareket FixedUpdate'de - daha stabil physics
-            HandleMovement();
-            HandleJumping();
+            // ⭐ TÜM HAREKET LOJİĞİ FixedUpdate'de
+            Vector3 input = GetMovementInput();
+            Vector3 horizontalMove = CalculateHorizontalMovement(input);
+            float verticalVelocity = CalculateVerticalVelocity();
             
-            // Apply movement with fixed timestep
+            // Birleştir
+            moveDirection = new Vector3(
+                horizontalMove.x, 
+                verticalVelocity, 
+                horizontalMove.z
+            );
+            
+            // Uygula
             characterController.Move(moveDirection * Time.fixedDeltaTime);
         }
         
-        private void HandleMovement()
+        // ⭐ YENİ MOVEMENT SİSTEMİ - FixedUpdate için optimize edilmiş
+        private Vector3 GetMovementInput()
         {
-            // Check if movement is blocked
             if (inputManager != null && inputManager.BlockMovementInput)
             {
-                return;
+                return Vector3.zero;
             }
             
-            if (!canMove) return;
+            if (!canMove) return Vector3.zero;
+            
+            return new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
+        }
+        
+        private Vector3 CalculateHorizontalMovement(Vector3 input)
+        {
+            if (input.magnitude < 0.1f) return Vector3.zero;
             
             // Get direction vectors
             Vector3 forward = transform.forward;
@@ -232,19 +247,13 @@ namespace TacticalCombat.Player
             }
             
             bool isRunning = wantsToSprint && canSprint;
-            
             float currentSpeed = isRunning ? runSpeed : walkSpeed;
             
-            float curSpeedX = currentSpeed * Input.GetAxis("Vertical");
-            float curSpeedY = currentSpeed * Input.GetAxis("Horizontal");
-            
-            // ⭐ CRITICAL FIX: Preserve Y velocity!
-            float movementDirectionY = moveDirection.y;
-            moveDirection = (forward * curSpeedX) + (right * curSpeedY);
-            moveDirection.y = movementDirectionY; // ⭐ Restore Y velocity
+            Vector3 horizontalMove = (forward * input.z) + (right * input.x);
+            return horizontalMove * currentSpeed;
         }
         
-        private void HandleJumping()
+        private float CalculateVerticalVelocity()
         {
             bool grounded = IsGrounded();
             
@@ -255,26 +264,24 @@ namespace TacticalCombat.Player
             }
             else if (Input.GetButtonDown("Jump") && canMove && grounded)
             {
-                moveDirection.y = jumpPower;
-                PlaySound(jumpSound);
-                
-                if (showDebugInfo)
-                {
-                    Debug.Log("🦘 Jump!");
-                }
+                return jumpPower;
             }
             
-            // Apply gravity when not grounded
+            // Apply gravity
             if (!grounded)
             {
-                moveDirection.y -= gravity * Time.deltaTime;
+                return moveDirection.y - gravity * Time.fixedDeltaTime;
             }
             else if (moveDirection.y < 0)
             {
                 // Small downward force to keep grounded
-                moveDirection.y = -2f;
+                return -2f;
             }
+            
+            return moveDirection.y;
         }
+        
+        // ⭐ HandleJumping artık CalculateVerticalVelocity içinde
         
         private void HandleRotation()
         {

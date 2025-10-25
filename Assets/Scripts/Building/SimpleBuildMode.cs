@@ -24,6 +24,7 @@ namespace TacticalCombat.Building
         
         [Header("Settings")]
         public LayerMask groundLayer;
+        public LayerMask obstacleLayer; // For overlap detection
         public float placementDistance = 5f;
         public float rotationSpeed = 90f; // Degrees per second
         public KeyCode buildModeKey = KeyCode.B;
@@ -148,6 +149,10 @@ namespace TacticalCombat.Building
             }
         }
 
+        // ⭐ PERFORMANCE: Throttle için
+        private float lastUpdateTime;
+        private const float UPDATE_INTERVAL = 0.05f; // 20 FPS yeterli
+        
         private void Update()
         {
             if (!isLocalPlayer) 
@@ -165,9 +170,15 @@ namespace TacticalCombat.Building
             if (isBuildModeActive)
             {
                 HandleStructureSelection();
-                UpdateGhostPreview();
                 HandleRotation();
                 HandlePlacement();
+                
+                // ⭐ THROTTLE: UpdateGhostPreview sadece belirli aralıklarla
+                if (Time.time - lastUpdateTime >= UPDATE_INTERVAL)
+                {
+                    UpdateGhostPreview();
+                    lastUpdateTime = Time.time;
+                }
             }
             
             // Debug: Tab tuşu her zaman çalışsın
@@ -531,28 +542,61 @@ namespace TacticalCombat.Building
         [Command]
         private void CmdPlaceStructure(Vector3 position, Quaternion rotation, int structureIndex)
         {
-            // ⚠️ GÜVENLİK KONTROLÜ: Client pozisyon manipülasyonu önleme
+            // 1️⃣ Mesafe kontrolü
             float distance = Vector3.Distance(transform.position, position);
-            float maxBuildDistance = placementDistance + 1f; // Tolerance
-            
-            if (distance > maxBuildDistance)
+            if (distance > placementDistance + 0.5f)
             {
-                Debug.LogWarning($"🚨 Invalid build position from {netId}: {distance}m > {maxBuildDistance}m");
+                Debug.LogWarning($"🚨 Invalid placement distance: {distance}m");
                 return;
             }
             
-            if (availableStructures == null || structureIndex >= availableStructures.Length) return;
+            // 2️⃣ Line of sight kontrolü
+            Vector3 playerEye = transform.position + Vector3.up * 1.6f;
+            if (Physics.Linecast(playerEye, position, out RaycastHit hit, obstacleLayer))
+            {
+                if (Vector3.Distance(hit.point, position) > 0.5f)
+                {
+                    Debug.LogWarning($"🚨 No line of sight to placement position");
+                    return;
+                }
+            }
+            
+            // 3️⃣ Ground check (server-side!)
+            if (!Physics.Raycast(position, Vector3.down, 2f, groundLayer))
+            {
+                Debug.LogWarning($"🚨 Invalid placement: not on ground");
+                return;
+            }
+            
+            // 4️⃣ Structure index validation
+            if (availableStructures == null || structureIndex >= availableStructures.Length) 
+            {
+                Debug.LogWarning($"🚨 Invalid structure index: {structureIndex}");
+                return;
+            }
             
             GameObject selectedStructure = availableStructures[structureIndex];
-            if (selectedStructure == null) return;
-
-            // ⚠️ GÜVENLİK: Geçerli yerleştirme kontrolü
-            if (!IsValidPlacement(position, selectedStructure))
+            if (selectedStructure == null) 
             {
-                Debug.LogWarning($"🚨 Invalid placement attempt from {netId} at {position}");
+                Debug.LogWarning($"🚨 Selected structure is null at index {structureIndex}");
                 return;
             }
 
+            // 5️⃣ Overlap check (server-side!)
+            Collider[] overlaps = Physics.OverlapBox(
+                position, 
+                new Vector3(0.9f, 0.45f, 0.09f), 
+                rotation, 
+                obstacleLayer
+            );
+            
+            if (overlaps.Length > 0)
+            {
+                Debug.LogWarning($"🚨 Invalid placement: overlapping with {overlaps[0].name}");
+                return;
+            }
+
+            // ✅ Tüm kontroller geçti - spawn et
             GameObject structure = Instantiate(selectedStructure, position, rotation);
             NetworkServer.Spawn(structure);
             
@@ -664,6 +708,9 @@ namespace TacticalCombat.Building
         // ═══════════════════════════════════════════════════════════
         // DEBUG GIZMOS
         // ═══════════════════════════════════════════════════════════
+        
+        // ⭐ Public method for other scripts
+        public bool IsBuildModeActive() => isBuildModeActive;
         
         private void OnDrawGizmos()
         {

@@ -5,46 +5,26 @@ using TacticalCombat.Core;
 namespace TacticalCombat.Player
 {
     /// <summary>
-    /// Player controller with network registration and team management
+    /// Player controller - SADECE network state management
+    /// Hareket kontrolü FPSController'da, Build kontrolü SimpleBuildMode'da
     /// </summary>
     public class PlayerController : NetworkBehaviour
     {
-        [Header("Player Info")]
-        [SerializeField] private Team playerTeam = Team.TeamA;
-        [SerializeField] private RoleId playerRole = RoleId.Builder;
-        
-        [Header("Build Mode")]
-        [SerializeField] private bool isInBuildMode = false;
+        [Header("Network State")]
+        [SyncVar] public Team team = Team.TeamA;
+        [SyncVar] public RoleId role = RoleId.Builder;
+        [SyncVar] public ulong playerId;
         
         [Header("Debug")]
         [SerializeField] private bool showDebugInfo = true;
         
         // Components
-        private FPSController fpsController;
         private PlayerVisuals playerVisuals;
-        
-        // Properties for other scripts
-        public Team team 
-        { 
-            get => playerTeam; 
-            set => playerTeam = value; 
-        }
-        public RoleId role 
-        { 
-            get => playerRole; 
-            set => playerRole = value; 
-        }
-        public ulong playerId => netId;
         
         private void Awake()
         {
-            fpsController = GetComponent<FPSController>();
             playerVisuals = GetComponent<PlayerVisuals>();
-            
-            if (fpsController == null)
-            {
-                Debug.LogError("❌ FPSController not found! Please add FPSController component.");
-            }
+            playerId = netId; // Network ID'yi set et
         }
         
         public override void OnStartLocalPlayer()
@@ -63,32 +43,16 @@ namespace TacticalCombat.Player
             }
         }
         
-        private void Update()
-        {
-            if (!isLocalPlayer) return;
-            
-            HandleInput();
-        }
-        
-        private void HandleInput()
-        {
-            // Build mode toggle (T key)
-            if (Input.GetKeyDown(KeyCode.T))
-            {
-                ToggleBuildMode();
-            }
-        }
-        
         private void RegisterWithMatchManager()
         {
             var matchManager = FindFirstObjectByType<MatchManager>();
             if (matchManager != null)
             {
-                matchManager.RegisterPlayer(netId, playerTeam, playerRole);
+                matchManager.RegisterPlayer(netId, team, role);
                 
                 if (showDebugInfo)
                 {
-                    Debug.Log($"📝 Player registered: Team {playerTeam}, Role {playerRole}");
+                    Debug.Log($"📝 Player registered: Team {team}, Role {role}");
                 }
             }
         }
@@ -97,55 +61,13 @@ namespace TacticalCombat.Player
         {
             if (playerVisuals != null)
             {
-                playerVisuals.UpdateTeamColor(playerTeam);
+                playerVisuals.UpdateTeamColor(team);
             }
         }
         
-        public void ToggleBuildMode()
-        {
-            isInBuildMode = !isInBuildMode;
-            
-            if (showDebugInfo)
-            {
-                Debug.Log($"🔨 Build mode: {isInBuildMode}");
-            }
-            
-            // Notify InputManager
-            if (InputManager.Instance != null)
-            {
-                if (isInBuildMode)
-                {
-                    InputManager.Instance.EnterBuildMode();
-                }
-                else
-                {
-                    InputManager.Instance.ExitBuildMode();
-                }
-            }
-        }
-        
-        public void SetBuildMode(bool enabled)
-        {
-            isInBuildMode = enabled;
-            
-            if (showDebugInfo)
-            {
-                Debug.Log($"🔨 Build mode set to: {enabled}");
-            }
-        }
-        
-        public bool IsInBuildMode() => isInBuildMode;
-        
-        public Camera GetPlayerCamera()
-        {
-            if (fpsController != null)
-            {
-                return fpsController.GetCamera();
-            }
-            return null;
-        }
-        
-        public Team GetPlayerTeam() => playerTeam;
-        public RoleId GetPlayerRole() => playerRole;
+        // ⭐ SADECE network state getter'ları
+        public Team GetPlayerTeam() => team;
+        public RoleId GetPlayerRole() => role;
+        public ulong GetPlayerId() => playerId;
     }
 }

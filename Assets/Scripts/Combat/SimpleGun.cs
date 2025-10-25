@@ -77,24 +77,43 @@ namespace TacticalCombat.Combat
         }
 
         [Command]
-        private void CmdFire(Vector3 origin, Vector3 direction)
+        private void CmdFire(Vector3 clientOrigin, Vector3 clientDirection)
         {
-            // ⚠️ GÜVENLİK: Server-side fire rate kontrolü
+            // 1️⃣ Fire rate check
             if (Time.time < lastServerFireTime + fireRate)
             {
-                Debug.LogWarning($"🚨 Server fire rate exceeded by {netId}: {Time.time - lastServerFireTime:F2}s < {fireRate:F2}s");
+                Debug.LogWarning($"🚨 Fire rate exceeded by {netId}");
+                return;
+            }
+            lastServerFireTime = Time.time;
+            
+            // 2️⃣ Origin validation (must be near player head)
+            Vector3 serverPlayerHead = transform.position + Vector3.up * 1.6f;
+            float originDistance = Vector3.Distance(clientOrigin, serverPlayerHead);
+            
+            if (originDistance > 0.5f) // Tolerance
+            {
+                Debug.LogWarning($"🚨 Invalid shot origin from {netId}: {originDistance}m away");
                 return;
             }
             
-            // Server fire time güncelle
-            lastServerFireTime = Time.time;
+            // 3️⃣ Direction validation (must be within reasonable angle)
+            Vector3 serverForward = transform.forward;
+            float angle = Vector3.Angle(serverForward, clientDirection);
             
-            // Server'da client'ın gönderdiği ray ile raycast yap
-            Ray ray = new Ray(origin, direction);
+            if (angle > 90f) // Max 90° deviation (look sensitivity)
+            {
+                Debug.LogWarning($"🚨 Invalid shot direction from {netId}: {angle}° off");
+                return;
+            }
             
-            Debug.Log($"🎯 [SERVER] Raycast from {origin} direction {direction} with layers {hitLayers}");
+            // 4️⃣ Server raycast (use validated direction)
+            Vector3 validatedOrigin = serverPlayerHead;
+            Vector3 validatedDirection = clientDirection.normalized;
             
-            if (Physics.Raycast(ray, out RaycastHit hit, range, hitLayers))
+            Debug.Log($"🎯 [SERVER] Validated raycast from {validatedOrigin} direction {validatedDirection}");
+            
+            if (Physics.Raycast(validatedOrigin, validatedDirection, out RaycastHit hit, range, hitLayers))
             {
                 Debug.Log($"🎯 [SERVER] Hit: {hit.collider.name} at {hit.point}");
                 

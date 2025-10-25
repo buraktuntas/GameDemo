@@ -4,7 +4,7 @@ using TacticalCombat.Core;
 
 namespace TacticalCombat.Combat
 {
-    public class Health : NetworkBehaviour
+    public class Health : NetworkBehaviour, IDamageable
     {
         [Header("Health Settings")]
         [SerializeField] private int maxHealth = GameConstants.PLAYER_MAX_HEALTH;
@@ -26,20 +26,50 @@ namespace TacticalCombat.Combat
             }
         }
 
+        // ⭐ Interface implementation
+        public void ApplyDamage(DamageInfo info)
+        {
+            if (!isServer)
+            {
+                Debug.LogWarning("❌ ApplyDamage called on client!");
+                return;
+            }
+            
+            ApplyDamageInternal(info);
+        }
+        
+        // ⭐ Private damage method
+        [Server]
+        private void ApplyDamageInternal(DamageInfo info)
+        {
+            if (isDead) return;
+            
+            // Damage reduction based on armor, etc.
+            int finalDamage = CalculateFinalDamage(info);
+            
+            currentHealth -= finalDamage;
+            currentHealth = Mathf.Max(0, currentHealth);
+            
+            Debug.Log($"{gameObject.name} took {finalDamage} damage ({info.Type}). Health: {currentHealth}/{maxHealth}");
+            
+            if (currentHealth <= 0)
+            {
+                Die(info.AttackerID);
+            }
+        }
+        
+        // ⭐ Legacy method for backward compatibility
         [Server]
         public void TakeDamage(int damage, ulong attackerId = 0)
         {
-            if (isDead) return;
-
-            currentHealth -= damage;
-            currentHealth = Mathf.Max(0, currentHealth);
-
-            Debug.Log($"{gameObject.name} took {damage} damage. Health: {currentHealth}/{maxHealth}");
-
-            if (currentHealth <= 0)
-            {
-                Die(attackerId);
-            }
+            DamageInfo info = new DamageInfo(damage, attackerId, DamageType.Bullet, transform.position);
+            ApplyDamageInternal(info);
+        }
+        
+        private int CalculateFinalDamage(DamageInfo info)
+        {
+            // TODO: Add armor, damage reduction, etc.
+            return info.Amount;
         }
 
         [Server]
@@ -89,6 +119,10 @@ namespace TacticalCombat.Combat
             OnHealthChangedEvent?.Invoke(newHealth, maxHealth);
         }
 
+        // ⭐ IDamageable interface properties
+        public bool IsAlive => !isDead;
+        public float HealthPercentage => (float)currentHealth / maxHealth;
+        
         public int GetCurrentHealth() => currentHealth;
         public int GetMaxHealth() => maxHealth;
         public bool IsDead() => isDead;

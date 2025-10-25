@@ -24,6 +24,7 @@ namespace TacticalCombat.Building
         [SerializeField] private GameObject rampPrefab;
 
         private PlayerController playerController;
+        private SimpleBuildMode buildMode;
         private Camera mainCamera;
         private BuildGhost currentGhost;
         private StructureType currentStructureType = StructureType.Wall;
@@ -40,6 +41,7 @@ namespace TacticalCombat.Building
         private void Awake()
         {
             playerController = GetComponent<PlayerController>();
+            buildMode = GetComponent<SimpleBuildMode>();
         }
 
         public override void OnStartLocalPlayer()
@@ -75,7 +77,7 @@ namespace TacticalCombat.Building
         {
             if (!isLocalPlayer || playerController == null) return;
 
-            if (playerController.IsInBuildMode() && currentGhost != null)
+            if (buildMode != null && buildMode.IsBuildModeActive() && currentGhost != null)
             {
                 UpdateGhostPosition();
                 currentGhost.Show(true);
@@ -124,7 +126,7 @@ namespace TacticalCombat.Building
 
         private void OnPlace(InputAction.CallbackContext context)
         {
-            if (!playerController.IsInBuildMode() || !isPlacementValid) return;
+            if (buildMode == null || !buildMode.IsBuildModeActive() || !isPlacementValid) return;
 
             // Request placement from server
             BuildRequest request = new BuildRequest(
@@ -139,7 +141,7 @@ namespace TacticalCombat.Building
 
         private void OnRotate(InputAction.CallbackContext context)
         {
-            if (!playerController.IsInBuildMode()) return;
+            if (buildMode == null || !buildMode.IsBuildModeActive()) return;
 
             // Rotate ghost 90 degrees
             ghostRotation *= Quaternion.Euler(0, 90, 0);
@@ -147,7 +149,7 @@ namespace TacticalCombat.Building
 
         private void SelectStructure(StructureType type)
         {
-            if (!playerController.IsInBuildMode()) return;
+            if (buildMode == null || !buildMode.IsBuildModeActive()) return;
 
             currentStructureType = type;
             CreateGhost(type);
