@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!1 &1512288110212753304
+--- !u!1 &1315435914672205785
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -8,10 +8,315 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 6362327356115177644}
-  - component: {fileID: 298214627491640420}
-  - component: {fileID: 3314998421457855324}
-  - component: {fileID: 3639332896164648476}
+  - component: {fileID: 460997269704206824}
+  - component: {fileID: 2275138456358380371}
+  - component: {fileID: 1876601161130231760}
+  - component: {fileID: 3605152208076797756}
+  - component: {fileID: 5899238454496886194}
+  - component: {fileID: 2301432243223283899}
+  - component: {fileID: 2376009879963226149}
+  - component: {fileID: 3695399961410176493}
+  - component: {fileID: 8685277316346494335}
+  - component: {fileID: 1638243773519310559}
+  - component: {fileID: 8845657606831186008}
+  - component: {fileID: 6060963678774000080}
+  m_Layer: 0
+  m_Name: Player
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &460997269704206824
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 4315752071719178225}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2275138456358380371
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9b91ecbcc199f4492b9a91e820070131, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Mirror::Mirror.NetworkIdentity
+  sceneId: 0
+  _assetId: 0
+  serverOnly: 0
+  visibility: 0
+  hasSpawned: 0
+--- !u!114 &1876601161130231760
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8ff3ba0becae47b8b9381191598957c8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Mirror.Components::Mirror.NetworkTransformReliable
+  syncDirection: 1
+  syncMode: 0
+  syncInterval: 0
+  target: {fileID: 460997269704206824}
+  syncPosition: 1
+  syncRotation: 1
+  syncScale: 0
+  onlySyncOnChange: 1
+  compressRotation: 1
+  interpolatePosition: 1
+  interpolateRotation: 1
+  interpolateScale: 1
+  coordinateSpace: 0
+  timelineOffset: 1
+  showGizmos: 0
+  showOverlay: 0
+  overlayColor: {r: 0, g: 0, b: 0, a: 0.5}
+  onlySyncOnChangeCorrectionMultiplier: 2
+  useFixedUpdate: 0
+  rotationSensitivity: 0.01
+  positionPrecision: 0.01
+  scalePrecision: 0.01
+--- !u!143 &3605152208076797756
+CharacterController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Height: 2
+  m_Radius: 0.5
+  m_SlopeLimit: 45
+  m_StepOffset: 0.3
+  m_SkinWidth: 0.08
+  m_MinMoveDistance: 0.001
+  m_Center: {x: 0, y: 1, z: 0}
+--- !u!114 &5899238454496886194
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6e418cd1295b1f942b70fe0d85d80333, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.FPSController
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  playerCamera: {fileID: 4361979465110981768}
+  walkSpeed: 7
+  runSpeed: 14
+  jumpPower: 10
+  gravity: 25
+  lookSpeed: 5
+  lookXLimit: 60
+  groundCheckDistance: 0.2
+  groundMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  useStamina: 0
+  maxStamina: 100
+  staminaDrainRate: 10
+  staminaRegenRate: 5
+  team: 0
+  role: 0
+  playerId: 0
+  jumpSound: {fileID: 0}
+  landSound: {fileID: 0}
+  footstepSounds: []
+  useHeadBob: 1
+  bobSpeed: 12
+  bobAmount: 0.05
+  useFOVKick: 1
+  sprintFOVIncrease: 10
+  showDebugInfo: 0
+--- !u!114 &2301432243223283899
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 76ef4a9a204cba84790f728897442ea9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.PlayerController
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  playerTeam: 1
+  playerRole: 0
+  isInBuildMode: 0
+  showDebugInfo: 1
+--- !u!114 &2376009879963226149
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f5e4d3c2b1a9f8e7d6c5b4a3e2d1c0b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.PlayerVisuals
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  teamAColor: {r: 0.2, g: 0.5, b: 1, a: 1}
+  teamBColor: {r: 1, g: 0.3, b: 0.3, a: 1}
+  neutralColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
+--- !u!114 &3695399961410176493
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8d7c6f5b4a3e2d1c9f8e7a6b5d4c3b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.UI.SimpleCrosshair
+  crosshairColor: {r: 1, g: 1, b: 1, a: 1}
+  size: 10
+  thickness: 2
+  showDebugInfo: 0
+--- !u!114 &8685277316346494335
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e4c9c67c82b597445904eff90f537c32, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.Health
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  maxHealth: 100
+--- !u!114 &1638243773519310559
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8d7c6e5f4a3b2d1e9c8f7a6b5d4c3e2a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.SimpleGun
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  damage: 10
+  range: 100
+  fireRate: 0.5
+  hitLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  hitEffectPrefab: {fileID: 0}
+--- !u!114 &8845657606831186008
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7e6d5c4b3a2f1e9d8c7b6a5e4d3c2b1a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Building.SimpleBuildMode
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  wallPrefab: {fileID: 6401222315660631112, guid: 2e41a10791f30e146b61242c6bdb9d86, type: 3}
+  floorPrefab: {fileID: 7958207703214008250, guid: 5316438264283d441afc5c737b710f2b, type: 3}
+  roofPrefab: {fileID: 8464780267908267775, guid: ddac192a209a42845acb4441f0aec924, type: 3}
+  doorPrefab: {fileID: 70180072436422421, guid: ef5dfa688ebdcbd4a8bcca6d75587a7e, type: 3}
+  windowPrefab: {fileID: 4810401950708496547, guid: 1beaf45ea37847d438f44c4d80d1f8af, type: 3}
+  stairsPrefab: {fileID: 266457105137506284, guid: 7ac5ea097db00d4499c488f8978aa295, type: 3}
+  validPlacementMaterial: {fileID: 0}
+  invalidPlacementMaterial: {fileID: 0}
+  groundLayer:
+    serializedVersion: 2
+    m_Bits: 1
+  placementDistance: 5
+  rotationSpeed: 90
+  buildModeKey: 98
+  rotateKey: 114
+  cycleStructureKey: 9
+  gridSize: 1
+  allowCameraInBuildMode: 1
+  allowMovementInBuildMode: 1
+  currentStructureIndex: 0
+  showStabilityPreview: 1
+  maxSupportDistance: 10
+--- !u!114 &6060963678774000080
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1315435914672205785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c7ec5b327334e44a86b85ac18a6c93e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.AbilityController
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  roleDefinition: {fileID: 0}
+--- !u!1 &1712431185083777239
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4315752071719178225}
+  - component: {fileID: 4361979465110981768}
+  - component: {fileID: 7605007752719017285}
+  - component: {fileID: 8391236088004731785}
   m_Layer: 0
   m_Name: PlayerCamera
   m_TagString: Untagged
@@ -19,28 +324,28 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &6362327356115177644
+--- !u!4 &4315752071719178225
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1512288110212753304}
+  m_GameObject: {fileID: 1712431185083777239}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 1.6, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 7429790279342140012}
+  m_Father: {fileID: 460997269704206824}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!20 &298214627491640420
+--- !u!20 &4361979465110981768
 Camera:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1512288110212753304}
+  m_GameObject: {fileID: 1712431185083777239}
   m_Enabled: 0
   serializedVersion: 2
   m_ClearFlags: 1
@@ -85,13 +390,13 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
---- !u!114 &3314998421457855324
+--- !u!114 &7605007752719017285
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1512288110212753304}
+  m_GameObject: {fileID: 1712431185083777239}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
@@ -129,314 +434,11 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
---- !u!81 &3639332896164648476
+--- !u!81 &8391236088004731785
 AudioListener:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1512288110212753304}
+  m_GameObject: {fileID: 1712431185083777239}
   m_Enabled: 1
---- !u!1 &6942980588957763361
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 7429790279342140012}
-  - component: {fileID: 4638595522701518504}
-  - component: {fileID: 838767860353382462}
-  - component: {fileID: 8166112914252076745}
-  - component: {fileID: 7906521683564986197}
-  - component: {fileID: 5372635160337823600}
-  - component: {fileID: 6805473579870519397}
-  - component: {fileID: 5312618647165212403}
-  - component: {fileID: 5366033563044652059}
-  - component: {fileID: 4760181615361382601}
-  - component: {fileID: 2066943132959840038}
-  - component: {fileID: 3841361115153687652}
-  m_Layer: 0
-  m_Name: Player
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &7429790279342140012
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 6362327356115177644}
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &4638595522701518504
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9b91ecbcc199f4492b9a91e820070131, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Mirror::Mirror.NetworkIdentity
-  sceneId: 0
-  _assetId: 0
-  serverOnly: 0
-  visibility: 0
-  hasSpawned: 0
---- !u!114 &838767860353382462
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8ff3ba0becae47b8b9381191598957c8, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Mirror.Components::Mirror.NetworkTransformReliable
-  syncDirection: 1
-  syncMode: 0
-  syncInterval: 0
-  target: {fileID: 7429790279342140012}
-  syncPosition: 1
-  syncRotation: 1
-  syncScale: 0
-  onlySyncOnChange: 1
-  compressRotation: 1
-  interpolatePosition: 1
-  interpolateRotation: 1
-  interpolateScale: 1
-  coordinateSpace: 0
-  timelineOffset: 1
-  showGizmos: 0
-  showOverlay: 0
-  overlayColor: {r: 0, g: 0, b: 0, a: 0.5}
-  onlySyncOnChangeCorrectionMultiplier: 2
-  useFixedUpdate: 0
-  rotationSensitivity: 0.01
-  positionPrecision: 0.01
-  scalePrecision: 0.01
---- !u!143 &8166112914252076745
-CharacterController:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Height: 2
-  m_Radius: 0.5
-  m_SlopeLimit: 45
-  m_StepOffset: 0.3
-  m_SkinWidth: 0.08
-  m_MinMoveDistance: 0.001
-  m_Center: {x: 0, y: 1, z: 0}
---- !u!114 &7906521683564986197
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6e418cd1295b1f942b70fe0d85d80333, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.FPSController
-  syncDirection: 0
-  syncMode: 0
-  syncInterval: 0
-  playerCamera: {fileID: 298214627491640420}
-  walkSpeed: 7
-  runSpeed: 14
-  jumpPower: 10
-  gravity: 25
-  lookSpeed: 5
-  lookXLimit: 60
-  groundCheckDistance: 0.2
-  groundMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  useStamina: 0
-  maxStamina: 100
-  staminaDrainRate: 10
-  staminaRegenRate: 5
-  team: 0
-  role: 0
-  playerId: 0
-  jumpSound: {fileID: 0}
-  landSound: {fileID: 0}
-  footstepSounds: []
-  useHeadBob: 1
-  bobSpeed: 12
-  bobAmount: 0.05
-  useFOVKick: 1
-  sprintFOVIncrease: 10
-  showDebugInfo: 0
---- !u!114 &5372635160337823600
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 76ef4a9a204cba84790f728897442ea9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.PlayerController
-  syncDirection: 0
-  syncMode: 0
-  syncInterval: 0
-  playerTeam: 1
-  playerRole: 0
-  isInBuildMode: 0
-  showDebugInfo: 1
---- !u!114 &6805473579870519397
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6f5e4d3c2b1a9f8e7d6c5b4a3e2d1c0b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.PlayerVisuals
-  syncDirection: 0
-  syncMode: 0
-  syncInterval: 0
-  teamAColor: {r: 0.2, g: 0.5, b: 1, a: 1}
-  teamBColor: {r: 1, g: 0.3, b: 0.3, a: 1}
-  neutralColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
---- !u!114 &5312618647165212403
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9e8d7c6f5b4a3e2d1c9f8e7a6b5d4c3b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.UI.SimpleCrosshair
-  crosshairColor: {r: 1, g: 1, b: 1, a: 1}
-  size: 10
-  thickness: 2
-  showDebugInfo: 0
---- !u!114 &5366033563044652059
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e4c9c67c82b597445904eff90f537c32, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.Health
-  syncDirection: 0
-  syncMode: 0
-  syncInterval: 0
-  maxHealth: 100
---- !u!114 &4760181615361382601
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8d7c6e5f4a3b2d1e9c8f7a6b5d4c3e2a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.SimpleGun
-  syncDirection: 0
-  syncMode: 0
-  syncInterval: 0
-  damage: 10
-  range: 100
-  fireRate: 0.5
-  hitLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  hitEffectPrefab: {fileID: 0}
---- !u!114 &2066943132959840038
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7e6d5c4b3a2f1e9d8c7b6a5e4d3c2b1a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Building.SimpleBuildMode
-  syncDirection: 0
-  syncMode: 0
-  syncInterval: 0
-  wallPrefab: {fileID: 6873336198138292673, guid: 2e41a10791f30e146b61242c6bdb9d86, type: 3}
-  floorPrefab: {fileID: 4163262681158983247, guid: 5316438264283d441afc5c737b710f2b, type: 3}
-  roofPrefab: {fileID: 3944120946071444512, guid: ddac192a209a42845acb4441f0aec924, type: 3}
-  doorPrefab: {fileID: 1528162292656485033, guid: ef5dfa688ebdcbd4a8bcca6d75587a7e, type: 3}
-  windowPrefab: {fileID: 2042801008423349306, guid: 1beaf45ea37847d438f44c4d80d1f8af, type: 3}
-  stairsPrefab: {fileID: 6503641372757465615, guid: 7ac5ea097db00d4499c488f8978aa295, type: 3}
-  validPlacementMaterial: {fileID: 0}
-  invalidPlacementMaterial: {fileID: 0}
-  groundLayer:
-    serializedVersion: 2
-    m_Bits: 1
-  placementDistance: 5
-  rotationSpeed: 90
-  buildModeKey: 98
-  rotateKey: 114
-  cycleStructureKey: 9
-  gridSize: 1
-  currentStructureIndex: 0
-  showStabilityPreview: 1
-  maxSupportDistance: 10
---- !u!114 &3841361115153687652
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6942980588957763361}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1c7ec5b327334e44a86b85ac18a6c93e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.AbilityController
-  syncDirection: 0
-  syncMode: 0
-  syncInterval: 0
-  roleDefinition: {fileID: 0}

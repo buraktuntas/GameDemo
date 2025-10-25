@@ -34,6 +34,8 @@ namespace TacticalCombat.Player
         {
             Locked,    // FPS gameplay - cursor locked, camera + movement enabled
             Unlocked,  // Cursor visible - camera blocked, movement enabled
+            Confined,  // Cursor confined - camera + movement enabled
+            Free,      // Cursor free - camera + movement blocked
             Menu       // Full menu - everything blocked
         }
         
@@ -49,7 +51,7 @@ namespace TacticalCombat.Player
         private CursorMode currentMode = CursorMode.Locked;
         
         // Public properties
-        public bool IsInBuildMode { get; private set; }
+        public bool IsInBuildMode { get; set; }
         public bool IsInMenu { get; private set; }
         public bool IsPaused { get; private set; }
         
@@ -189,6 +191,22 @@ namespace TacticalCombat.Player
                     OnCursorUnlocked?.Invoke();
                     break;
                     
+                case CursorMode.Confined:
+                    Cursor.lockState = CursorLockMode.Confined;
+                    Cursor.visible = true;
+                    BlockCameraInput = false;
+                    BlockMovementInput = false;
+                    Debug.Log("🔒 Confined Mode: Cursor confined, Camera + Movement enabled");
+                    break;
+                    
+                case CursorMode.Free:
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
+                    BlockCameraInput = true;
+                    BlockMovementInput = true;
+                    Debug.Log("🔓 Free Mode: Cursor free, Camera + Movement blocked");
+                    break;
+                    
                 case CursorMode.Menu:
                     Cursor.lockState = CursorLockMode.None;
                     Cursor.visible = true;
@@ -210,15 +228,15 @@ namespace TacticalCombat.Player
         {
             IsInBuildMode = true;
             
-            // Build mode: Cursor visible and confined to screen, camera + movement work
+            // Fortnite tarzı: Build mode'da durarak yapı yerleştir
             Cursor.lockState = CursorLockMode.Confined;
             Cursor.visible = true;
-            BlockCameraInput = false;  // Camera works for looking around
-            BlockMovementInput = false; // Movement works for positioning
-            BlockJumpInput = false;
-            BlockSprintInput = false;
+            BlockCameraInput = true;   // Kamerayı durdur
+            BlockMovementInput = true; // Hareketi durdur
+            BlockJumpInput = true;
+            BlockSprintInput = true;
             
-            Debug.Log("🏗️ Build Mode: Camera + Movement enabled, Cursor confined");
+            Debug.Log("🏗️ Build Mode: Fortnite tarzı - Hareket durduruldu, Cursor confined");
             OnBuildModeEnter?.Invoke();
         }
         

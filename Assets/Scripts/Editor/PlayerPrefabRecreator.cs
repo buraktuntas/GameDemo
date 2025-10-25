@@ -66,9 +66,14 @@ namespace TacticalCombat.Editor
             
             // Configure gun
             SerializedObject serializedGun = new SerializedObject(simpleGun);
-            serializedGun.FindProperty("damage").floatValue = 25f;
-            serializedGun.FindProperty("range").floatValue = 100f;
-            serializedGun.FindProperty("fireRate").floatValue = 0.5f;
+            var damageProp = serializedGun.FindProperty("damage");
+            var rangeProp = serializedGun.FindProperty("range");
+            var fireRateProp = serializedGun.FindProperty("fireRate");
+            
+            if (damageProp != null) damageProp.floatValue = 25f;
+            if (rangeProp != null) rangeProp.floatValue = 100f;
+            if (fireRateProp != null) fireRateProp.floatValue = 0.5f;
+            
             serializedGun.ApplyModifiedProperties();
             
             // ═══════════════════════════════════════════════════════════

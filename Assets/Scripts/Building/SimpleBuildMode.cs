@@ -29,7 +29,13 @@ namespace TacticalCombat.Building
         public KeyCode buildModeKey = KeyCode.B;
         public KeyCode rotateKey = KeyCode.R;
         public KeyCode cycleStructureKey = KeyCode.Tab;
-        public float gridSize = 1f; // Grid snapping size
+        public float gridSize = 1f;
+        
+        [Header("Build Mode Behavior")]
+        [Tooltip("Valheim style: Camera rotates freely while building")]
+        public bool allowCameraInBuildMode = true;
+        [Tooltip("Fortnite style: Movement allowed while building")]
+        public bool allowMovementInBuildMode = true; // Grid snapping size
         
         [Header("Structure Selection")]
         public int currentStructureIndex = 0;
@@ -251,37 +257,72 @@ namespace TacticalCombat.Building
         {
             Debug.Log($"🏗️ EnterBuildMode çağrıldı - wallPrefab: {(wallPrefab != null ? wallPrefab.name : "NULL")}");
             
-            if (wallPrefab == null)
+            if (availableStructures == null || availableStructures.Length == 0)
             {
-                Debug.LogError("❌ Wall prefab not assigned! Build mode açılamıyor!");
+                Debug.LogWarning("⚠️ No structures available!");
                 return;
             }
             
             isBuildModeActive = true;
             currentRotationY = 0f;
             
-            Debug.Log("🏗️ BUILD MODE: ON | LMB=Place | ESC=Exit | R=Rotate");
-            CreateGhostPreview();
-            
-            // InputManager'ın yeni API'sini kullan
+            // ✅ Configure input based on build mode behavior
             if (InputManager.Instance != null)
             {
-                InputManager.Instance.EnterBuildMode();
+                InputManager.Instance.IsInBuildMode = true;
+                
+                // ⭐ KEY DECISION POINT
+                if (allowCameraInBuildMode && allowMovementInBuildMode)
+                {
+                    // VALHEIM STYLE: Full movement + camera
+                    Cursor.lockState = CursorLockMode.Confined;
+                    Cursor.visible = true;
+                    InputManager.Instance.BlockCameraInput = false;
+                    InputManager.Instance.BlockMovementInput = false;
+                    
+                    Debug.Log("🏗️ BUILD MODE (Valheim): Movement + Camera enabled");
+                }
+                else if (allowMovementInBuildMode && !allowCameraInBuildMode)
+                {
+                    // FORTNITE STYLE: Movement but no camera
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
+                    InputManager.Instance.BlockCameraInput = true;
+                    InputManager.Instance.BlockMovementInput = false;
+                    
+                    Debug.Log("🏗️ BUILD MODE (Fortnite): Movement only");
+                }
+                else
+                {
+                    // STATIC BUILD: No movement, no camera
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
+                    InputManager.Instance.BlockCameraInput = true;
+                    InputManager.Instance.BlockMovementInput = true;
+                    
+                    Debug.Log("🏗️ BUILD MODE (Static): No movement");
+                }
             }
+            
+            CreateGhostPreview();
+            
+            Debug.Log("🏗️ BUILD MODE: ON | LMB=Place | ESC=Exit | R=Rotate | Tab=Change");
         }
         
         private void ExitBuildMode()
         {
             isBuildModeActive = false;
             
-            Debug.Log("❌ BUILD MODE: OFF");
-            DestroyGhostPreview();
-            
-            // InputManager'ın yeni API'sini kullan
+            // ✅ Restore FPS mode
             if (InputManager.Instance != null)
             {
-                InputManager.Instance.ExitBuildMode();
+                InputManager.Instance.IsInBuildMode = false;
+                InputManager.Instance.SetCursorMode(InputManager.CursorMode.Locked);
             }
+            
+            DestroyGhostPreview();
+            
+            Debug.Log("❌ BUILD MODE: OFF");
         }
 
         private void CreateGhostPreview()
@@ -465,6 +506,16 @@ namespace TacticalCombat.Building
             
             return true;
         }
+        
+        // Overload for GameObject parameter
+        private bool IsValidPlacement(Vector3 position, GameObject structure)
+        {
+            if (structure == null) return false;
+            
+            // Use default rotation for GameObject check
+            Quaternion rotation = Quaternion.identity;
+            return IsValidPlacement(position, rotation);
+        }
 
         private void PlaceStructure()
         {
@@ -480,20 +531,42 @@ namespace TacticalCombat.Building
         [Command]
         private void CmdPlaceStructure(Vector3 position, Quaternion rotation, int structureIndex)
         {
+            // ⚠️ GÜVENLİK KONTROLÜ: Client pozisyon manipülasyonu önleme
+            float distance = Vector3.Distance(transform.position, position);
+            float maxBuildDistance = placementDistance + 1f; // Tolerance
+            
+            if (distance > maxBuildDistance)
+            {
+                Debug.LogWarning($"🚨 Invalid build position from {netId}: {distance}m > {maxBuildDistance}m");
+                return;
+            }
+            
             if (availableStructures == null || structureIndex >= availableStructures.Length) return;
             
             GameObject selectedStructure = availableStructures[structureIndex];
             if (selectedStructure == null) return;
 
+            // ⚠️ GÜVENLİK: Geçerli yerleştirme kontrolü
+            if (!IsValidPlacement(position, selectedStructure))
+            {
+                Debug.LogWarning($"🚨 Invalid placement attempt from {netId} at {position}");
+                return;
+            }
+
             GameObject structure = Instantiate(selectedStructure, position, rotation);
             NetworkServer.Spawn(structure);
             
-            Debug.Log($"✅ [SERVER] {selectedStructure.name} placed at {position}");
+            Debug.Log($"✅ [SERVER] {selectedStructure.name} placed at {position} by {netId}");
         }
 
         // ═══════════════════════════════════════════════════════════
         // STRUCTURAL INTEGRITY PREVIEW SYSTEM
         // ═══════════════════════════════════════════════════════════
+        
+        // Performance optimization - cache stability calculations
+        private float lastStabilityCheckTime;
+        private Color cachedStabilityColor;
+        private Vector3 lastStabilityPosition;
         
         /// <summary>
         /// Calculates stability color based on support distance
@@ -505,10 +578,21 @@ namespace TacticalCombat.Building
         /// </summary>
         private Color GetStabilityPreviewColor(Vector3 position)
         {
+            // ⚡ PERFORMANCE: Cache stability calculations - 0.1 saniyede bir hesapla
+            if (Time.time - lastStabilityCheckTime < 0.1f && 
+                Vector3.Distance(position, lastStabilityPosition) < 0.5f)
+            {
+                return cachedStabilityColor;
+            }
+            
+            lastStabilityCheckTime = Time.time;
+            lastStabilityPosition = position;
+            
             // Check if grounded
             if (IsGrounded(position))
             {
-                return new Color(0.3f, 0.6f, 1f, 0.5f); // Blue - 100% stable
+                cachedStabilityColor = new Color(0.3f, 0.6f, 1f, 0.5f); // Blue - 100% stable
+                return cachedStabilityColor;
             }
             
             // Find nearest support
@@ -516,17 +600,20 @@ namespace TacticalCombat.Building
             
             if (supportDistance < 0 || supportDistance > maxSupportDistance)
             {
-                return new Color(1f, 0.2f, 0.2f, 0.5f); // Red - will collapse
+                cachedStabilityColor = new Color(1f, 0.2f, 0.2f, 0.5f); // Red - will collapse
+                return cachedStabilityColor;
             }
             
             // Calculate stability based on distance
             float stabilityPercent = 1f - (supportDistance / maxSupportDistance);
             
-            if (stabilityPercent > 0.8f) return new Color(0.3f, 0.6f, 1f, 0.5f);    // Blue
-            if (stabilityPercent > 0.6f) return new Color(0.3f, 1f, 0.3f, 0.5f);    // Green
-            if (stabilityPercent > 0.4f) return new Color(1f, 1f, 0.3f, 0.5f);      // Yellow
-            if (stabilityPercent > 0.2f) return new Color(1f, 0.6f, 0.2f, 0.5f);    // Orange
-            return new Color(1f, 0.2f, 0.2f, 0.5f);                                 // Red
+            if (stabilityPercent > 0.8f) cachedStabilityColor = new Color(0.3f, 0.6f, 1f, 0.5f);    // Blue
+            else if (stabilityPercent > 0.6f) cachedStabilityColor = new Color(0.3f, 1f, 0.3f, 0.5f);    // Green
+            else if (stabilityPercent > 0.4f) cachedStabilityColor = new Color(1f, 1f, 0.3f, 0.5f);      // Yellow
+            else if (stabilityPercent > 0.2f) cachedStabilityColor = new Color(1f, 0.6f, 0.2f, 0.5f);    // Orange
+            else cachedStabilityColor = new Color(1f, 0.2f, 0.2f, 0.5f);                                 // Red
+            
+            return cachedStabilityColor;
         }
         
         private bool IsGrounded(Vector3 position)

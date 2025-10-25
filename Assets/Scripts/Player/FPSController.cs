@@ -179,12 +179,8 @@ namespace TacticalCombat.Player
         {
             if (!isLocalPlayer) return;
             
-            HandleMovement();
-            HandleJumping();
+            // Sadece rotation ve UI Update'de
             HandleRotation();
-            
-            // Apply movement - CharacterController uses Update, NOT FixedUpdate!
-            characterController.Move(moveDirection * Time.deltaTime);
             
             // Optional features
             if (useStamina) HandleStamina();
@@ -193,6 +189,18 @@ namespace TacticalCombat.Player
             
             UpdateFootsteps();
             CheckGroundState();
+        }
+        
+        private void FixedUpdate()
+        {
+            if (!isLocalPlayer) return;
+            
+            // Hareket FixedUpdate'de - daha stabil physics
+            HandleMovement();
+            HandleJumping();
+            
+            // Apply movement with fixed timestep
+            characterController.Move(moveDirection * Time.fixedDeltaTime);
         }
         
         private void HandleMovement()
@@ -216,6 +224,13 @@ namespace TacticalCombat.Player
             // Check if can sprint
             bool wantsToSprint = Input.GetKey(KeyCode.LeftShift);
             bool canSprint = !useStamina || currentStamina > 0;
+            
+            // ⭐ Check if sprint is blocked
+            if (inputManager != null && inputManager.BlockSprintInput)
+            {
+                wantsToSprint = false;
+            }
+            
             bool isRunning = wantsToSprint && canSprint;
             
             float currentSpeed = isRunning ? runSpeed : walkSpeed;
@@ -233,8 +248,12 @@ namespace TacticalCombat.Player
         {
             bool grounded = IsGrounded();
             
-            // Jump input
-            if (Input.GetButtonDown("Jump") && canMove && grounded)
+            // ⭐ Check if jump is blocked
+            if (inputManager != null && inputManager.BlockJumpInput)
+            {
+                // Skip jump check
+            }
+            else if (Input.GetButtonDown("Jump") && canMove && grounded)
             {
                 moveDirection.y = jumpPower;
                 PlaySound(jumpSound);

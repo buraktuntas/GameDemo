@@ -20,6 +20,7 @@ namespace TacticalCombat.Combat
         [SerializeField] private GameObject hitEffectPrefab;
         
         private float nextFireTime = 0f;
+        private float lastServerFireTime = 0f;
         private Camera playerCamera;
 
         private void Start()
@@ -53,10 +54,20 @@ namespace TacticalCombat.Combat
         {
             if (playerCamera == null) return;
 
+            // ⭐ Client-side fire rate kontrolü
+            if (Time.time < nextFireTime)
+            {
+                Debug.Log($"🔫 Fire rate exceeded on client: {Time.time - nextFireTime + fireRate:F2}s remaining");
+                return;
+            }
+
             // Kamera'nın baktığı yönü al
             Ray cameraRay = playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
             Vector3 shootDirection = cameraRay.direction;
             Vector3 shootOrigin = cameraRay.origin;
+
+            // Client tarafında fire rate güncelle
+            nextFireTime = Time.time + fireRate;
 
             // Client tarafında görsel feedback
             Debug.Log("🔫 Fired!");
@@ -68,6 +79,16 @@ namespace TacticalCombat.Combat
         [Command]
         private void CmdFire(Vector3 origin, Vector3 direction)
         {
+            // ⚠️ GÜVENLİK: Server-side fire rate kontrolü
+            if (Time.time < lastServerFireTime + fireRate)
+            {
+                Debug.LogWarning($"🚨 Server fire rate exceeded by {netId}: {Time.time - lastServerFireTime:F2}s < {fireRate:F2}s");
+                return;
+            }
+            
+            // Server fire time güncelle
+            lastServerFireTime = Time.time;
+            
             // Server'da client'ın gönderdiği ray ile raycast yap
             Ray ray = new Ray(origin, direction);
             
