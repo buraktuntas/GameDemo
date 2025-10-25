@@ -74,6 +74,10 @@ namespace TacticalCombat.Combat
             OnDeathEvent?.Invoke();
             
             // Disable player controls or switch to spectator
+            if (TryGetComponent<TacticalCombat.Player.FPSController>(out var fps))
+            {
+                fps.SetCanMove(false);
+            }
             if (TryGetComponent<TacticalCombat.Player.PlayerController>(out var player))
             {
                 player.enabled = false;
@@ -88,6 +92,10 @@ namespace TacticalCombat.Combat
         public int GetCurrentHealth() => currentHealth;
         public int GetMaxHealth() => maxHealth;
         public bool IsDead() => isDead;
+        
+        // Public properties for UI access
+        public int CurrentHealth => currentHealth;
+        public int MaxHealth => maxHealth;
 
         public void SetMaxHealth(int max)
         {

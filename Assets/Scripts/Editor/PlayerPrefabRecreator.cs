@@ -77,8 +77,15 @@ namespace TacticalCombat.Editor
             
             TacticalCombat.Building.SimpleBuildMode simpleBuildMode = player.AddComponent<TacticalCombat.Building.SimpleBuildMode>();
             
-            // Wall prefab'ı ata
+            // Try to find structure prefabs
             GameObject wallPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Structures/Wall.prefab");
+            GameObject floorPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Structures/Floor.prefab");
+            GameObject roofPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Structures/Roof.prefab");
+            GameObject doorPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Structures/Door.prefab");
+            GameObject windowPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Structures/Window.prefab");
+            GameObject stairsPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Structures/Stairs.prefab");
+            
+            // Fallback to old wall prefab
             if (wallPrefab == null)
             {
                 wallPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Wall.prefab");
@@ -87,7 +94,14 @@ namespace TacticalCombat.Editor
             if (wallPrefab != null)
             {
                 SerializedObject serializedBuildMode = new SerializedObject(simpleBuildMode);
+                
+                // Assign all structure prefabs
                 serializedBuildMode.FindProperty("wallPrefab").objectReferenceValue = wallPrefab;
+                serializedBuildMode.FindProperty("floorPrefab").objectReferenceValue = floorPrefab;
+                serializedBuildMode.FindProperty("roofPrefab").objectReferenceValue = roofPrefab;
+                serializedBuildMode.FindProperty("doorPrefab").objectReferenceValue = doorPrefab;
+                serializedBuildMode.FindProperty("windowPrefab").objectReferenceValue = windowPrefab;
+                serializedBuildMode.FindProperty("stairsPrefab").objectReferenceValue = stairsPrefab;
                 
                 // ⭐ ONLY GROUND LAYER (not everything!)
                 LayerMask groundMask = LayerMask.GetMask("Ground", "Terrain");
@@ -99,9 +113,10 @@ namespace TacticalCombat.Editor
                 serializedBuildMode.FindProperty("rotationSpeed").floatValue = 90f;
                 serializedBuildMode.FindProperty("buildModeKey").intValue = (int)KeyCode.B;
                 serializedBuildMode.FindProperty("rotateKey").intValue = (int)KeyCode.R;
+                serializedBuildMode.FindProperty("cycleStructureKey").intValue = (int)KeyCode.Tab;
                 
                 serializedBuildMode.ApplyModifiedProperties();
-                Debug.Log("✅ Wall prefab assigned to SimpleBuildMode (Valheim style)");
+                Debug.Log("✅ Structure prefabs assigned to SimpleBuildMode (Multi-structure support)");
             }
             else
             {

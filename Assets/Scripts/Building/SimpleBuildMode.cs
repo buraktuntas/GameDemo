@@ -10,8 +10,13 @@ namespace TacticalCombat.Building
     /// </summary>
     public class SimpleBuildMode : NetworkBehaviour
     {
-        [Header("Prefabs")]
-        public GameObject wallPrefab;
+    [Header("Prefabs")]
+    public GameObject wallPrefab;
+    public GameObject floorPrefab;
+    public GameObject roofPrefab;
+    public GameObject doorPrefab;
+    public GameObject windowPrefab;
+    public GameObject stairsPrefab;
         
         [Header("Materials")]
         public Material validPlacementMaterial;   // Green ghost
@@ -23,7 +28,12 @@ namespace TacticalCombat.Building
         public float rotationSpeed = 90f; // Degrees per second
         public KeyCode buildModeKey = KeyCode.B;
         public KeyCode rotateKey = KeyCode.R;
+        public KeyCode cycleStructureKey = KeyCode.Tab;
         public float gridSize = 1f; // Grid snapping size
+        
+        [Header("Structure Selection")]
+        public int currentStructureIndex = 0;
+        private GameObject[] availableStructures;
         
         
         [Header("Structural Integrity Preview")]
@@ -68,6 +78,53 @@ namespace TacticalCombat.Building
             }
             
             CreateDefaultMaterials();
+            InitializeAvailableStructures();
+        }
+        
+        private void InitializeAvailableStructures()
+        {
+            // Debug: Prefab durumlarını kontrol et
+            Debug.Log($"🏗️ Prefab durumları:");
+            Debug.Log($"  Wall: {(wallPrefab != null ? wallPrefab.name : "NULL")}");
+            Debug.Log($"  Floor: {(floorPrefab != null ? floorPrefab.name : "NULL")}");
+            Debug.Log($"  Roof: {(roofPrefab != null ? roofPrefab.name : "NULL")}");
+            Debug.Log($"  Door: {(doorPrefab != null ? doorPrefab.name : "NULL")}");
+            Debug.Log($"  Window: {(windowPrefab != null ? windowPrefab.name : "NULL")}");
+            Debug.Log($"  Stairs: {(stairsPrefab != null ? stairsPrefab.name : "NULL")}");
+            
+            // Mevcut yapıları listele
+            availableStructures = new GameObject[]
+            {
+                wallPrefab,
+                floorPrefab,
+                roofPrefab,
+                doorPrefab,
+                windowPrefab,
+                stairsPrefab
+            };
+            
+            // Null olanları filtrele
+            int validCount = 0;
+            for (int i = 0; i < availableStructures.Length; i++)
+            {
+                if (availableStructures[i] != null)
+                {
+                    availableStructures[validCount] = availableStructures[i];
+                    validCount++;
+                }
+            }
+            
+            // Array'i yeniden boyutlandır
+            System.Array.Resize(ref availableStructures, validCount);
+            
+            if (availableStructures.Length == 0)
+            {
+                Debug.LogWarning("⚠️ Hiç yapı prefab'ı atanmamış!");
+            }
+            else
+            {
+                Debug.Log($"✅ {availableStructures.Length} yapı türü yüklendi");
+            }
         }
         
         private void CreateDefaultMaterials()
@@ -87,15 +144,30 @@ namespace TacticalCombat.Building
 
         private void Update()
         {
-            if (!isLocalPlayer) return;
+            if (!isLocalPlayer) 
+            {
+                // Debug: isLocalPlayer false ise log at
+                if (Time.frameCount % 300 == 0) // Her 5 saniyede bir
+                {
+                    Debug.Log($"🏗️ SimpleBuildMode Update - isLocalPlayer: {isLocalPlayer}");
+                }
+                return;
+            }
             
             HandleBuildModeToggle();
             
             if (isBuildModeActive)
             {
+                HandleStructureSelection();
                 UpdateGhostPreview();
                 HandleRotation();
                 HandlePlacement();
+            }
+            
+            // Debug: Tab tuşu her zaman çalışsın
+            if (Input.GetKeyDown(KeyCode.Tab))
+            {
+                Debug.Log("🏗️ Tab tuşu algılandı - Build mode: " + isBuildModeActive);
             }
         }
         
@@ -103,12 +175,16 @@ namespace TacticalCombat.Building
         {
             if (Input.GetKeyDown(buildModeKey))
             {
+                Debug.Log($"🏗️ B tuşu basıldı - Mevcut durum: {isBuildModeActive}");
+                
                 if (isBuildModeActive)
                 {
+                    Debug.Log("🏗️ Build mode kapatılıyor...");
                     ExitBuildMode();
                 }
                 else
                 {
+                    Debug.Log("🏗️ Build mode açılıyor...");
                     EnterBuildMode();
                 }
             }
@@ -118,6 +194,40 @@ namespace TacticalCombat.Building
             {
                 ExitBuildMode();
             }
+        }
+        
+        private void HandleStructureSelection()
+        {
+            if (Input.GetKeyDown(cycleStructureKey))
+            {
+                Debug.Log("🏗️ Tab tuşu basıldı - Yapı değiştiriliyor...");
+                CycleStructure();
+            }
+        }
+        
+        private void CycleStructure()
+        {
+            if (availableStructures == null || availableStructures.Length == 0) 
+            {
+                Debug.LogWarning("⚠️ availableStructures is null or empty! Cannot cycle structures.");
+                return;
+            }
+            
+            Debug.Log($"🏗️ Önceki index: {currentStructureIndex}, Toplam yapı: {availableStructures.Length}");
+            
+            currentStructureIndex = (currentStructureIndex + 1) % availableStructures.Length;
+            
+            Debug.Log($"🏗️ Yeni index: {currentStructureIndex}");
+            
+            // Ghost preview'ı yeniden oluştur
+            if (ghostPreview != null)
+            {
+                DestroyGhostPreview();
+                CreateGhostPreview();
+            }
+            
+            string structureName = availableStructures[currentStructureIndex].name;
+            Debug.Log($"🏗️ Yapı seçildi: {structureName}");
         }
         
         private void HandleRotation()
@@ -139,9 +249,11 @@ namespace TacticalCombat.Building
 
         private void EnterBuildMode()
         {
+            Debug.Log($"🏗️ EnterBuildMode çağrıldı - wallPrefab: {(wallPrefab != null ? wallPrefab.name : "NULL")}");
+            
             if (wallPrefab == null)
             {
-                Debug.LogError("❌ Wall prefab not assigned!");
+                Debug.LogError("❌ Wall prefab not assigned! Build mode açılamıyor!");
                 return;
             }
             
@@ -174,13 +286,26 @@ namespace TacticalCombat.Building
 
         private void CreateGhostPreview()
         {
-            if (wallPrefab == null)
+            if (availableStructures == null || availableStructures.Length == 0)
             {
-                Debug.LogWarning("⚠️ Wall prefab not assigned!");
+                Debug.LogWarning("⚠️ Hiç yapı prefab'ı atanmamış!");
+                return;
+            }
+            
+            if (currentStructureIndex >= availableStructures.Length)
+            {
+                Debug.LogWarning("⚠️ Geçersiz yapı indeksi!");
+                return;
+            }
+            
+            GameObject selectedStructure = availableStructures[currentStructureIndex];
+            if (selectedStructure == null)
+            {
+                Debug.LogWarning("⚠️ Seçili yapı prefab'ı null!");
                 return;
             }
 
-            ghostPreview = Instantiate(wallPrefab);
+            ghostPreview = Instantiate(selectedStructure);
             
             // Disable colliders
             foreach (var collider in ghostPreview.GetComponentsInChildren<Collider>())
@@ -343,19 +468,27 @@ namespace TacticalCombat.Building
 
         private void PlaceStructure()
         {
-            Debug.Log($"🏗️ Placing wall at {placementPosition}");
-            CmdPlaceStructure(placementPosition, placementRotation);
+            if (availableStructures == null || currentStructureIndex >= availableStructures.Length) return;
+            
+            GameObject selectedStructure = availableStructures[currentStructureIndex];
+            string structureName = selectedStructure.name;
+            
+            Debug.Log($"🏗️ Placing {structureName} at {placementPosition}");
+            CmdPlaceStructure(placementPosition, placementRotation, currentStructureIndex);
         }
 
         [Command]
-        private void CmdPlaceStructure(Vector3 position, Quaternion rotation)
+        private void CmdPlaceStructure(Vector3 position, Quaternion rotation, int structureIndex)
         {
-            if (wallPrefab == null) return;
+            if (availableStructures == null || structureIndex >= availableStructures.Length) return;
+            
+            GameObject selectedStructure = availableStructures[structureIndex];
+            if (selectedStructure == null) return;
 
-            GameObject structure = Instantiate(wallPrefab, position, rotation);
+            GameObject structure = Instantiate(selectedStructure, position, rotation);
             NetworkServer.Spawn(structure);
             
-            Debug.Log($"✅ [SERVER] Wall placed at {position}");
+            Debug.Log($"✅ [SERVER] {selectedStructure.name} placed at {position}");
         }
 
         // ═══════════════════════════════════════════════════════════

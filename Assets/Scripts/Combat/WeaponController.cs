@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 using Mirror;
 using TacticalCombat.Core;
 
@@ -15,8 +14,6 @@ namespace TacticalCombat.Combat
         [SerializeField] private Transform weaponMount;
 
         private WeaponBase currentWeapon;
-        private InputAction fireAction;
-        private InputAction switchWeaponAction;
         private bool scoutArrowEnabled = false;
 
         private void Awake()
@@ -34,35 +31,31 @@ namespace TacticalCombat.Combat
         public override void OnStartLocalPlayer()
         {
             base.OnStartLocalPlayer();
-
-            var playerInput = GetComponent<PlayerInput>();
-            if (playerInput != null)
-            {
-                var playerMap = playerInput.actions.FindActionMap("Player");
-                fireAction = playerMap.FindAction("Fire");
-                switchWeaponAction = playerMap.FindAction("SwitchWeapon");
-
-                fireAction.performed += OnFire;
-                switchWeaponAction.performed += OnSwitchWeapon;
-            }
-
-            // Default to bow
             EquipWeapon(bow);
         }
 
-        private void OnFire(InputAction.CallbackContext context)
+        private void Update()
         {
+            if (!isLocalPlayer) return;
+            
             if (MatchManager.Instance.GetCurrentPhase() != Phase.Combat)
                 return;
-
-            if (currentWeapon != null && currentWeapon.CanFire())
+            
+            // LMB = Fire
+            if (Input.GetMouseButtonDown(0) && currentWeapon != null && currentWeapon.CanFire())
             {
                 currentWeapon.Fire(scoutArrowEnabled);
-                scoutArrowEnabled = false; // Reset after use
+                scoutArrowEnabled = false;
+            }
+            
+            // Q = Switch weapon
+            if (Input.GetKeyDown(KeyCode.Q))
+            {
+                SwitchWeapon();
             }
         }
 
-        private void OnSwitchWeapon(InputAction.CallbackContext context)
+        private void SwitchWeapon()
         {
             if (currentWeapon == bow)
             {
@@ -93,17 +86,6 @@ namespace TacticalCombat.Combat
             scoutArrowEnabled = true;
         }
 
-        private void OnDisable()
-        {
-            if (fireAction != null)
-            {
-                fireAction.performed -= OnFire;
-            }
-            if (switchWeaponAction != null)
-            {
-                switchWeaponAction.performed -= OnSwitchWeapon;
-            }
-        }
     }
 }
 

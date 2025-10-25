@@ -27,6 +27,13 @@ namespace TacticalCombat.Combat
             if (isLocalPlayer)
             {
                 playerCamera = Camera.main;
+                
+                // Hit layers'ı otomatik ayarla
+                if (hitLayers == 0)
+                {
+                    hitLayers = LayerMask.GetMask("Default", "Player", "Structure", "Trap");
+                    Debug.Log($"🎯 SimpleGun hit layers set to: {hitLayers}");
+                }
             }
         }
 
@@ -64,6 +71,8 @@ namespace TacticalCombat.Combat
             // Server'da client'ın gönderdiği ray ile raycast yap
             Ray ray = new Ray(origin, direction);
             
+            Debug.Log($"🎯 [SERVER] Raycast from {origin} direction {direction} with layers {hitLayers}");
+            
             if (Physics.Raycast(ray, out RaycastHit hit, range, hitLayers))
             {
                 Debug.Log($"🎯 [SERVER] Hit: {hit.collider.name} at {hit.point}");
@@ -72,8 +81,24 @@ namespace TacticalCombat.Combat
                 var health = hit.collider.GetComponent<Health>();
                 if (health != null)
                 {
-                    health.TakeDamage(damage);
-                    Debug.Log($"💥 [SERVER] Dealt {damage} damage to {hit.collider.name}. Remaining HP: {health.GetCurrentHealth()}");
+                    // Critical hit kontrolü
+                    bool isCritical = Random.Range(0f, 1f) < 0.1f; // %10 critical chance
+                    int finalDamage = isCritical ? Mathf.RoundToInt(damage * 2f) : Mathf.RoundToInt(damage);
+                    
+                    health.TakeDamage(finalDamage);
+                    
+                    // Hit effects
+                    RpcPlayHitEffects(hit.point, isCritical, HitType.Normal);
+                    
+                    // Damage numbers
+                    RpcShowDamageNumbers(hit.collider.transform, finalDamage, isCritical);
+                    
+                    Debug.Log($"💥 [SERVER] Dealt {finalDamage} damage to {hit.collider.name}. Remaining HP: {health.GetCurrentHealth()} {(isCritical ? "CRITICAL!" : "")}");
+                }
+                else
+                {
+                    // Metal hit effect
+                    RpcPlayHitEffects(hit.point, false, HitType.Metal);
                 }
 
                 // Tüm clientlara hit efekti göster
@@ -96,6 +121,36 @@ namespace TacticalCombat.Combat
             {
                 GameObject effect = Instantiate(hitEffectPrefab, position, Quaternion.LookRotation(normal));
                 Destroy(effect, 2f);
+            }
+        }
+        
+        [ClientRpc]
+        private void RpcPlayHitEffects(Vector3 hitPosition, bool isCritical, HitType hitType)
+        {
+            Debug.Log($"🎯 [CLIENT] RpcPlayHitEffects called at {hitPosition}");
+            if (HitEffects.Instance != null)
+            {
+                HitEffects.Instance.PlayHitEffect(hitPosition, isCritical ? HitType.Critical : hitType);
+                Debug.Log($"🎯 [CLIENT] HitEffects played");
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [CLIENT] HitEffects.Instance is null!");
+            }
+        }
+        
+        [ClientRpc]
+        private void RpcShowDamageNumbers(Transform target, float damage, bool isCritical)
+        {
+            Debug.Log($"🎯 [CLIENT] RpcShowDamageNumbers called for {target?.name} damage {damage}");
+            if (DamageNumbers.Instance != null && target != null)
+            {
+                DamageNumbers.Instance.ShowDamageAtTransform(target, damage, isCritical);
+                Debug.Log($"🎯 [CLIENT] DamageNumbers shown");
+            }
+            else
+            {
+                Debug.LogWarning($"⚠️ [CLIENT] DamageNumbers.Instance: {DamageNumbers.Instance != null}, Target: {target != null}");
             }
         }
 

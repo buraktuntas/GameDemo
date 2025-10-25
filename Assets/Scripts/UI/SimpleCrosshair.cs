@@ -14,37 +14,46 @@ namespace TacticalCombat.UI
         [SerializeField] private float thickness = 2f;
         
         [Header("Debug")]
-        [SerializeField] private bool showDebugInfo = true;
+        [SerializeField] private bool showDebugInfo = false;
+        
+        // Debug state tracking
+        private bool lastBuildModeState = false;
+        private InputManager.CursorMode lastCursorMode = InputManager.CursorMode.Locked;
 
         private void OnGUI()
         {
             // ⭐ Sadece FPS mode'da crosshair göster
             if (InputManager.Instance != null)
             {
-                // Build mode'da veya menu'de crosshair gizle
-                if (InputManager.Instance.IsInBuildMode || 
-                    InputManager.Instance.IsInMenu)
+                bool currentBuildMode = InputManager.Instance.IsInBuildMode || InputManager.Instance.IsInMenu;
+                InputManager.CursorMode currentCursorMode = InputManager.Instance.GetCurrentMode();
+                
+                // Debug logları sadece state değiştiğinde göster
+                if (showDebugInfo)
                 {
-                    if (showDebugInfo)
+                    if (currentBuildMode != lastBuildModeState)
                     {
-                        Debug.Log("🎯 Crosshair hidden - Build mode or Menu active");
+                        Debug.Log($"🎯 Crosshair state changed - Build mode: {currentBuildMode}");
+                        lastBuildModeState = currentBuildMode;
                     }
+                    
+                    if (currentCursorMode != lastCursorMode)
+                    {
+                        Debug.Log($"🎯 Crosshair state changed - Cursor mode: {currentCursorMode}");
+                        lastCursorMode = currentCursorMode;
+                    }
+                }
+                
+                // Build mode'da veya menu'de crosshair gizle
+                if (currentBuildMode)
+                {
                     return; // Crosshair gizle
                 }
                 
                 // Cursor locked değilse crosshair gizle
-                if (InputManager.Instance.GetCurrentMode() != InputManager.CursorMode.Locked)
+                if (currentCursorMode != InputManager.CursorMode.Locked)
                 {
-                    if (showDebugInfo)
-                    {
-                        Debug.Log($"🎯 Crosshair hidden - Cursor mode: {InputManager.Instance.GetCurrentMode()}");
-                    }
                     return; // Crosshair gizle
-                }
-                
-                if (showDebugInfo)
-                {
-                    Debug.Log("🎯 Crosshair visible - FPS mode active");
                 }
             }
             
