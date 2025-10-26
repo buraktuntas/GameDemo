@@ -38,7 +38,7 @@ namespace TacticalCombat.Combat
         {
             if (!isLocalPlayer) return;
             
-            if (MatchManager.Instance.GetCurrentPhase() != Phase.Combat)
+            if (MatchManager.Instance == null || MatchManager.Instance.GetCurrentPhase() != Phase.Combat)
                 return;
             
             // LMB = Fire
@@ -77,6 +77,12 @@ namespace TacticalCombat.Combat
             currentWeapon = weapon;
             if (currentWeapon != null)
             {
+                // Initialize ownership for local/client-side systems (server re-validates in Commands)
+                var pc = GetComponent<TacticalCombat.Player.PlayerController>();
+                if (pc != null)
+                {
+                    currentWeapon.Initialize(pc.team, pc.playerId);
+                }
                 currentWeapon.Equip();
             }
         }

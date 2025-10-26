@@ -14,6 +14,9 @@ namespace TacticalCombat.Traps
         [SerializeField] private Transform firePoint;
 
         private float lastFireTime;
+        private float lastScanTime;
+        private const float SCAN_INTERVAL = 0.2f;  // Scan every 200ms instead of every frame
+        private static readonly Collider[] scanBuffer = new Collider[16];  // NonAlloc buffer
 
         private void Awake()
         {
@@ -26,8 +29,12 @@ namespace TacticalCombat.Traps
 
             if (!isServer || !isArmed) return;
 
-            // Scan for enemies
-            ScanForTargets();
+            // ✅ PERFORMANCE FIX: Throttled scanning instead of every frame
+            if (Time.time - lastScanTime >= SCAN_INTERVAL)
+            {
+                lastScanTime = Time.time;
+                ScanForTargets();
+            }
         }
 
         [Server]
@@ -35,17 +42,31 @@ namespace TacticalCombat.Traps
         {
             if (Time.time < lastFireTime + fireRate) return;
 
-            Collider[] hits = Physics.OverlapSphere(transform.position, detectionRange);
-            foreach (var hit in hits)
+            // ✅ PERFORMANCE FIX: Use NonAlloc to avoid GC allocations
+            int hitCount = Physics.OverlapSphereNonAlloc(
+                transform.position,
+                detectionRange,
+                scanBuffer,
+                LayerMask.GetMask("Player")  // Only check player layer
+            );
+
+            for (int i = 0; i < hitCount; i++)
             {
-                var player = hit.GetComponent<Player.PlayerController>();
-                if (player != null && player.team != ownerTeam)
+                Collider hit = scanBuffer[i];
+
+                // ✅ PERFORMANCE FIX: Use TryGetComponent (faster than GetComponent)
+                if (hit.TryGetComponent<Player.PlayerController>(out var player))
                 {
-                    var health = player.GetComponent<Combat.Health>();
-                    if (health != null && !health.IsDead())
+                    if (player.team != ownerTeam)
                     {
-                        FireDart(player.gameObject);
-                        break;
+                        if (hit.TryGetComponent<Combat.Health>(out var health))
+                        {
+                            if (!health.IsDead())
+                            {
+                                FireDart(player.gameObject);
+                                break;
+                            }
+                        }
                     }
                 }
             }

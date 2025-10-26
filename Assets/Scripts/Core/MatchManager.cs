@@ -7,6 +7,7 @@ namespace TacticalCombat.Core
 {
     public class MatchManager : NetworkBehaviour
     {
+        private static readonly HashSet<GameObject> s_registeredPrefabs = new HashSet<GameObject>();
         public static MatchManager Instance { get; private set; }
 
         [Header("Match State")]
@@ -56,7 +57,78 @@ namespace TacticalCombat.Core
         public override void OnStartServer()
         {
             base.OnStartServer();
+            // Prewarm networked pools from catalog if available
+            try
+            {
+                var pool = TacticalCombat.Core.NetworkObjectPool.Instance;
+                if (pool == null)
+                {
+                    var go = new GameObject("[NetworkObjectPool]");
+                    pool = go.AddComponent<TacticalCombat.Core.NetworkObjectPool>();
+                }
+
+                var catalog = Resources.Load<TacticalCombat.Core.PoolCatalog>("PoolCatalog");
+                if (catalog != null)
+                {
+                    foreach (var e in catalog.entries)
+                    {
+                        if (e.prefab != null && e.serverPrewarmCount > 0)
+                        {
+                            pool.Prewarm(e.prefab, e.serverPrewarmCount);
+                        }
+                    }
+                }
+            }
+            catch { }
             InitializeMatch();
+        }
+
+        public override void OnStartClient()
+        {
+            base.OnStartClient();
+            try
+            {
+                var pool = TacticalCombat.Core.NetworkObjectPool.Instance;
+                if (pool == null)
+                {
+                    var go = new GameObject("[NetworkObjectPool]");
+                    pool = go.AddComponent<TacticalCombat.Core.NetworkObjectPool>();
+                }
+
+                var catalog = Resources.Load<TacticalCombat.Core.PoolCatalog>("PoolCatalog");
+                if (catalog != null)
+                {
+                    foreach (var e in catalog.entries)
+                    {
+                        if (e.prefab == null) continue;
+
+                        // Client prewarm
+                        if (e.clientPrewarmCount > 0)
+                        {
+                            pool.Prewarm(e.prefab, e.clientPrewarmCount);
+                        }
+
+                        // Register client spawn/unspawn to use pool
+                        var p = e.prefab; // capture local
+                        if (!s_registeredPrefabs.Contains(p))
+                        {
+                            NetworkClient.RegisterPrefab(
+                                p,
+                                (Mirror.SpawnMessage msg) =>
+                                {
+                                    return pool.Get(p, msg.position, msg.rotation);
+                                },
+                                (GameObject spawned) =>
+                                {
+                                    pool.Release(spawned);
+                                }
+                            );
+                            s_registeredPrefabs.Add(p);
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
         [Server]

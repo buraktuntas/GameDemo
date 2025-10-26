@@ -15,6 +15,7 @@ namespace TacticalCombat.Combat
         [SerializeField] private float range = 100f;
         [SerializeField] private float fireRate = 0.5f; // Saniyede 2 atış
         [SerializeField] private LayerMask hitLayers;
+        [SerializeField] [Range(15f, 179f)] private float maxClientAimAngle = 85f; // anti-spoof guard
 
         [Header("Effects")]
         [SerializeField] private GameObject hitEffectPrefab;
@@ -36,7 +37,11 @@ namespace TacticalCombat.Combat
                 // Hit layers'ı otomatik ayarla
                 if (hitLayers == 0)
                 {
-                    hitLayers = LayerMask.GetMask("Default", "Player", "Structure", "Trap");
+                    var cfg = TacticalCombat.Core.LayerConfigProvider.Instance;
+                    if (cfg != null && cfg.projectileHitMask != 0)
+                        hitLayers = cfg.projectileHitMask;
+                    else
+                        hitLayers = LayerMask.GetMask("Default", "Player", "Structure", "Trap");
                     Debug.Log($"🎯 SimpleGun hit layers set to: {hitLayers}");
                 }
             }
@@ -99,21 +104,28 @@ namespace TacticalCombat.Combat
             // 3️⃣ Direction validation - FPS oyunlarda client kamera direction serbest
             // Client'ın kamera direction'ı tamamen güvenilir (FPS standard)
             Vector3 serverForward = transform.forward;
-            float angle = Vector3.Angle(serverForward, clientDirection);
+            float angleDbg = Vector3.Angle(serverForward, clientDirection);
             
             // Debug: Direction angle'i logla (sadece bilgi için)
-            if (angle > 90f)
+            if (angleDbg > 90f)
             {
-                Debug.Log($"🎯 Shot direction angle: {angle:F1}° (server: {serverForward}, client: {clientDirection})");
+                Debug.Log($"🎯 Shot direction angle: {angleDbg:F1}° (server: {serverForward}, client: {clientDirection})");
             }
             
             // 4️⃣ Server raycast (use server player head position for security)
             Vector3 validatedOrigin = serverPlayerHead;
-            Vector3 validatedDirection = clientDirection.normalized;
+            Vector3 clampedDirection = clientDirection.sqrMagnitude > 0.0001f ? clientDirection.normalized : transform.forward;
+            float angle = Vector3.Angle(transform.forward, clampedDirection);
+            if (angle > maxClientAimAngle && angle > 0.001f)
+            {
+                float t = maxClientAimAngle / angle;
+                clampedDirection = Vector3.Slerp(transform.forward, clampedDirection, Mathf.Clamp01(t)).normalized;
+            }
+            Vector3 validatedDirection = clampedDirection;
             
             Debug.Log($"🎯 [SERVER] Raycast from {validatedOrigin} direction {validatedDirection}");
             
-            if (Physics.Raycast(validatedOrigin, validatedDirection, out RaycastHit hit, range, hitLayers))
+            if (Physics.Raycast(validatedOrigin, validatedDirection, out RaycastHit hit, range, hitLayers, QueryTriggerInteraction.Ignore))
             {
                 Debug.Log($"🎯 [SERVER] Hit: {hit.collider.name} at {hit.point}");
                 
@@ -249,4 +261,7 @@ namespace TacticalCombat.Combat
         }
     }
 }
+
+
+
 

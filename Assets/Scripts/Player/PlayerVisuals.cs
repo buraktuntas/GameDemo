@@ -34,6 +34,9 @@ namespace TacticalCombat.Player
         // State
         private Team currentTeam = Team.None;
         private bool isInitialized = false;
+
+        // ✅ PERFORMANCE FIX: Cache material instances to prevent memory leaks
+        private Material materialInstance;
         
         private void Awake()
         {
@@ -152,13 +155,14 @@ namespace TacticalCombat.Player
                     break;
             }
             
+            // ✅ PERFORMANCE FIX: Use sharedMaterial if material is not instance-specific
             if (targetMaterial != null)
             {
-                visualRenderer.material = targetMaterial;
+                visualRenderer.sharedMaterial = targetMaterial;
             }
             else
             {
-                // Fallback: change color directly
+                // Fallback: create/reuse material instance for color change
                 Color targetColor = neutralColor;
                 switch (team)
                 {
@@ -169,8 +173,14 @@ namespace TacticalCombat.Player
                         targetColor = teamBColor;
                         break;
                 }
-                
-                visualRenderer.material.color = targetColor;
+
+                // ✅ PERFORMANCE FIX: Reuse material instance instead of creating new one
+                if (materialInstance == null)
+                {
+                    materialInstance = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                    visualRenderer.material = materialInstance;  // Assigns our tracked instance
+                }
+                materialInstance.color = targetColor;
             }
             
             Debug.Log($"🎨 Player team color updated: {team}");
@@ -285,6 +295,33 @@ namespace TacticalCombat.Player
         public bool IsInitialized()
         {
             return isInitialized;
+        }
+
+        /// <summary>
+        /// ✅ PERFORMANCE FIX: Clean up material instances to prevent memory leaks
+        /// </summary>
+        private void OnDestroy()
+        {
+            // Destroy cached material instance
+            if (materialInstance != null)
+            {
+                Destroy(materialInstance);
+                materialInstance = null;
+            }
+
+            // Destroy dynamically created materials
+            if (teamAMaterial != null && teamAMaterial.name.Contains("(Instance)"))
+            {
+                Destroy(teamAMaterial);
+            }
+            if (teamBMaterial != null && teamBMaterial.name.Contains("(Instance)"))
+            {
+                Destroy(teamBMaterial);
+            }
+            if (neutralMaterial != null && neutralMaterial.name.Contains("(Instance)"))
+            {
+                Destroy(neutralMaterial);
+            }
         }
     }
 }

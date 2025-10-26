@@ -279,18 +279,36 @@ namespace TacticalCombat.Player
         private float duration;
         private float elapsed;
 
+        // ✅ PERFORMANCE FIX: Cache renderers and material instances
+        private Renderer[] cachedRenderers;
+        private Material[] originalMaterials;
+        private Material[] stealthMaterials;
+
         public void Initialize(float dur)
         {
             duration = dur;
             elapsed = 0f;
-            
+
+            // ✅ PERFORMANCE FIX: Cache renderers once (not every frame)
+            cachedRenderers = GetComponentsInChildren<Renderer>();
+            originalMaterials = new Material[cachedRenderers.Length];
+            stealthMaterials = new Material[cachedRenderers.Length];
+
             // Reduce visibility
-            var renderers = GetComponentsInChildren<Renderer>();
-            foreach (var rend in renderers)
+            for (int i = 0; i < cachedRenderers.Length; i++)
             {
-                Color c = rend.material.color;
+                Renderer rend = cachedRenderers[i];
+
+                // ✅ PERFORMANCE FIX: Store original material reference
+                originalMaterials[i] = rend.sharedMaterial;
+
+                // ✅ PERFORMANCE FIX: Create single material instance per renderer
+                stealthMaterials[i] = new Material(originalMaterials[i]);
+                Color c = stealthMaterials[i].color;
                 c.a = 0.3f;
-                rend.material.color = c;
+                stealthMaterials[i].color = c;
+
+                rend.material = stealthMaterials[i];
             }
         }
 
@@ -299,15 +317,48 @@ namespace TacticalCombat.Player
             elapsed += Time.deltaTime;
             if (elapsed >= duration)
             {
-                // Restore visibility
-                var renderers = GetComponentsInChildren<Renderer>();
-                foreach (var rend in renderers)
-                {
-                    Color c = rend.material.color;
-                    c.a = 1f;
-                    rend.material.color = c;
-                }
+                RestoreVisibility();
                 Destroy(this);
+            }
+        }
+
+        /// <summary>
+        /// ✅ PERFORMANCE FIX: Restore visibility using cached materials
+        /// </summary>
+        private void RestoreVisibility()
+        {
+            if (cachedRenderers == null) return;
+
+            for (int i = 0; i < cachedRenderers.Length; i++)
+            {
+                if (cachedRenderers[i] != null)
+                {
+                    // Restore original material
+                    cachedRenderers[i].sharedMaterial = originalMaterials[i];
+                }
+
+                // Clean up stealth material instance
+                if (stealthMaterials[i] != null)
+                {
+                    Destroy(stealthMaterials[i]);
+                }
+            }
+        }
+
+        /// <summary>
+        /// ✅ PERFORMANCE FIX: Clean up material instances on destroy
+        /// </summary>
+        private void OnDestroy()
+        {
+            if (stealthMaterials != null)
+            {
+                foreach (var mat in stealthMaterials)
+                {
+                    if (mat != null)
+                    {
+                        Destroy(mat);
+                    }
+                }
             }
         }
 

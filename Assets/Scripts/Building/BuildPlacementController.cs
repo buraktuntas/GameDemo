@@ -1,8 +1,10 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using Unity.Profiling;
 using Mirror;
 using TacticalCombat.Core;
 using TacticalCombat.Player;
+using System.Collections.Generic;
 
 namespace TacticalCombat.Building
 {
@@ -12,6 +14,7 @@ namespace TacticalCombat.Building
         [SerializeField] private float placementRange = GameConstants.BUILD_PLACEMENT_RANGE;
         [SerializeField] private LayerMask placementSurface;
         [SerializeField] private LayerMask obstacleMask;
+        [SerializeField] private bool verboseLogging = false;
 
         [Header("Ghost Prefabs")]
         [SerializeField] private GameObject wallGhostPrefab;
@@ -23,6 +26,9 @@ namespace TacticalCombat.Building
         [SerializeField] private GameObject platformPrefab;
         [SerializeField] private GameObject rampPrefab;
 
+        [Header("Dependencies (Server)")]
+        [SerializeField] private BuildValidator buildValidator;
+
         private PlayerController playerController;
         private SimpleBuildMode buildMode;
         private Camera mainCamera;
@@ -31,12 +37,23 @@ namespace TacticalCombat.Building
         private bool isPlacementValid = false;
         private Vector3 ghostPosition;
         private Quaternion ghostRotation;
+        private readonly Dictionary<StructureType, BuildGhost> ghostCache = new Dictionary<StructureType, BuildGhost>();
 
         private InputAction placeAction;
         private InputAction rotateAction;
         private InputAction selectWallAction;
         private InputAction selectPlatformAction;
         private InputAction selectRampAction;
+        private System.Action<InputAction.CallbackContext> selectWallHandler;
+        private System.Action<InputAction.CallbackContext> selectPlatformHandler;
+        private System.Action<InputAction.CallbackContext> selectRampHandler;
+
+        // NonAlloc buffers
+        private static readonly Collider[] overlapBuffer = new Collider[64];
+
+        // Profiling
+        private static readonly ProfilerMarker marker_UpdateGhost = new ProfilerMarker("BuildPlacement.UpdateGhost");
+        private static readonly ProfilerMarker marker_Validate = new ProfilerMarker("BuildPlacement.ValidatePlacement");
 
         private void Awake()
         {
@@ -51,6 +68,24 @@ namespace TacticalCombat.Building
             // Unity 6: Cache Camera.main for performance
             mainCamera = Camera.main;
 
+            var layerCfg = TacticalCombat.Core.LayerConfigProvider.Instance;
+            if (layerCfg != null)
+            {
+                if (placementSurface == 0) placementSurface = layerCfg.placementSurface;
+                if (obstacleMask == 0) obstacleMask = layerCfg.obstacleMask;
+            }
+            else
+            {
+                if (placementSurface == 0)
+                {
+                    placementSurface = LayerMask.GetMask("Default", "Structure");
+                }
+                if (obstacleMask == 0)
+                {
+                    obstacleMask = LayerMask.GetMask("Structure", "Player", "BuildObstruction");
+                }
+            }
+
             // Setup input
             var playerInput = GetComponent<PlayerInput>();
             if (playerInput != null)
@@ -64,13 +99,30 @@ namespace TacticalCombat.Building
 
                 placeAction.performed += OnPlace;
                 rotateAction.performed += OnRotate;
-                selectWallAction.performed += ctx => SelectStructure(StructureType.Wall);
-                selectPlatformAction.performed += ctx => SelectStructure(StructureType.Platform);
-                selectRampAction.performed += ctx => SelectStructure(StructureType.Ramp);
+                selectWallHandler = ctx => SelectStructure(StructureType.Wall);
+                selectPlatformHandler = ctx => SelectStructure(StructureType.Platform);
+                selectRampHandler = ctx => SelectStructure(StructureType.Ramp);
+
+                selectWallAction.performed += selectWallHandler;
+                selectPlatformAction.performed += selectPlatformHandler;
+                selectRampAction.performed += selectRampHandler;
             }
 
             // Create initial ghost
             CreateGhost(currentStructureType);
+        }
+
+        private void OnDisable()
+        {
+            // Unsubscribe input actions to prevent duplicate handlers on re-enable
+            if (placeAction != null) placeAction.performed -= OnPlace;
+            if (rotateAction != null) rotateAction.performed -= OnRotate;
+            if (selectWallAction != null && selectWallHandler != null) selectWallAction.performed -= selectWallHandler;
+            if (selectPlatformAction != null && selectPlatformHandler != null) selectPlatformAction.performed -= selectPlatformHandler;
+            if (selectRampAction != null && selectRampHandler != null) selectRampAction.performed -= selectRampHandler;
+            selectWallHandler = null;
+            selectPlatformHandler = null;
+            selectRampHandler = null;
         }
 
         private void Update()
@@ -79,7 +131,9 @@ namespace TacticalCombat.Building
 
             if (buildMode != null && buildMode.IsBuildModeActive() && currentGhost != null)
             {
+                marker_UpdateGhost.Begin();
                 UpdateGhostPosition();
+                marker_UpdateGhost.End();
                 currentGhost.Show(true);
             }
             else if (currentGhost != null)
@@ -92,13 +146,15 @@ namespace TacticalCombat.Building
         {
             Ray ray = mainCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2, 0));
             
-            if (Physics.Raycast(ray, out RaycastHit hit, placementRange, placementSurface))
+            if (Physics.Raycast(ray, out RaycastHit hit, placementRange, placementSurface, QueryTriggerInteraction.Ignore))
             {
                 ghostPosition = hit.point;
                 ghostRotation = Quaternion.FromToRotation(Vector3.up, hit.normal);
                 
                 // Validate placement
+                marker_Validate.Begin();
                 isPlacementValid = ValidatePlacement(ghostPosition, ghostRotation);
+                marker_Validate.End();
                 
                 currentGhost.transform.position = ghostPosition;
                 currentGhost.transform.rotation = ghostRotation;
@@ -114,8 +170,8 @@ namespace TacticalCombat.Building
         private bool ValidatePlacement(Vector3 position, Quaternion rotation)
         {
             // Check if too close to other structures
-            Collider[] overlaps = Physics.OverlapSphere(position, 0.5f, obstacleMask);
-            if (overlaps.Length > 0)
+            int count = Physics.OverlapSphereNonAlloc(position, 0.5f, overlapBuffer, obstacleMask, QueryTriggerInteraction.Ignore);
+            if (count > 0)
             {
                 return false;
             }
@@ -157,22 +213,28 @@ namespace TacticalCombat.Building
 
         private void CreateGhost(StructureType type)
         {
-            // Destroy old ghost
-            if (currentGhost != null)
+            // hide current
+            if (currentGhost != null) currentGhost.Show(false);
+
+            // reuse cached ghost if available
+            if (!ghostCache.TryGetValue(type, out var ghost) || ghost == null)
             {
-                Destroy(currentGhost.gameObject);
+                var ghostPrefab = GetGhostPrefab(type);
+                if (ghostPrefab != null)
+                {
+                    var ghostObj = Instantiate(ghostPrefab);
+                    ghost = ghostObj.GetComponent<BuildGhost>();
+                    if (ghost == null)
+                    {
+                        ghost = ghostObj.AddComponent<BuildGhost>();
+                    }
+                    ghostCache[type] = ghost;
+                }
             }
 
-            // Create new ghost
-            GameObject ghostPrefab = GetGhostPrefab(type);
-            if (ghostPrefab != null)
+            currentGhost = ghost;
+            if (currentGhost != null)
             {
-                GameObject ghostObj = Instantiate(ghostPrefab);
-                currentGhost = ghostObj.GetComponent<BuildGhost>();
-                if (currentGhost == null)
-                {
-                    currentGhost = ghostObj.AddComponent<BuildGhost>();
-                }
                 currentGhost.Show(false);
             }
         }
@@ -202,35 +264,30 @@ namespace TacticalCombat.Building
         [Command]
         private void CmdRequestPlace(BuildRequest request)
         {
-            // Unity 6: Use FindFirstObjectByType
-            BuildValidator validator = FindFirstObjectByType<BuildValidator>();
+            // Prefer injected dependency (server)
+            var validator = buildValidator;
             if (validator == null)
             {
-                Debug.LogWarning("No BuildValidator found!");
-                return;
+                // Fallback: attempt to find once on server
+                validator = FindFirstObjectByType<BuildValidator>();
+                buildValidator = validator;
+                if (validator == null)
+                {
+                    Debug.LogWarning("No BuildValidator found on server!");
+                    return;
+                }
             }
 
             if (validator.ValidateAndPlace(request, playerController.team))
             {
-                Debug.Log($"Structure {request.type} placed successfully");
+                if (verboseLogging) Debug.Log($"Structure {request.type} placed successfully");
             }
             else
             {
-                Debug.Log($"Structure {request.type} placement failed validation");
+                if (verboseLogging) Debug.Log($"Structure {request.type} placement failed validation");
             }
         }
 
-        private void OnDisable()
-        {
-            if (placeAction != null)
-            {
-                placeAction.performed -= OnPlace;
-            }
-            if (rotateAction != null)
-            {
-                rotateAction.performed -= OnRotate;
-            }
-        }
+        
     }
 }
-

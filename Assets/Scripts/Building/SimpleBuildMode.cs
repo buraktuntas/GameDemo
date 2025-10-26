@@ -1,8 +1,10 @@
 using UnityEngine;
+using Unity.Profiling;
 using Mirror;
 using TacticalCombat.Core;
 using TacticalCombat.Player;
 using TacticalCombat.Combat;
+using System.Collections.Generic;
 
 namespace TacticalCombat.Building
 {
@@ -27,6 +29,7 @@ namespace TacticalCombat.Building
         [Header("Settings")]
         public LayerMask groundLayer;
         public LayerMask obstacleLayer;
+        [SerializeField] private LayerMask structureLayer; // for stability/support checks
         public float placementDistance = 5f;
         public float rotationSpeed = 90f;
         public KeyCode buildModeKey = KeyCode.B;
@@ -84,6 +87,14 @@ namespace TacticalCombat.Building
         private float lastToggleTime = 0f;
         private const float TOGGLE_COOLDOWN = 0.3f;
         
+        // NonAlloc buffers
+        private static readonly Collider[] stabilityBuffer = new Collider[256];
+        private static readonly Collider[] overlapBoxBuffer = new Collider[64];
+
+        // Profiling
+        private static readonly ProfilerMarker marker_UpdateGhostPreview = new ProfilerMarker("Build.Simple.UpdateGhostPreview");
+        private static readonly ProfilerMarker marker_FindSupport = new ProfilerMarker("Build.Simple.FindNearestSupport");
+        
         private void Start()
         {
             if (!isLocalPlayer) return;
@@ -121,6 +132,17 @@ namespace TacticalCombat.Building
                 Debug.LogError("❌ [SimpleBuildMode] Player camera not found!");
             }
             
+            if (structureLayer == 0)
+            {
+                structureLayer = LayerMask.GetMask("Structure");
+            }
+
+            var layerCfg = TacticalCombat.Core.LayerConfigProvider.Instance;
+            if (structureLayer == 0 && layerCfg != null)
+            {
+                structureLayer = layerCfg.structureLayer;
+            }
+
             CreateDefaultMaterials();
             InitializeAvailableStructures();
         }
@@ -238,7 +260,9 @@ namespace TacticalCombat.Building
                 // Throttled update
                 if (Time.time - lastUpdateTime >= UPDATE_INTERVAL)
                 {
+                    marker_UpdateGhostPreview.Begin();
                     UpdateGhostPreview();
+                    marker_UpdateGhostPreview.End();
                     lastUpdateTime = Time.time;
                 }
             }
@@ -307,14 +331,27 @@ namespace TacticalCombat.Building
             }
         }
         
+        private float lastPlacementTime = 0f;
+        private const float PLACEMENT_COOLDOWN = 0.15f;  // 150ms minimum between placements
+
         private void HandlePlacement()
         {
             // ✅ FIX: Sadece build modunda placement'e izin ver
             if (!isBuildModeActive) return;
-            
+
+            // ✅ PERFORMANCE FIX: Prevent rapid placement spam (freeze fix)
             if (Input.GetMouseButtonDown(0) && canPlace)
             {
-                PlaceStructure();
+                float timeSinceLastPlacement = Time.time - lastPlacementTime;
+                if (timeSinceLastPlacement >= PLACEMENT_COOLDOWN)
+                {
+                    PlaceStructure();
+                    lastPlacementTime = Time.time;
+                }
+                else
+                {
+                    Debug.Log($"⏱️ [SimpleBuildMode] Placement on cooldown ({PLACEMENT_COOLDOWN - timeSinceLastPlacement:F2}s remaining)");
+                }
             }
         }
         
@@ -463,27 +500,39 @@ namespace TacticalCombat.Building
             }
         }
         
+        private Vector3 lastGhostPosition = Vector3.zero;
+        private float lastGhostRotation = 0f;
+
         private void UpdateGhostPreview()
         {
             if (ghostPreview == null || playerCamera == null) return;
-            
+
             Ray ray = playerCamera.ScreenPointToRay(Input.mousePosition);
-            
+
             if (Physics.Raycast(ray, out RaycastHit hit, placementDistance, groundLayer))
             {
                 Vector3 snappedPosition = SnapToGrid(hit.point);
                 snappedPosition.y = 0.5f;
-                
+
                 placementPosition = snappedPosition;
                 placementRotation = Quaternion.Euler(0, currentRotationY, 0);
-                
+
                 ghostPreview.transform.position = placementPosition;
                 ghostPreview.transform.rotation = placementRotation;
-                
-                canPlace = IsValidPlacement(placementPosition, placementRotation);
-                
+
+                // ✅ PERFORMANCE FIX: Only validate if position or rotation changed
+                bool positionChanged = Vector3.Distance(lastGhostPosition, placementPosition) > 0.01f;
+                bool rotationChanged = Mathf.Abs(lastGhostRotation - currentRotationY) > 1f;
+
+                if (positionChanged || rotationChanged)
+                {
+                    canPlace = IsValidPlacement(placementPosition, placementRotation);
+                    lastGhostPosition = placementPosition;
+                    lastGhostRotation = currentRotationY;
+                }
+
                 UpdateGhostMaterials();
-                
+
                 if (!ghostPreview.activeSelf)
                 {
                     ghostPreview.SetActive(true);
@@ -560,10 +609,12 @@ namespace TacticalCombat.Building
                 return false;
             
             Vector3 boxSize = new Vector3(1.8f, 0.9f, 0.18f);
-            Collider[] overlaps = Physics.OverlapBox(position, boxSize / 2f, rotation);
+            int overlapCountLocal = Physics.OverlapBoxNonAlloc(position, boxSize / 2f, overlapBoxBuffer, rotation, obstacleLayer, QueryTriggerInteraction.Ignore);
             
-            foreach (var overlap in overlaps)
+            for (int k = 0; k < overlapCountLocal; k++)
             {
+                var overlap = overlapBoxBuffer[k];
+                if (overlap == null) continue;
                 if (overlap.transform == transform) continue;
                 if (overlap.gameObject.layer == LayerMask.NameToLayer("Default")) continue;
                 
@@ -597,68 +648,80 @@ namespace TacticalCombat.Building
             CmdPlaceStructure(placementPosition, placementRotation, currentStructureIndex);
         }
         
+        private float lastServerPlacementTime = 0f;
+        private const float SERVER_PLACEMENT_COOLDOWN = 0.1f;  // Server-side cooldown
+
         [Command]
         private void CmdPlaceStructure(Vector3 position, Quaternion rotation, int structureIndex)
         {
+            // ✅ ANTI-CHEAT: Server-side cooldown to prevent spam
+            if (Time.time - lastServerPlacementTime < SERVER_PLACEMENT_COOLDOWN)
+            {
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Rate limit exceeded from player {netId}");
+                return;
+            }
+            lastServerPlacementTime = Time.time;
+
             // Distance check
             float distance = Vector3.Distance(transform.position, position);
             if (distance > placementDistance + 0.5f)
             {
-                Debug.LogWarning($"🚨 [SimpleBuildMode] Invalid placement distance: {distance}m");
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Invalid placement distance: {distance}m");
                 return;
             }
-            
-            // Line of sight check
-            Vector3 playerEye = transform.position + Vector3.up * 1.6f;
-            if (Physics.Linecast(playerEye, position, out RaycastHit hit, obstacleLayer))
-            {
-                if (Vector3.Distance(hit.point, position) > 0.5f)
-                {
-                    Debug.LogWarning($"🚨 [SimpleBuildMode] No line of sight");
-                    return;
-                }
-            }
-            
-            // Ground check
-            if (!Physics.Raycast(position, Vector3.down, 2f, groundLayer))
-            {
-                Debug.LogWarning($"🚨 [SimpleBuildMode] Not on ground");
-                return;
-            }
-            
-            // Structure index validation
+
+            // Structure index validation (cheap check first)
             if (availableStructures == null || structureIndex >= availableStructures.Length)
             {
-                Debug.LogWarning($"🚨 [SimpleBuildMode] Invalid structure index: {structureIndex}");
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Invalid structure index: {structureIndex}");
                 return;
             }
-            
+
             GameObject selectedStructure = availableStructures[structureIndex];
             if (selectedStructure == null)
             {
-                Debug.LogWarning($"🚨 [SimpleBuildMode] Selected structure is null");
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Selected structure is null");
                 return;
             }
-            
-            // Overlap check
-            Collider[] overlaps = Physics.OverlapBox(
+
+            // Ground check
+            if (!Physics.Raycast(position, Vector3.down, 2f, groundLayer))
+            {
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Not on ground");
+                return;
+            }
+
+            // Overlap check (NonAlloc) - most expensive, do last
+            int overlapCount = Physics.OverlapBoxNonAlloc(
                 position,
                 new Vector3(0.9f, 0.45f, 0.09f),
+                overlapBoxBuffer,
                 rotation,
-                obstacleLayer
+                obstacleLayer,
+                QueryTriggerInteraction.Ignore
             );
-            
-            if (overlaps.Length > 0)
+            if (overlapCount > 0)
             {
-                Debug.LogWarning($"🚨 [SimpleBuildMode] Overlapping with {overlaps[0].name}");
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Overlapping with {overlapBoxBuffer[0].name}");
                 return;
             }
-            
+
+            // Line of sight check (expensive, skip if other checks fail first)
+            Vector3 playerEye = transform.position + Vector3.up * 1.6f;
+            if (Physics.Linecast(playerEye, position, out RaycastHit hit, obstacleLayer, QueryTriggerInteraction.Ignore))
+            {
+                if (Vector3.Distance(hit.point, position) > 0.5f)
+                {
+                    Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] No line of sight");
+                    return;
+                }
+            }
+
             // Spawn structure
             GameObject structure = Instantiate(selectedStructure, position, rotation);
             NetworkServer.Spawn(structure);
-            
-            Debug.Log($"✅ [SimpleBuildMode] {selectedStructure.name} placed at {position}");
+
+            Debug.Log($"✅ [SimpleBuildMode SERVER] {selectedStructure.name} placed at {position}");
         }
         
         // Stability preview system
@@ -708,27 +771,33 @@ namespace TacticalCombat.Building
         
         private float FindNearestSupportDistance(Vector3 position)
         {
-            Collider[] nearbyStructures = Physics.OverlapSphere(position, maxSupportDistance);
+            marker_FindSupport.Begin();
+            int count = Physics.OverlapSphereNonAlloc(position, maxSupportDistance, stabilityBuffer, structureLayer, QueryTriggerInteraction.Ignore);
             
             float nearestDistance = float.MaxValue;
             bool foundSupport = false;
             
-            foreach (var col in nearbyStructures)
+            for (int i = 0; i < count; i++)
             {
-                Structure structure = col.GetComponent<Structure>();
+                var col = stabilityBuffer[i];
+                if (col == null) continue;
+                var structure = col.GetComponent<Structure>();
                 if (structure == null) continue;
                 
-                StructuralIntegrity integrity = structure.GetComponent<StructuralIntegrity>();
+                var integrity = structure.GetComponent<StructuralIntegrity>();
                 if (integrity == null) continue;
                 
                 if (integrity.IsGrounded() || integrity.GetCurrentStability() > 50f)
                 {
                     float distance = Vector3.Distance(position, col.transform.position);
-                    nearestDistance = Mathf.Min(nearestDistance, distance);
-                    foundSupport = true;
+                    if (distance < nearestDistance)
+                    {
+                        nearestDistance = distance;
+                        foundSupport = true;
+                    }
                 }
             }
-            
+            marker_FindSupport.End();
             return foundSupport ? nearestDistance : -1f;
         }
         

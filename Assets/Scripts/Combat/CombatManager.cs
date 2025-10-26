@@ -135,9 +135,10 @@ namespace TacticalCombat.Combat
             }
             else
             {
-                // Pool exhausted, create new
+                // Pool exhausted, create new (auto-expand)
                 Debug.LogWarning($"Effect pool '{poolName}' exhausted! Creating new instance.");
-                return;
+                effect = Instantiate(GetPrefabForPool(poolName));
+                if (effect == null) return;
             }
             
             effect.transform.position = position;
@@ -146,6 +147,18 @@ namespace TacticalCombat.Combat
             
             // Return to pool after lifetime
             StartCoroutine(ReturnToPool(effect, poolName, lifetime));
+        }
+
+        private GameObject GetPrefabForPool(string poolName)
+        {
+            switch (poolName)
+            {
+                case "MuzzleFlash": return muzzleFlashPrefab;
+                case "BulletHole": return bulletHolePrefab;
+                case "Blood": return bloodEffectPrefab;
+                case "MetalSparks": return metalSparksPrefab;
+                default: return null;
+            }
         }
         
         private System.Collections.IEnumerator ReturnToPool(GameObject obj, string poolName, float delay)

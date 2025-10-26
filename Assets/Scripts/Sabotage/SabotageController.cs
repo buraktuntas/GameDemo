@@ -19,6 +19,11 @@ namespace TacticalCombat.Sabotage
 
         private InputAction interactAction;
 
+        // ✅ PERFORMANCE FIX: Throttle target scanning + NonAlloc buffer
+        private float lastScanTime = 0f;
+        private const float SCAN_INTERVAL = 0.3f;  // Scan every 300ms instead of every frame
+        private static readonly Collider[] scanBuffer = new Collider[8];  // NonAlloc buffer
+
         public System.Action<float> OnSabotageProgress; // 0-1
         public System.Action<bool> OnSabotageResult; // success/fail
 
@@ -46,8 +51,12 @@ namespace TacticalCombat.Sabotage
         {
             if (!isLocalPlayer) return;
 
-            // Check for nearby sabotage targets
-            FindNearbyTarget();
+            // ✅ PERFORMANCE FIX: Throttled target scanning (was every frame)
+            if (Time.time - lastScanTime >= SCAN_INTERVAL)
+            {
+                lastScanTime = Time.time;
+                FindNearbyTarget();
+            }
 
             // Update sabotage progress
             if (isInteracting && currentTarget != null)
@@ -66,20 +75,32 @@ namespace TacticalCombat.Sabotage
         {
             if (isInteracting) return;
 
-            Collider[] hits = Physics.OverlapSphere(transform.position, interactRange, sabotageTargetMask);
+            // ✅ PERFORMANCE FIX: Use NonAlloc to avoid GC allocations
+            int hitCount = Physics.OverlapSphereNonAlloc(
+                transform.position,
+                interactRange,
+                scanBuffer,
+                sabotageTargetMask
+            );
+
             SabotageTarget closestTarget = null;
             float closestDistance = float.MaxValue;
 
-            foreach (var hit in hits)
+            for (int i = 0; i < hitCount; i++)
             {
-                var target = hit.GetComponent<SabotageTarget>();
-                if (target != null && target.CanBeSabotaged(playerController.team))
+                Collider hit = scanBuffer[i];
+
+                // ✅ PERFORMANCE FIX: Use TryGetComponent (faster than GetComponent)
+                if (hit.TryGetComponent<SabotageTarget>(out var target))
                 {
-                    float distance = Vector3.Distance(transform.position, hit.transform.position);
-                    if (distance < closestDistance)
+                    if (target.CanBeSabotaged(playerController.team))
                     {
-                        closestDistance = distance;
-                        closestTarget = target;
+                        float distance = Vector3.Distance(transform.position, hit.transform.position);
+                        if (distance < closestDistance)
+                        {
+                            closestDistance = distance;
+                            closestTarget = target;
+                        }
                     }
                 }
             }

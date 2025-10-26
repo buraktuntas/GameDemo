@@ -24,16 +24,34 @@ namespace TacticalCombat.Vision
         private float lastPulseTime;
         private List<Player.PlayerController> playersInZone = new List<Player.PlayerController>();
 
+        // ✅ PERFORMANCE FIX: Cache player health components
+        private Dictionary<Player.PlayerController, Combat.Health> playerHealthCache = new Dictionary<Player.PlayerController, Combat.Health>();
+
+        // ✅ PERFORMANCE FIX: NonAlloc buffer for vision pulse
+        private static readonly Collider[] visionBuffer = new Collider[32];
+
         public System.Action<Team> OnControlChanged;
 
         private void OnTriggerEnter(Collider other)
         {
             if (!isServer) return;
 
-            var player = other.GetComponent<Player.PlayerController>();
-            if (player != null && !playersInZone.Contains(player))
+            // ✅ PERFORMANCE FIX: Use TryGetComponent
+            if (other.TryGetComponent<Player.PlayerController>(out var player))
             {
-                playersInZone.Add(player);
+                if (!playersInZone.Contains(player))
+                {
+                    playersInZone.Add(player);
+
+                    // ✅ PERFORMANCE FIX: Cache health component
+                    if (!playerHealthCache.ContainsKey(player))
+                    {
+                        if (player.TryGetComponent<Combat.Health>(out var health))
+                        {
+                            playerHealthCache[player] = health;
+                        }
+                    }
+                }
             }
         }
 
@@ -41,10 +59,14 @@ namespace TacticalCombat.Vision
         {
             if (!isServer) return;
 
-            var player = other.GetComponent<Player.PlayerController>();
-            if (player != null && playersInZone.Contains(player))
+            // ✅ PERFORMANCE FIX: Use TryGetComponent
+            if (other.TryGetComponent<Player.PlayerController>(out var player))
             {
-                playersInZone.Remove(player);
+                if (playersInZone.Contains(player))
+                {
+                    playersInZone.Remove(player);
+                    // Note: Keep health cache in case player returns
+                }
             }
         }
 
@@ -73,12 +95,27 @@ namespace TacticalCombat.Vision
             int teamACount = 0;
             int teamBCount = 0;
 
-            // Remove dead players
-            playersInZone.RemoveAll(p => p == null);
+            // Remove dead players and clean up cache
+            playersInZone.RemoveAll(p => {
+                if (p == null)
+                {
+                    return true;
+                }
+                return false;
+            });
 
             foreach (var player in playersInZone)
             {
-                var health = player.GetComponent<Combat.Health>();
+                // ✅ PERFORMANCE FIX: Use cached health component instead of GetComponent
+                if (!playerHealthCache.TryGetValue(player, out var health))
+                {
+                    // Cache miss - get and cache it
+                    if (player.TryGetComponent<Combat.Health>(out health))
+                    {
+                        playerHealthCache[player] = health;
+                    }
+                }
+
                 if (health != null && !health.IsDead())
                 {
                     if (player.team == Team.TeamA)
@@ -138,19 +175,37 @@ namespace TacticalCombat.Vision
         [Server]
         private void ApplyVisionPulse()
         {
-            // Find all enemy players in radius
-            Collider[] hits = Physics.OverlapSphere(transform.position, visionPulseRadius);
+            // ✅ PERFORMANCE FIX: Use NonAlloc to avoid GC allocations
+            int hitCount = Physics.OverlapSphereNonAlloc(
+                transform.position,
+                visionPulseRadius,
+                visionBuffer
+            );
+
             List<Vector3> revealedPositions = new List<Vector3>();
 
-            foreach (var hit in hits)
+            for (int i = 0; i < hitCount; i++)
             {
-                var player = hit.GetComponent<Player.PlayerController>();
-                if (player != null && player.team != controllingTeam)
+                Collider hit = visionBuffer[i];
+
+                // ✅ PERFORMANCE FIX: Use TryGetComponent
+                if (hit.TryGetComponent<Player.PlayerController>(out var player))
                 {
-                    var health = player.GetComponent<Combat.Health>();
-                    if (health != null && !health.IsDead())
+                    if (player.team != controllingTeam)
                     {
-                        revealedPositions.Add(player.transform.position);
+                        // ✅ PERFORMANCE FIX: Use cached health component
+                        if (!playerHealthCache.TryGetValue(player, out var health))
+                        {
+                            if (player.TryGetComponent<Combat.Health>(out health))
+                            {
+                                playerHealthCache[player] = health;
+                            }
+                        }
+
+                        if (health != null && !health.IsDead())
+                        {
+                            revealedPositions.Add(player.transform.position);
+                        }
                     }
                 }
             }

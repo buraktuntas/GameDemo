@@ -31,8 +31,7 @@ namespace TacticalCombat.Player
         {
             base.OnStartLocalPlayer();
             
-            // Register with match manager
-            RegisterWithMatchManager();
+            // Registration handled in FPSController via CmdRegisterPlayer
             
             // Update team color
             UpdateTeamColor();

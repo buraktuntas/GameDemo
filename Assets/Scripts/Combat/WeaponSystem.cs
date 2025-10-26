@@ -405,38 +405,88 @@ namespace TacticalCombat.Combat
         
         private void ProcessHit(RaycastHit hit)
         {
-            // ✅ FIX: Send hit to server for validation (server-authoritative damage)
+            // ✅ SECURITY: Send hit to server for validation (SERVER-AUTHORITATIVE)
             if (isServer)
             {
-                // Server processes damage directly
+                // Server processes directly
                 ProcessHitOnServer(hit);
             }
             else
             {
-                // Client sends hit to server for validation
+                // Client sends hit data to server for validation
                 CmdProcessHit(hit.point, hit.normal, hit.distance, hit.collider.gameObject);
             }
 
-            // Visual feedback (client-side only)
-            SurfaceType surface = DetermineSurfaceType(hit.collider);
-            Debug.Log($"🎯 [WeaponSystem] HIT: {hit.collider.name} - Surface: {surface} - Distance: {hit.distance:F1}m");
+            // CLIENT-SIDE: Immediate visual/audio feedback (optimistic prediction)
+            ShowClientSideHitFeedback(hit);
         }
 
         /// <summary>
-        /// ✅ FIX: Client requests server to process hit (anti-cheat)
+        /// CLIENT-SIDE: Immediate visual feedback (prediction - no damage yet)
+        /// </summary>
+        private void ShowClientSideHitFeedback(RaycastHit hit)
+        {
+            SurfaceType surface = DetermineSurfaceType(hit.collider);
+
+            // Show hit effects immediately (client prediction)
+            SpawnHitEffect(hit.point, hit.normal, surface);
+
+            // Play hit sound
+            PlayHitSound(surface);
+
+            // Optimistic damage numbers (will be corrected by server)
+            var hitbox = hit.collider.GetComponent<Hitbox>();
+            float predictedDamage = currentWeapon.damage;
+            if (hitbox != null)
+            {
+                predictedDamage = hitbox.CalculateDamage(Mathf.RoundToInt(predictedDamage));
+            }
+
+            Debug.Log($"🎯 [WeaponSystem CLIENT] HIT: {hit.collider.name} - Predicted Damage: {predictedDamage:F1}");
+        }
+
+        /// <summary>
+        /// ✅ ANTI-CHEAT: Client requests server to validate and process hit
         /// </summary>
         [Command]
         private void CmdProcessHit(Vector3 hitPoint, Vector3 hitNormal, float distance, GameObject hitObject)
         {
-            // Server validates and processes hit
-            if (hitObject == null) return;
+            if (hitObject == null)
+            {
+                Debug.LogWarning("⚠️ [WeaponSystem SERVER] Received null hit object");
+                return;
+            }
 
-            // Note: We can't pass full RaycastHit via Command, so we reconstruct minimal data
-            Collider collider = hitObject.GetComponent<Collider>();
-            if (collider == null) return;
+            // ANTI-CHEAT: Validate fire rate
+            if (Time.time < nextFireTime)
+            {
+                Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Rate limit violation from player {netId}");
+                return;
+            }
 
-            // Process on server
-            ProcessHitOnServer(hitPoint, hitNormal, distance, collider);
+            // ANTI-CHEAT: Validate ammo
+            if (currentAmmo <= 0)
+            {
+                Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Ammo cheat attempt from player {netId}");
+                return;
+            }
+
+            // ANTI-CHEAT: Validate distance (within weapon range)
+            if (distance > currentWeapon.range)
+            {
+                Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Distance cheat attempt: {distance}m > {currentWeapon.range}m");
+                return;
+            }
+
+            // Reconstruct hit for server-side processing
+            Collider hitCollider = hitObject.GetComponent<Collider>();
+            if (hitCollider == null)
+            {
+                Debug.LogWarning("⚠️ [WeaponSystem SERVER] Hit object has no collider");
+                return;
+            }
+
+            ProcessHitOnServer(hitPoint, hitNormal, distance, hitCollider);
         }
 
         /// <summary>
@@ -818,12 +868,19 @@ namespace TacticalCombat.Combat
         private void PlayHitSound()
         {
             if (hitSounds == null || hitSounds.Length == 0 || audioSource == null) return;
-            
+
             AudioClip clip = hitSounds[Random.Range(0, hitSounds.Length)];
             if (clip != null)
             {
                 audioSource.PlayOneShot(clip, 0.3f);
             }
+        }
+
+        private void PlayHitSound(SurfaceType surface)
+        {
+            // TODO: Add surface-specific hit sounds
+            // For now, use generic hit sound
+            PlayHitSound();
         }
         
         private IEnumerator CameraShake(float intensity, float duration)

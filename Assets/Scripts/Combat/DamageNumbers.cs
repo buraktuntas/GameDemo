@@ -23,7 +23,13 @@ namespace TacticalCombat.Combat
         public Color normalDamageColor = Color.white;
         public Color criticalDamageColor = Color.red;
         public Color healColor = Color.green;
-        
+
+        [Header("Performance Settings")]
+        public int poolSize = 20;  // ✅ PERFORMANCE FIX: Object pool size
+
+        // ✅ PERFORMANCE FIX: Object pooling to avoid Instantiate spam
+        private System.Collections.Generic.Queue<GameObject> damageTextPool;
+
         private static DamageNumbers instance;
         public static DamageNumbers Instance
         {
@@ -65,23 +71,81 @@ namespace TacticalCombat.Combat
                 damageCanvas = canvasGO.AddComponent<Canvas>();
                 damageCanvas.renderMode = RenderMode.WorldSpace;
                 damageCanvas.sortingOrder = 100;
-                
+
                 // Canvas Scaler ekle
                 CanvasScaler scaler = canvasGO.AddComponent<CanvasScaler>();
                 scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
                 scaler.referenceResolution = new Vector2(1920, 1080);
-                
+
                 // Graphic Raycaster ekle
                 canvasGO.AddComponent<GraphicRaycaster>();
             }
-            
+
             // Damage text prefab oluştur
             if (damageTextPrefab == null)
             {
                 CreateDamageTextPrefab();
             }
-            
+
+            // ✅ PERFORMANCE FIX: Initialize object pool
+            InitializePool();
+
             Debug.Log("✅ Damage Numbers system initialized");
+        }
+
+        /// <summary>
+        /// ✅ PERFORMANCE FIX: Initialize damage text object pool
+        /// </summary>
+        private void InitializePool()
+        {
+            damageTextPool = new System.Collections.Generic.Queue<GameObject>();
+
+            for (int i = 0; i < poolSize; i++)
+            {
+                GameObject textGO = Instantiate(damageTextPrefab, damageCanvas.transform);
+                textGO.SetActive(false);
+                damageTextPool.Enqueue(textGO);
+            }
+
+            Debug.Log($"✅ Damage text pool initialized with {poolSize} objects");
+        }
+
+        /// <summary>
+        /// ✅ PERFORMANCE FIX: Get damage text from pool instead of Instantiate
+        /// </summary>
+        private GameObject GetPooledDamageText()
+        {
+            if (damageTextPool == null || damageTextPool.Count == 0)
+            {
+                // Fallback: create new if pool exhausted
+                GameObject newTextGO = Instantiate(damageTextPrefab, damageCanvas.transform);
+                Debug.LogWarning("⚠️ Damage text pool exhausted, creating new instance");
+                return newTextGO;
+            }
+
+            GameObject textGO = damageTextPool.Dequeue();
+            textGO.SetActive(true);
+            return textGO;
+        }
+
+        /// <summary>
+        /// ✅ PERFORMANCE FIX: Return damage text to pool instead of Destroy
+        /// </summary>
+        private void ReturnToPool(GameObject textGO)
+        {
+            if (textGO == null) return;
+
+            textGO.SetActive(false);
+
+            // Reset to default state
+            Text text = textGO.GetComponent<Text>();
+            if (text != null)
+            {
+                text.fontSize = 24;
+                text.color = normalDamageColor;
+            }
+
+            damageTextPool.Enqueue(textGO);
         }
         
         private void CreateDamageTextPrefab()
@@ -127,22 +191,26 @@ namespace TacticalCombat.Combat
                 Random.Range(-randomOffset.y, randomOffset.y),
                 Random.Range(-randomOffset.z, randomOffset.z)
             );
-            
+
             Vector3 startPosition = worldPosition + offset;
-            
-            // Damage text oluştur
+
+            // ✅ PERFORMANCE FIX: Get from pool instead of Instantiate
             if (damageTextPrefab == null)
             {
                 Debug.LogError("❌ DamageTextPrefab is null! Cannot show damage numbers.");
                 yield break;
             }
-            
-            GameObject damageTextGO = Instantiate(damageTextPrefab, damageCanvas.transform);
-            damageTextGO.SetActive(true);
-            
+
+            GameObject damageTextGO = GetPooledDamageText();
+            if (damageTextGO == null)
+            {
+                Debug.LogError("❌ Failed to get pooled damage text!");
+                yield break;
+            }
+
             Text damageText = damageTextGO.GetComponent<Text>();
             damageText.text = Mathf.RoundToInt(damage).ToString();
-            
+
             // Renk ayarla
             if (isHeal)
             {
@@ -159,33 +227,33 @@ namespace TacticalCombat.Combat
             {
                 damageText.color = normalDamageColor;
             }
-            
+
             // Pozisyon ayarla
             damageTextGO.transform.position = startPosition;
-            
+
             // Animasyon
             float timer = 0f;
             Vector3 startPos = startPosition;
             Vector3 endPos = startPosition + Vector3.up * 2f;
             Color startColor = damageText.color;
             Color endColor = new Color(startColor.r, startColor.g, startColor.b, 0f);
-            
+
             while (timer < displayDuration)
             {
                 timer += Time.deltaTime;
                 float progress = timer / displayDuration;
-                
+
                 // Pozisyon animasyonu
                 damageTextGO.transform.position = Vector3.Lerp(startPos, endPos, progress);
-                
+
                 // Fade animasyonu
                 damageText.color = Color.Lerp(startColor, endColor, progress * fadeSpeed);
-                
+
                 yield return null;
             }
-            
-            // Temizle
-            Destroy(damageTextGO);
+
+            // ✅ PERFORMANCE FIX: Return to pool instead of Destroy
+            ReturnToPool(damageTextGO);
         }
         
         // Utility methods
