@@ -117,15 +117,28 @@ namespace TacticalCombat.Combat
             
             // ✅ FIX: InputManager referansı
             inputManager = TacticalCombat.Player.InputManager.Instance;
-            
+
             if (debugInputs)
             {
                 Debug.Log($"✅ [WeaponSystem] OnStartLocalPlayer - InputManager: {(inputManager != null ? "Found" : "NULL")}");
             }
-            
-            // Find camera
+
+            // ⚡ PERFORMANCE FIX: Cache camera reference
             if (playerCamera == null)
-                playerCamera = Camera.main;
+            {
+                // First try to find FPSController's camera
+                var fpsController = GetComponent<TacticalCombat.Player.FPSController>();
+                if (fpsController != null)
+                {
+                    playerCamera = fpsController.GetCamera();
+                }
+
+                // Fallback to Camera.main (only once, then cached)
+                if (playerCamera == null)
+                {
+                    playerCamera = Camera.main;
+                }
+            }
                 
             // Initialize ammo
             if (currentWeapon != null)

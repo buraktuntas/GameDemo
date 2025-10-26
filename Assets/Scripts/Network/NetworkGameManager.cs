@@ -19,24 +19,43 @@ namespace TacticalCombat.Network
 
         public override void OnServerAddPlayer(NetworkConnectionToClient conn)
         {
+            Debug.Log("═══════════════════════════════════════");
+            Debug.Log($"🎮 OnServerAddPlayer ÇAĞRILDI - ConnectionID: {conn.connectionId}");
+
             // Determine team (balance teams)
             Team assignedTeam = teamACount <= teamBCount ? Team.TeamA : Team.TeamB;
-            
+            Debug.Log($"   Atanan Team: {assignedTeam}");
+
             // Get spawn point
             Transform spawnPoint = GetSpawnPoint(assignedTeam);
+            Debug.Log($"   Spawn Point: {spawnPoint.position}");
 
             // Spawn player
             GameObject player = Instantiate(playerPrefab, spawnPoint.position, spawnPoint.rotation);
-            
+            Debug.Log($"   Player GameObject oluşturuldu: {player.name}");
+
             // Assign team (role will be selected by player)
             var playerController = player.GetComponent<Player.PlayerController>();
             if (playerController != null)
             {
                 playerController.team = assignedTeam;
                 playerController.role = RoleId.Builder; // Default, can be changed in lobby
+                Debug.Log($"   PlayerController team/role atandı");
+            }
+
+            // KRITIK: NetworkIdentity kontrolü
+            var netIdentity = player.GetComponent<NetworkIdentity>();
+            if (netIdentity != null)
+            {
+                Debug.Log($"   NetworkIdentity VAR - NetID: {netIdentity.netId}");
+            }
+            else
+            {
+                Debug.LogError("   ❌ NetworkIdentity YOK! Player spawn edilemez!");
             }
 
             NetworkServer.AddPlayerForConnection(conn, player);
+            Debug.Log($"   ✅ NetworkServer.AddPlayerForConnection çağrıldı");
 
             // Update team counts
             if (assignedTeam == Team.TeamA)
@@ -44,7 +63,8 @@ namespace TacticalCombat.Network
             else
                 teamBCount++;
 
-            Debug.Log($"Player spawned for {assignedTeam}. Team A: {teamACount}, Team B: {teamBCount}");
+            Debug.Log($"   📊 SONUÇ: Team A: {teamACount}, Team B: {teamBCount}");
+            Debug.Log("═══════════════════════════════════════\n");
 
             // If enough players, could auto-start match
             CheckAutoStart();

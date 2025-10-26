@@ -91,20 +91,31 @@ namespace TacticalCombat.Player
         public override void OnStartLocalPlayer()
         {
             base.OnStartLocalPlayer();
-            
+
+            // KRITIK DEBUG
+            Debug.Log("═══════════════════════════════════════");
+            Debug.Log($"🎮 FPSController.OnStartLocalPlayer() ÇAĞRILDI!");
+            Debug.Log($"   GameObject: {gameObject.name}");
+            Debug.Log($"   NetID: {netId}");
+            Debug.Log($"   isLocalPlayer: {isLocalPlayer}");
+            Debug.Log($"   isServer: {isServer}");
+            Debug.Log($"   isClient: {isClient}");
+            Debug.Log($"   Team: {team}");
+            Debug.Log("═══════════════════════════════════════");
+
             // Cache InputManager
             inputManager = InputManager.Instance;
-            
+
             // Setup camera
             SetupCamera();
-            
+
             // Lock cursor
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
-            
+
             // Register with match manager
             RegisterPlayer();
-            
+
             if (showDebugInfo)
             {
                 Debug.Log("✅ FPSController initialized for local player");
@@ -141,37 +152,45 @@ namespace TacticalCombat.Player
         
         private void SetupCamera()
         {
+            // ⚡ PERFORMANCE FIX: Cache camera reference instead of using Camera.main
             // Find camera if not assigned
             if (playerCamera == null)
             {
-                playerCamera = Camera.main;
+                // First try to find child camera (best practice)
+                playerCamera = GetComponentInChildren<Camera>();
+
+                // Fallback to Camera.main (only once, then cached)
                 if (playerCamera == null)
                 {
-                    Debug.LogError("❌ No camera found!");
-                    return;
+                    playerCamera = Camera.main;
+                    if (playerCamera == null)
+                    {
+                        Debug.LogError("❌ No camera found! Player prefab should have a Camera child.");
+                        return;
+                    }
                 }
             }
-            
+
             // Enable camera
             playerCamera.enabled = true;
-            
+
             // Make camera child of player if not already
             if (playerCamera.transform.parent != transform)
             {
                 playerCamera.transform.SetParent(transform);
             }
-            
+
             // Position at eye level
             originalCameraPos = new Vector3(0, 1.6f, 0);
             playerCamera.transform.localPosition = originalCameraPos;
             playerCamera.transform.localRotation = Quaternion.identity;
-            
+
             // Store base FOV
             baseFOV = playerCamera.fieldOfView;
-            
+
             if (showDebugInfo)
             {
-                Debug.Log("📷 Camera setup complete");
+                Debug.Log("📷 Camera setup complete (cached reference)");
             }
         }
         

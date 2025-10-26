@@ -16,6 +16,27 @@ namespace TacticalCombat.Network
             networkManager = GetComponent<NetworkManager>();
         }
 
+        private void Update()
+        {
+            // Klavye kısayolları
+            if (!NetworkClient.isConnected && !NetworkServer.active)
+            {
+                // H tuşu = Host
+                if (Input.GetKeyDown(KeyCode.H))
+                {
+                    networkManager.StartHost();
+                    Debug.Log("🚀 [H] Starting HOST...");
+                }
+
+                // C tuşu = Client
+                if (Input.GetKeyDown(KeyCode.C))
+                {
+                    networkManager.StartClient();
+                    Debug.Log("🚀 [C] Starting CLIENT...");
+                }
+            }
+        }
+
         private void OnGUI()
         {
             if (networkManager == null) return;
@@ -43,31 +64,48 @@ namespace TacticalCombat.Network
             // Network status
             if (!NetworkClient.isConnected && !NetworkServer.active)
             {
-                GUI.Label(new Rect(x, y, 300, 25), "Status: Disconnected", labelStyle);
+                // Büyük uyarı kutusu
+                GUI.color = new Color(1f, 0.9f, 0.5f);
+                GUI.Box(new Rect(x - 5, y - 5, 450, 220), "");
+                GUI.color = Color.white;
+
+                GUI.Label(new Rect(x, y, 400, 25), "⚠️ BAĞLANTI YOK", labelStyle);
                 y += 35;
 
-                // Host button
-                if (GUI.Button(new Rect(x, y, buttonWidth, buttonHeight), "HOST", buttonStyle))
+                // Talimatlar
+                GUIStyle instructionStyle = new GUIStyle(GUI.skin.label);
+                instructionStyle.fontSize = 14;
+                instructionStyle.normal.textColor = new Color(0.3f, 0.3f, 0.3f);
+
+                GUI.Label(new Rect(x, y, 400, 20), "BUILD'DE:", instructionStyle);
+                y += 20;
+                GUI.Label(new Rect(x, y, 400, 20), "  → 'LAN HOST (H)' butonuna tıkla", instructionStyle);
+                y += 25;
+
+                GUI.Label(new Rect(x, y, 400, 20), "EDITOR'DE:", instructionStyle);
+                y += 20;
+                GUI.Label(new Rect(x, y, 400, 20), "  → 'LAN CLIENT (C)' butonuna tıkla", instructionStyle);
+                y += 30;
+
+                // Host button (Yeşil)
+                GUI.backgroundColor = new Color(0.3f, 0.8f, 0.3f);
+                if (GUI.Button(new Rect(x, y, buttonWidth * 1.8f, buttonHeight), "LAN HOST (H)", buttonStyle))
                 {
                     networkManager.StartHost();
                     Debug.Log("🚀 Starting HOST...");
                 }
+                GUI.backgroundColor = Color.white;
                 y += buttonHeight + spacing;
 
-                // Client button
-                if (GUI.Button(new Rect(x, y, buttonWidth, buttonHeight), "CLIENT", buttonStyle))
+                // Client button (Mavi)
+                GUI.backgroundColor = new Color(0.3f, 0.6f, 1f);
+                if (GUI.Button(new Rect(x, y, buttonWidth * 1.8f, buttonHeight), "LAN CLIENT (C)", buttonStyle))
                 {
                     networkManager.StartClient();
                     Debug.Log("🚀 Starting CLIENT...");
                 }
+                GUI.backgroundColor = Color.white;
                 y += buttonHeight + spacing;
-
-                // Server button (headless)
-                if (GUI.Button(new Rect(x, y, buttonWidth, buttonHeight), "SERVER ONLY", buttonStyle))
-                {
-                    networkManager.StartServer();
-                    Debug.Log("🚀 Starting SERVER...");
-                }
             }
             else
             {
