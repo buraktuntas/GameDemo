@@ -47,16 +47,20 @@ namespace TacticalCombat.Player
         {
             // ✅ FIX: Sadece server'da register et
             if (!isServer) return;
-            
-            var matchManager = FindFirstObjectByType<MatchManager>();
-            if (matchManager != null)
+
+            // ✅ FIX: Use singleton instead of FindFirstObjectByType
+            if (MatchManager.Instance != null)
             {
-                matchManager.RegisterPlayer(netId, team, role);
-                
+                MatchManager.Instance.RegisterPlayer(netId, team, role);
+
                 if (showDebugInfo)
                 {
                     Debug.Log($"📝 Player registered: Team {team}, Role {role}");
                 }
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ MatchManager.Instance is null! Cannot register player.");
             }
         }
         

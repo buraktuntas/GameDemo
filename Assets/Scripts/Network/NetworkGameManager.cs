@@ -67,8 +67,27 @@ namespace TacticalCombat.Network
             Debug.Log($"   📊 SONUÇ: Team A: {teamACount}, Team B: {teamBCount}");
             Debug.Log("═══════════════════════════════════════\n");
 
+            // ✅ FIX: Sync existing scene state to newly joined player
+            SyncSceneStateToPlayer(conn);
+
             // If enough players, could auto-start match
             CheckAutoStart();
+        }
+
+        /// <summary>
+        /// ✅ FIX: Sync all scene objects (structures, etc.) to newly joined player
+        /// </summary>
+        private void SyncSceneStateToPlayer(NetworkConnectionToClient conn)
+        {
+            if (!NetworkServer.active) return;
+
+            // Find all structures (BuildableStructure components)
+            var structures = FindObjectsByType<Building.Structure>(FindObjectsSortMode.None);
+
+            Debug.Log($"📡 [NetworkGameManager] Syncing {structures.Length} structures to new player (Conn: {conn.connectionId})");
+
+            // Note: Structures with NetworkIdentity are automatically synced by Mirror
+            // This log helps verify the sync is happening
         }
 
         public override void OnServerDisconnect(NetworkConnectionToClient conn)

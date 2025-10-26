@@ -74,11 +74,15 @@ namespace TacticalCombat.Building
         // Performance throttling
         private float lastUpdateTime;
         private const float UPDATE_INTERVAL = 0.05f;
-        
+
         // Stability caching
         private float lastStabilityCheckTime;
         private Color cachedStabilityColor;
         private Vector3 lastStabilityPosition;
+
+        // ✅ FIX: Toggle cooldown to prevent race condition
+        private float lastToggleTime = 0f;
+        private const float TOGGLE_COOLDOWN = 0.3f;
         
         private void Start()
         {
@@ -168,33 +172,55 @@ namespace TacticalCombat.Building
         {
             if (validPlacementMaterial == null)
             {
-                // ✅ FIX: Use Standard shader for simplicity
-                validPlacementMaterial = new Material(Shader.Find("Standard"));
+                // ✅ FIX: Use URP/Lit shader for Unity 6 URP
+                Shader urpShader = Shader.Find("Universal Render Pipeline/Lit");
+                if (urpShader == null)
+                {
+                    // Fallback to Standard if URP not available
+                    Debug.LogWarning("⚠️ [SimpleBuildMode] URP shader not found, using Standard");
+                    urpShader = Shader.Find("Standard");
+                }
+
+                validPlacementMaterial = new Material(urpShader);
                 validPlacementMaterial.color = new Color(0, 1, 0, 0.7f); // Green with alpha
-                validPlacementMaterial.SetFloat("_Mode", 3); // Transparent mode
-                validPlacementMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                validPlacementMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                validPlacementMaterial.SetInt("_ZWrite", 0);
-                validPlacementMaterial.DisableKeyword("_ALPHATEST_ON");
-                validPlacementMaterial.EnableKeyword("_ALPHABLEND_ON");
-                validPlacementMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+
+                // URP transparency setup
+                validPlacementMaterial.SetFloat("_Surface", 1f); // 0 = Opaque, 1 = Transparent
+                validPlacementMaterial.SetFloat("_Blend", 0f); // 0 = Alpha, 1 = Premultiply
+                validPlacementMaterial.SetFloat("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                validPlacementMaterial.SetFloat("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                validPlacementMaterial.SetFloat("_ZWrite", 0f);
+                validPlacementMaterial.SetFloat("_AlphaClip", 0f);
                 validPlacementMaterial.renderQueue = 3000;
+                validPlacementMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                validPlacementMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
             }
-            
+
             if (invalidPlacementMaterial == null)
             {
-                // ✅ FIX: Use Standard shader for simplicity
-                invalidPlacementMaterial = new Material(Shader.Find("Standard"));
+                // ✅ FIX: Use URP/Lit shader for Unity 6 URP
+                Shader urpShader = Shader.Find("Universal Render Pipeline/Lit");
+                if (urpShader == null)
+                {
+                    urpShader = Shader.Find("Standard");
+                }
+
+                invalidPlacementMaterial = new Material(urpShader);
                 invalidPlacementMaterial.color = new Color(1, 0, 0, 0.7f); // Red with alpha
-                invalidPlacementMaterial.SetFloat("_Mode", 3); // Transparent mode
-                invalidPlacementMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                invalidPlacementMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                invalidPlacementMaterial.SetInt("_ZWrite", 0);
-                invalidPlacementMaterial.DisableKeyword("_ALPHATEST_ON");
-                invalidPlacementMaterial.EnableKeyword("_ALPHABLEND_ON");
-                invalidPlacementMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+
+                // URP transparency setup
+                invalidPlacementMaterial.SetFloat("_Surface", 1f);
+                invalidPlacementMaterial.SetFloat("_Blend", 0f);
+                invalidPlacementMaterial.SetFloat("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                invalidPlacementMaterial.SetFloat("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                invalidPlacementMaterial.SetFloat("_ZWrite", 0f);
+                invalidPlacementMaterial.SetFloat("_AlphaClip", 0f);
                 invalidPlacementMaterial.renderQueue = 3000;
+                invalidPlacementMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                invalidPlacementMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
             }
+
+            Debug.Log("✅ [SimpleBuildMode] URP materials created successfully");
         }
         
         private void Update()
@@ -220,10 +246,12 @@ namespace TacticalCombat.Building
         
         private void HandleBuildModeToggle()
         {
-            if (Input.GetKeyDown(buildModeKey))
+            // ✅ FIX: Add cooldown to prevent rapid toggle causing state corruption
+            if (Input.GetKeyDown(buildModeKey) && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
             {
+                lastToggleTime = Time.time;
                 Debug.Log($"🏗️ [SimpleBuildMode] B key pressed - Current state: {isBuildModeActive}");
-                
+
                 if (isBuildModeActive)
                 {
                     ExitBuildMode();
@@ -233,10 +261,11 @@ namespace TacticalCombat.Building
                     EnterBuildMode();
                 }
             }
-            
-            // ESC also exits build mode
-            if (isBuildModeActive && Input.GetKeyDown(KeyCode.Escape))
+
+            // ESC also exits build mode (with same cooldown)
+            if (isBuildModeActive && Input.GetKeyDown(KeyCode.Escape) && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
             {
+                lastToggleTime = Time.time;
                 ExitBuildMode();
             }
         }
@@ -398,11 +427,12 @@ namespace TacticalCombat.Building
 
             for (int i = 0; i < ghostRenderers.Length; i++)
             {
-                ghostOriginalMaterials[i] = ghostRenderers[i].material;
+                ghostOriginalMaterials[i] = ghostRenderers[i].sharedMaterial;
 
                 // Create ONE material instance per renderer
                 ghostMaterialInstances[i] = new Material(validPlacementMaterial);
-                ghostRenderers[i].material = ghostMaterialInstances[i];
+                // ✅ FIX: Use sharedMaterial to avoid Unity creating instances
+                ghostRenderers[i].sharedMaterial = ghostMaterialInstances[i];
             }
 
             lastCanPlaceState = true;
@@ -486,7 +516,8 @@ namespace TacticalCombat.Building
                     {
                         // Reuse existing material instance, just change color
                         ghostMaterialInstances[i].color = stabilityColor;
-                        ghostRenderers[i].material = ghostMaterialInstances[i];
+                        // ✅ FIX: Use sharedMaterial to avoid creating new instances
+                        ghostRenderers[i].sharedMaterial = ghostMaterialInstances[i];
                     }
 
                     lastStabilityColor = stabilityColor;
@@ -498,7 +529,8 @@ namespace TacticalCombat.Building
                 {
                     foreach (var renderer in ghostRenderers)
                     {
-                        renderer.material = invalidPlacementMaterial;
+                        // ✅ FIX: Use sharedMaterial to avoid creating new instances
+                        renderer.sharedMaterial = invalidPlacementMaterial;
                     }
                 }
             }
@@ -706,10 +738,34 @@ namespace TacticalCombat.Building
             {
                 ExitBuildMode();
             }
-            
+
             DestroyGhostPreview();
         }
-        
+
+        /// <summary>
+        /// ✅ FIX: Cleanup on destroy to prevent memory leaks
+        /// </summary>
+        private void OnDestroy()
+        {
+            // Cleanup materials
+            if (ghostMaterialInstances != null)
+            {
+                foreach (var mat in ghostMaterialInstances)
+                {
+                    if (mat != null)
+                    {
+                        Destroy(mat);
+                    }
+                }
+                ghostMaterialInstances = null;
+            }
+
+            // Destroy ghost preview
+            DestroyGhostPreview();
+
+            Debug.Log("🗑️ [SimpleBuildMode] Cleanup completed");
+        }
+
         public bool IsBuildModeActive() => isBuildModeActive;
         
         private void OnDrawGizmos()

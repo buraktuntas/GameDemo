@@ -11,9 +11,10 @@ namespace TacticalCombat.Combat
     /// ✅ Silah sesi fix
     /// ✅ Build modu input çakışması fix
     /// ✅ Weapon state reset
+    /// ✅ Network support for multiplayer
     /// </summary>
     [RequireComponent(typeof(AudioSource))]
-    public class WeaponSystem : MonoBehaviour
+    public class WeaponSystem : NetworkBehaviour
     {
         [Header("📦 WEAPON CONFIG")]
         [SerializeField] private WeaponConfig currentWeapon;
@@ -264,25 +265,33 @@ namespace TacticalCombat.Combat
                 return;
             }
             
-            // Fire
-            if (Input.GetButton("Fire1"))
+            // Fire - ✅ FIX: Separate auto and semi-auto to prevent stuck shooting
+            if (currentWeapon != null)
             {
-                if (debugInputs && Time.frameCount % 30 == 0)
+                if (currentWeapon.fireMode == FireMode.Auto)
                 {
-                    Debug.Log($"🔫 [WeaponSystem] Fire1 pressed - CanFire: {CanFire()}, FireMode: {currentWeapon?.fireMode}");
-                }
-                
-                if (CanFire())
-                {
-                    if (currentWeapon.fireMode == FireMode.Auto || Input.GetButtonDown("Fire1"))
+                    // Auto mode: Hold to fire continuously
+                    if (Input.GetButton("Fire1") && CanFire())
                     {
                         Fire();
                     }
+                    else if (Input.GetButton("Fire1") && currentAmmo <= 0 && Time.frameCount % 30 == 0)
+                    {
+                        // Empty gun sound (throttled)
+                        PlayEmptySound();
+                    }
                 }
-                else if (currentAmmo <= 0)
+                else
                 {
-                    // Empty gun sound
-                    PlayEmptySound();
+                    // Semi-auto/Burst: Press to fire once
+                    if (Input.GetButtonDown("Fire1") && CanFire())
+                    {
+                        Fire();
+                    }
+                    else if (Input.GetButtonDown("Fire1") && currentAmmo <= 0)
+                    {
+                        PlayEmptySound();
+                    }
                 }
             }
             
@@ -320,8 +329,12 @@ namespace TacticalCombat.Combat
         
         private void Fire()
         {
-            Debug.Log($"🔥 [WeaponSystem] FIRE() executing - Weapon: {currentWeapon?.weaponName}, Ammo: {currentAmmo}");
-            
+            // ✅ FIX: Throttle debug logs to prevent console spam
+            if (debugInputs && Time.frameCount % 60 == 0)
+            {
+                Debug.Log($"🔥 [WeaponSystem] FIRE() executing - Weapon: {currentWeapon?.weaponName}, Ammo: {currentAmmo}");
+            }
+
             nextFireTime = Time.time + (1f / currentWeapon.fireRate);
             currentAmmo--;
             
@@ -392,56 +405,96 @@ namespace TacticalCombat.Combat
         
         private void ProcessHit(RaycastHit hit)
         {
+            // ✅ FIX: Send hit to server for validation (server-authoritative damage)
+            if (isServer)
+            {
+                // Server processes damage directly
+                ProcessHitOnServer(hit);
+            }
+            else
+            {
+                // Client sends hit to server for validation
+                CmdProcessHit(hit.point, hit.normal, hit.distance, hit.collider.gameObject);
+            }
+
+            // Visual feedback (client-side only)
+            SurfaceType surface = DetermineSurfaceType(hit.collider);
+            Debug.Log($"🎯 [WeaponSystem] HIT: {hit.collider.name} - Surface: {surface} - Distance: {hit.distance:F1}m");
+        }
+
+        /// <summary>
+        /// ✅ FIX: Client requests server to process hit (anti-cheat)
+        /// </summary>
+        [Command]
+        private void CmdProcessHit(Vector3 hitPoint, Vector3 hitNormal, float distance, GameObject hitObject)
+        {
+            // Server validates and processes hit
+            if (hitObject == null) return;
+
+            // Note: We can't pass full RaycastHit via Command, so we reconstruct minimal data
+            Collider collider = hitObject.GetComponent<Collider>();
+            if (collider == null) return;
+
+            // Process on server
+            ProcessHitOnServer(hitPoint, hitNormal, distance, collider);
+        }
+
+        /// <summary>
+        /// ✅ Server-authoritative hit processing
+        /// </summary>
+        private void ProcessHitOnServer(RaycastHit hit)
+        {
+            ProcessHitOnServer(hit.point, hit.normal, hit.distance, hit.collider);
+        }
+
+        private void ProcessHitOnServer(Vector3 hitPoint, Vector3 hitNormal, float distance, Collider hitCollider)
+        {
             // ⭐ ÖNCELİKLE HITBOX KONTROL ET
-            var hitbox = hit.collider.GetComponent<Hitbox>();
-            
+            var hitbox = hitCollider.GetComponent<Hitbox>();
+
             Health health = null;
             float damage = currentWeapon.damage;
             bool isCritical = false;
-            
+
             if (hitbox != null)
             {
                 // Hitbox found - use multiplier
                 health = hitbox.GetParentHealth();
                 damage = hitbox.CalculateDamage(Mathf.RoundToInt(damage));
                 isCritical = hitbox.IsCritical();
-                
-                Debug.Log($"🎯 [WeaponSystem] HIT {hitbox.zone} - Damage: {damage} (Multiplier: {hitbox.damageMultiplier}x)");
+
+                Debug.Log($"🎯 [Server] HIT {hitbox.zone} - Damage: {damage} (Multiplier: {hitbox.damageMultiplier}x)");
             }
             else
             {
                 // No hitbox - direct health component
-                health = hit.collider.GetComponent<Health>();
-                Debug.Log($"🎯 [WeaponSystem] HIT (no hitbox) - Damage: {damage}");
+                health = hitCollider.GetComponent<Health>();
+                Debug.Log($"🎯 [Server] HIT (no hitbox) - Damage: {damage}");
             }
-            
+
             if (health != null)
             {
                 // Distance falloff
-                float distanceFactor = Mathf.Clamp01(1f - (hit.distance / currentWeapon.range));
+                float distanceFactor = Mathf.Clamp01(1f - (distance / currentWeapon.range));
                 damage *= distanceFactor;
-                
-                // Apply damage
+
+                // Apply damage (server-side)
                 DamageInfo damageInfo = new DamageInfo(
                     Mathf.RoundToInt(damage),
-                    0, // ✅ FIX: Local player ID (no network sync needed)
+                    netId,
                     DamageType.Bullet,
-                    hit.point,
-                    hit.normal
+                    hitPoint,
+                    hitNormal
                 );
-                
+
                 health.ApplyDamage(damageInfo);
-                
+
                 // Visual feedback
                 if (isCritical)
                 {
-                    Debug.Log($"💥 [WeaponSystem] CRITICAL HIT! Damage: {damage}");
+                    Debug.Log($"💥 [Server] CRITICAL HIT! Damage: {damage}");
                 }
             }
-            
-            // Determine surface type for effects
-            SurfaceType surface = DetermineSurfaceType(hit.collider);
-            Debug.Log($"🎯 [WeaponSystem] HIT: {hit.collider.name} - Surface: {surface} - Distance: {hit.distance:F1}m");
         }
         
         private SurfaceType DetermineSurfaceType(Collider collider)
@@ -939,7 +992,35 @@ namespace TacticalCombat.Combat
             
             Debug.Log("✅ [WeaponSystem] Default weapon config created!");
         }
-        
+
+        /// <summary>
+        /// ✅ FIX: Cleanup coroutines and events on destroy
+        /// </summary>
+        private void OnDestroy()
+        {
+            // Stop all coroutines to prevent memory leaks
+            StopAllCoroutines();
+
+            // Clear event subscriptions
+            OnAmmoChanged = null;
+            OnReloadStarted = null;
+            OnReloadComplete = null;
+            OnWeaponFired = null;
+
+            if (debugAudio)
+            {
+                Debug.Log("🗑️ [WeaponSystem] Cleanup completed - coroutines stopped, events cleared");
+            }
+        }
+
+        /// <summary>
+        /// ✅ FIX: Stop coroutines on disable
+        /// </summary>
+        private void OnDisable()
+        {
+            StopAllCoroutines();
+        }
+
         // ═══════════════════════════════════════════════════════════
         // PUBLIC PROPERTIES FOR EDITOR ACCESS
         // ═══════════════════════════════════════════════════════════

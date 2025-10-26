@@ -16,14 +16,19 @@ namespace TacticalCombat.Network
 
         private void Start()
         {
-            // Unity 6: Use FindFirstObjectByType instead of FindObjectOfType
-            networkManager = FindFirstObjectByType<NetworkManager>();
-            
+            // ✅ FIX: Cache NetworkManager reference (called once in Start, but good practice)
             if (networkManager == null)
             {
-                Debug.LogError("No NetworkManager found in scene!");
+                networkManager = FindFirstObjectByType<NetworkManager>();
+            }
+
+            if (networkManager == null)
+            {
+                Debug.LogError("❌ [NetworkSetup] No NetworkManager found in scene!");
                 return;
             }
+
+            Debug.Log("✅ [NetworkSetup] NetworkManager found and cached");
 
             if (autoStartHost)
             {
