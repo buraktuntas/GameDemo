@@ -134,8 +134,23 @@ namespace TacticalCombat.Combat
         public void SetMaxHealth(int max)
         {
             maxHealth = max;
-            if (isServer)
+            
+            // Editor mode'da veya Play mode'da güvenli şekilde set et
+            try
             {
+                if (Application.isPlaying && isServer)
+                {
+                    currentHealth = maxHealth;
+                }
+                else
+                {
+                    // Editor mode'da veya client'da direkt set et
+                    currentHealth = maxHealth;
+                }
+            }
+            catch (System.Exception)
+            {
+                // Herhangi bir hata durumunda direkt set et
                 currentHealth = maxHealth;
             }
         }

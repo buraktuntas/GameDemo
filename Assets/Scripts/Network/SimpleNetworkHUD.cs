@@ -10,10 +10,56 @@ namespace TacticalCombat.Network
     public class SimpleNetworkHUD : MonoBehaviour
     {
         private NetworkManager networkManager;
+        
+        [Header("Port Settings")]
+        [SerializeField] private ushort port = 7777; // Her ikisi için aynı port
 
         private void Start()
         {
             networkManager = GetComponent<NetworkManager>();
+            
+            // Her ikisi için aynı port kullan
+            var transport = networkManager.transport as kcp2k.KcpTransport;
+            if (transport != null)
+            {
+                transport.port = port;
+                Debug.Log($"🎮 [SimpleNetworkHUD] Port: {port}");
+            }
+            
+            // ✅ FIX: Spawnable prefabs kontrolü
+            EnsurePlayerPrefabInSpawnableList();
+        }
+        
+        /// <summary>
+        /// Player prefab'ın spawnable listesinde olduğundan emin ol
+        /// </summary>
+        private void EnsurePlayerPrefabInSpawnableList()
+        {
+            if (networkManager.playerPrefab != null)
+            {
+                // ✅ FIX: AssetId kontrolü
+                var netIdentity = networkManager.playerPrefab.GetComponent<NetworkIdentity>();
+                if (netIdentity != null && netIdentity.assetId == 0)
+                {
+                    Debug.LogError("❌ [SimpleNetworkHUD] Player prefab assetId is 0! This will cause network issues.");
+                    Debug.LogError("   Solution: Run 'Tools > Tactical Combat > Recreate Player Prefab (FINAL)'");
+                    return;
+                }
+                
+                if (!networkManager.spawnPrefabs.Contains(networkManager.playerPrefab))
+                {
+                    networkManager.spawnPrefabs.Add(networkManager.playerPrefab);
+                    Debug.Log($"✅ [SimpleNetworkHUD] Player prefab spawnable listesine eklendi: {networkManager.playerPrefab.name}");
+                }
+                else
+                {
+                    Debug.Log($"✓ [SimpleNetworkHUD] Player prefab zaten spawnable listesinde: {networkManager.playerPrefab.name}");
+                }
+            }
+            else
+            {
+                Debug.LogError("❌ [SimpleNetworkHUD] Player prefab NULL! NetworkManager'a Player Prefab atayın.");
+            }
         }
 
         private void Update()

@@ -101,10 +101,12 @@ namespace TacticalCombat.Player
             Debug.Log($"   isServer: {isServer}");
             Debug.Log($"   isClient: {isClient}");
             Debug.Log($"   Team: {team}");
+            Debug.Log($"   Position: {transform.position}");
+            Debug.Log($"   Scene: {gameObject.scene.name}");
             Debug.Log("═══════════════════════════════════════");
 
-            // Cache InputManager
-            inputManager = InputManager.Instance;
+            // Cache InputManager - her player'ın kendi InputManager'ı var
+            inputManager = GetComponent<InputManager>();
 
             // Setup camera
             SetupCamera();
@@ -187,6 +189,19 @@ namespace TacticalCombat.Player
 
             // Store base FOV
             baseFOV = playerCamera.fieldOfView;
+
+            // 🔧 AUDIO LISTENER FIX: Sadece local player'da AudioListener aktif olsun
+            AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
+            if (audioListener != null)
+            {
+                // Sadece local player'da AudioListener aktif
+                audioListener.enabled = isLocalPlayer;
+                
+                if (showDebugInfo)
+                {
+                    Debug.Log($"🔊 AudioListener enabled: {audioListener.enabled} (isLocalPlayer: {isLocalPlayer})");
+                }
+            }
 
             if (showDebugInfo)
             {

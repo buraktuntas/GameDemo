@@ -45,6 +45,9 @@ namespace TacticalCombat.Player
         
         private void RegisterWithMatchManager()
         {
+            // ✅ FIX: Sadece server'da register et
+            if (!isServer) return;
+            
             var matchManager = FindFirstObjectByType<MatchManager>();
             if (matchManager != null)
             {

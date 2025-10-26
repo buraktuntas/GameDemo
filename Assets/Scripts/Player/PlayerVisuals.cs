@@ -37,22 +37,59 @@ namespace TacticalCombat.Player
         
         private void Awake()
         {
-            // Find visual renderer if not assigned
-            if (visualRenderer == null)
-            {
-                visualRenderer = GetComponent<Renderer>();
-                if (visualRenderer == null)
-                {
-                    // Try to find in children
-                    visualRenderer = GetComponentInChildren<Renderer>();
-                }
-            }
+            // ✅ FIX: visualRenderer'ı güvenli şekilde bul
+            FindVisualRenderer();
             
             // Create default materials if not assigned
             CreateDefaultMaterials();
             
             // Initialize with neutral color
             UpdateTeamColor(Team.None);
+        }
+        
+        /// <summary>
+        /// visualRenderer'ı bul ve ata
+        /// </summary>
+        private void FindVisualRenderer()
+        {
+            if (visualRenderer == null)
+            {
+                // Önce root'ta ara
+                visualRenderer = GetComponent<Renderer>();
+                if (visualRenderer == null)
+                {
+                    // Sonra children'da ara
+                    visualRenderer = GetComponentInChildren<Renderer>();
+                }
+                
+                if (visualRenderer == null)
+                {
+                    // Son çare: PlayerVisual child'ı oluştur
+                    CreatePlayerVisual();
+                }
+            }
+        }
+        
+        /// <summary>
+        /// PlayerVisual child GameObject'i oluştur
+        /// </summary>
+        private void CreatePlayerVisual()
+        {
+            GameObject visualGO = new GameObject("PlayerVisual");
+            visualGO.transform.SetParent(transform);
+            visualGO.transform.localPosition = Vector3.zero;
+            visualGO.transform.localRotation = Quaternion.identity;
+            visualGO.transform.localScale = Vector3.one;
+            
+            // Capsule mesh oluştur
+            GameObject tempCapsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            MeshFilter meshFilter = visualGO.AddComponent<MeshFilter>();
+            visualRenderer = visualGO.AddComponent<MeshRenderer>();
+            
+            meshFilter.sharedMesh = tempCapsule.GetComponent<MeshFilter>().sharedMesh;
+            Object.DestroyImmediate(tempCapsule);
+            
+            Debug.Log("✅ PlayerVisual GameObject oluşturuldu ve visualRenderer atandı");
         }
         
         public override void OnStartLocalPlayer()
@@ -89,8 +126,13 @@ namespace TacticalCombat.Player
         {
             if (visualRenderer == null)
             {
-                Debug.LogWarning("PlayerVisuals: visualRenderer is null!");
-                return;
+                // Güvenli şekilde visualRenderer'ı bul
+                visualRenderer = GetComponentInChildren<MeshRenderer>();
+                if (visualRenderer == null)
+                {
+                    Debug.LogWarning("PlayerVisuals: visualRenderer is null! Player prefab'da MeshRenderer eksik olabilir.");
+                    return;
+                }
             }
             
             currentTeam = team;

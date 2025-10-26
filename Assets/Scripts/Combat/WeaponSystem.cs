@@ -25,6 +25,7 @@ namespace TacticalCombat.Combat
         
         [Header("🎨 VISUAL EFFECTS")]
         [SerializeField] private GameObject muzzleFlashPrefab;
+        [SerializeField] private GameObject hitEffectPrefab;
         [SerializeField] private GameObject bulletHolePrefab;
         [SerializeField] private GameObject bloodEffectPrefab;
         [SerializeField] private GameObject metalSparksPrefab;
@@ -116,7 +117,8 @@ namespace TacticalCombat.Combat
             base.OnStartLocalPlayer();
             
             // ✅ FIX: InputManager referansı
-            inputManager = TacticalCombat.Player.InputManager.Instance;
+            // Cache InputManager - her player'ın kendi InputManager'ı var
+            inputManager = GetComponent<TacticalCombat.Player.InputManager>();
 
             if (debugInputs)
             {
@@ -757,19 +759,45 @@ namespace TacticalCombat.Combat
             
             Debug.Log("✅ [WeaponSystem] Default weapon config created!");
         }
+        
+        // ═══════════════════════════════════════════════════════════
+        // PUBLIC PROPERTIES FOR EDITOR ACCESS
+        // ═══════════════════════════════════════════════════════════
+        
+        public WeaponConfig CurrentWeapon
+        {
+            get { return currentWeapon; }
+            set { currentWeapon = value; }
+        }
+        
+        public AudioClip[] FireSounds
+        {
+            get { return fireSounds; }
+            set { fireSounds = value; }
+        }
+        
+        public AudioClip[] HitSounds
+        {
+            get { return hitSounds; }
+            set { hitSounds = value; }
+        }
+        
+        public GameObject MuzzleFlashPrefab
+        {
+            get { return muzzleFlashPrefab; }
+            set { muzzleFlashPrefab = value; }
+        }
+        
+        public GameObject HitEffectPrefab
+        {
+            get { return hitEffectPrefab; }
+            set { hitEffectPrefab = value; }
+        }
     }
     
     // ═══════════════════════════════════════════════════════════
-    // WEAPON CONFIG (ScriptableObject)
+    // SURFACE TYPES
     // ═══════════════════════════════════════════════════════════
-    
-    [System.Serializable]
-    public enum FireMode
-    {
-        Semi,
-        Auto,
-        Burst
-    }
     
     [System.Serializable]
     public enum SurfaceType
@@ -779,30 +807,5 @@ namespace TacticalCombat.Combat
         Metal,
         Wood,
         Stone
-    }
-    
-    [CreateAssetMenu(fileName = "New Weapon", menuName = "Tactical Combat/Weapon Config")]
-    public class WeaponConfig : ScriptableObject
-    {
-        [Header("📊 STATS")]
-        public string weaponName = "Assault Rifle";
-        public float damage = 25f;
-        public float range = 100f;
-        public float fireRate = 10f;
-        public FireMode fireMode = FireMode.Auto;
-        
-        [Header("🎯 ACCURACY")]
-        public float hipSpread = 0.05f;
-        public float aimSpread = 0.01f;
-        public float recoilAmount = 2f;
-        public float headshotMultiplier = 2f;
-        
-        [Header("📦 AMMO")]
-        public int magazineSize = 30;
-        public int maxAmmo = 120;
-        public float reloadTime = 2f;
-        
-        [Header("🎯 TARGETING")]
-        public LayerMask hitMask = ~0;
     }
 }

@@ -5,29 +5,12 @@ namespace TacticalCombat.Player
     /// <summary>
     /// Professional Input Manager - Production Ready
     /// Manages input states, cursor modes, pause menu, and events
+    /// Her player'ın kendi InputManager'ı olmalı (singleton değil)
     /// </summary>
     public class InputManager : MonoBehaviour
     {
-        // Singleton
-        private static InputManager _instance;
-        public static InputManager Instance
-        {
-            get
-            {
-                if (_instance == null)
-                {
-                    _instance = FindFirstObjectByType<InputManager>();
-                    
-                    if (_instance == null)
-                    {
-                        GameObject go = new GameObject("[InputManager]");
-                        _instance = go.AddComponent<InputManager>();
-                        DontDestroyOnLoad(go);
-                    }
-                }
-                return _instance;
-            }
-        }
+        // Singleton kaldırıldı - multiplayer için her player kendi input'unu almalı
+        // Her player'ın kendi InputManager component'i var
         
         // Cursor modes
         public enum CursorMode
@@ -69,18 +52,8 @@ namespace TacticalCombat.Player
         
         private void Awake()
         {
-            if (_instance == null)
-            {
-                _instance = this;
-                DontDestroyOnLoad(gameObject);
-                Debug.Log("✅ InputManager initialized");
-            }
-            else if (_instance != this)
-            {
-                Debug.Log("⚠️ Duplicate InputManager destroyed");
-                Destroy(gameObject);
-                return;
-            }
+            // Her player'ın kendi InputManager'ı var - singleton değil
+            Debug.Log("✅ InputManager initialized for this player");
         }
         
         private void Start()

@@ -23,10 +23,12 @@ namespace TacticalCombat.UI
         private void OnGUI()
         {
             // ⭐ Sadece FPS mode'da crosshair göster
-            if (InputManager.Instance != null)
+            // InputManager singleton olmadığı için local player'ı bul
+            InputManager localInputManager = FindLocalPlayerInputManager();
+            if (localInputManager != null)
             {
-                bool currentBuildMode = InputManager.Instance.IsInBuildMode || InputManager.Instance.IsInMenu;
-                InputManager.CursorMode currentCursorMode = InputManager.Instance.GetCurrentMode();
+                bool currentBuildMode = localInputManager.IsInBuildMode || localInputManager.IsInMenu;
+                InputManager.CursorMode currentCursorMode = localInputManager.GetCurrentMode();
                 
                 // Debug logları sadece state değiştiğinde göster
                 if (showDebugInfo)
@@ -78,6 +80,27 @@ namespace TacticalCombat.UI
             );
 
             GUI.color = oldColor;
+        }
+        
+        /// <summary>
+        /// Local player'ın InputManager'ını bul
+        /// </summary>
+        private InputManager FindLocalPlayerInputManager()
+        {
+            // Tüm InputManager'ları bul ve local player'ı bul
+            InputManager[] allInputManagers = FindObjectsByType<InputManager>(FindObjectsSortMode.None);
+            
+            foreach (var inputManager in allInputManagers)
+            {
+                // NetworkBehaviour olup olmadığını kontrol et
+                var networkBehaviour = inputManager.GetComponent<Mirror.NetworkBehaviour>();
+                if (networkBehaviour != null && networkBehaviour.isLocalPlayer)
+                {
+                    return inputManager;
+                }
+            }
+            
+            return null;
         }
     }
 }

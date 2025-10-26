@@ -45,6 +45,9 @@ namespace TacticalCombat.Building
         // ✅ FIX: Weapon system reference
         private WeaponSystem weaponSystem;
         
+        // ✅ FIX: InputManager reference - her player'ın kendi InputManager'ı var
+        private TacticalCombat.Player.InputManager inputManager;
+        
         // State
         private bool isBuildModeActive = false;
         private GameObject ghostPreview;
@@ -83,6 +86,15 @@ namespace TacticalCombat.Building
             if (weaponSystem == null)
             {
                 Debug.LogWarning("⚠️ [SimpleBuildMode] WeaponSystem not found!");
+            }
+            
+            // ✅ FIX: Get InputManager reference - her player'ın kendi InputManager'ı var
+            inputManager = GetComponent<TacticalCombat.Player.InputManager>();
+            if (inputManager == null)
+            {
+                Debug.LogWarning("⚠️ [SimpleBuildMode] InputManager not found! Creating one...");
+                inputManager = gameObject.AddComponent<TacticalCombat.Player.InputManager>();
+                Debug.Log("✅ [SimpleBuildMode] InputManager created and assigned");
             }
             
             // Get FPSController and camera
@@ -273,18 +285,18 @@ namespace TacticalCombat.Building
             currentRotationY = 0f;
             
             // ✅ FIX: InputManager configuration
-            if (InputManager.Instance != null)
+            if (inputManager != null)
             {
-                InputManager.Instance.IsInBuildMode = true;
-                InputManager.Instance.BlockShootInput = true; // ← Silah kullanımını engelle
+                inputManager.IsInBuildMode = true;
+                inputManager.BlockShootInput = true; // ← Silah kullanımını engelle
                 
                 if (allowCameraInBuildMode && allowMovementInBuildMode)
                 {
                     // VALHEIM STYLE
                     Cursor.lockState = CursorLockMode.Confined;
                     Cursor.visible = true;
-                    InputManager.Instance.BlockCameraInput = false;
-                    InputManager.Instance.BlockMovementInput = false;
+                    inputManager.BlockCameraInput = false;
+                    inputManager.BlockMovementInput = false;
                     Debug.Log("🏗️ [SimpleBuildMode] Build mode: Valheim style (Movement + Camera)");
                 }
                 else if (allowMovementInBuildMode && !allowCameraInBuildMode)
@@ -292,8 +304,8 @@ namespace TacticalCombat.Building
                     // FORTNITE STYLE
                     Cursor.lockState = CursorLockMode.None;
                     Cursor.visible = true;
-                    InputManager.Instance.BlockCameraInput = true;
-                    InputManager.Instance.BlockMovementInput = false;
+                    inputManager.BlockCameraInput = true;
+                    inputManager.BlockMovementInput = false;
                     Debug.Log("🏗️ [SimpleBuildMode] Build mode: Fortnite style (Movement only)");
                 }
                 else
@@ -301,8 +313,8 @@ namespace TacticalCombat.Building
                     // STATIC BUILD
                     Cursor.lockState = CursorLockMode.None;
                     Cursor.visible = true;
-                    InputManager.Instance.BlockCameraInput = true;
-                    InputManager.Instance.BlockMovementInput = true;
+                    inputManager.BlockCameraInput = true;
+                    inputManager.BlockMovementInput = true;
                     Debug.Log("🏗️ [SimpleBuildMode] Build mode: Static (No movement)");
                 }
             }
@@ -329,11 +341,11 @@ namespace TacticalCombat.Building
             isBuildModeActive = false;
             
             // ✅ FIX: InputManager restoration
-            if (InputManager.Instance != null)
+            if (inputManager != null)
             {
-                InputManager.Instance.IsInBuildMode = false;
-                InputManager.Instance.BlockShootInput = false; // ← Silah kullanımını aç
-                InputManager.Instance.SetCursorMode(InputManager.CursorMode.Locked);
+                inputManager.IsInBuildMode = false;
+                inputManager.BlockShootInput = false; // ← Silah kullanımını aç
+                inputManager.SetCursorMode(InputManager.CursorMode.Locked);
             }
             
             // ✅ FIX: Silahı aktif et

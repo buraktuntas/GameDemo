@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 328734702825915639}
   - component: {fileID: 2312947150911743238}
   - component: {fileID: 1846232939587805995}
-  - component: {fileID: 6591249353330514815}
+  - component: {fileID: 8293929549146511264}
   m_Layer: 0
   m_Name: BulletHole
   m_TagString: Untagged
@@ -90,7 +90,7 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3543283723937687351}
   m_Mesh: {fileID: 0}
---- !u!114 &6591249353330514815
+--- !u!114 &8293929549146511264
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}

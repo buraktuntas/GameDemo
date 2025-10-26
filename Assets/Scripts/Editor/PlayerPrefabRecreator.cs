@@ -76,7 +76,7 @@ namespace TacticalCombat.Editor
                     
                     // Create simple capsule mesh
                     GameObject tempCapsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-                    meshFilter.mesh = tempCapsule.GetComponent<MeshFilter>().mesh;
+                    meshFilter.sharedMesh = tempCapsule.GetComponent<MeshFilter>().sharedMesh;
                     Object.DestroyImmediate(tempCapsule);
                 }
                 
