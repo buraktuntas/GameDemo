@@ -6,7 +6,7 @@ AudioClip:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: EmptyGunSound
+  m_Name: EmptySound
   m_LoadType: 0
   m_Channels: 1
   m_Frequency: 44100

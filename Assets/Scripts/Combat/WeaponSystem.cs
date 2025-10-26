@@ -499,6 +499,57 @@ namespace TacticalCombat.Combat
                     StartCoroutine(ReturnHitEffectToPool(effect, 2f));
                 }
             }
+            
+            // ✅ FIX: Network sync hit effects
+            CmdSpawnHitEffect(hit.point, hit.normal, surface);
+        }
+        
+        [Command]
+        private void CmdSpawnHitEffect(Vector3 position, Vector3 normal, SurfaceType surface)
+        {
+            RpcSpawnHitEffect(position, normal, surface);
+        }
+        
+        [ClientRpc]
+        private void RpcSpawnHitEffect(Vector3 position, Vector3 normal, SurfaceType surface)
+        {
+            // ✅ FIX: Play hit effects for all players
+            GameObject effectPrefab = null;
+            
+            switch (surface)
+            {
+                case SurfaceType.Flesh:
+                    effectPrefab = bloodEffectPrefab;
+                    break;
+                case SurfaceType.Metal:
+                    effectPrefab = metalSparksPrefab;
+                    break;
+                case SurfaceType.Wood:
+                case SurfaceType.Stone:
+                    effectPrefab = bulletHolePrefab;
+                    break;
+                default:
+                    effectPrefab = bulletHolePrefab;
+                    break;
+            }
+            
+            if (effectPrefab != null)
+            {
+                GameObject effect = GetPooledHitEffect();
+                if (effect != null)
+                {
+                    effect.transform.position = position;
+                    effect.transform.rotation = Quaternion.LookRotation(normal);
+                    effect.SetActive(true);
+                    
+                    StartCoroutine(ReturnHitEffectToPool(effect, 2f));
+                }
+            }
+            else
+            {
+                // ✅ FIX: Fallback if effectPrefab is null
+                Debug.LogWarning("⚠️ [WeaponSystem] effectPrefab is null for surface: " + surface);
+            }
         }
         
         private GameObject GetPooledHitEffect()
@@ -506,6 +557,13 @@ namespace TacticalCombat.Combat
             if (hitEffectPool.Count > 0)
             {
                 return hitEffectPool.Dequeue();
+            }
+            
+            // ✅ FIX: Null check for hitEffectPrefab
+            if (hitEffectPrefab == null)
+            {
+                Debug.LogError("❌ [WeaponSystem] hitEffectPrefab is NULL! Cannot create hit effect.");
+                return null;
             }
             
             // Pool empty, create new one
@@ -779,11 +837,15 @@ namespace TacticalCombat.Combat
         [ClientRpc]
         private void RpcFire()
         {
-            if (isLocalPlayer) return;
-            
-            // Play effects for other players
+            // ✅ FIX: Play effects for ALL players (including local player)
             PlayMuzzleFlash();
             PlayFireSound();
+            
+            // ✅ FIX: Play weapon animation for other players
+            if (weaponAnimator != null)
+            {
+                weaponAnimator.SetTrigger("Fire");
+            }
         }
         
         // ═══════════════════════════════════════════════════════════
