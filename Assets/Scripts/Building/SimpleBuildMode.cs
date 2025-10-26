@@ -168,14 +168,32 @@ namespace TacticalCombat.Building
         {
             if (validPlacementMaterial == null)
             {
-                validPlacementMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-                validPlacementMaterial.color = new Color(0, 1, 0, 0.5f);
+                // ✅ FIX: Use Standard shader for simplicity
+                validPlacementMaterial = new Material(Shader.Find("Standard"));
+                validPlacementMaterial.color = new Color(0, 1, 0, 0.7f); // Green with alpha
+                validPlacementMaterial.SetFloat("_Mode", 3); // Transparent mode
+                validPlacementMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                validPlacementMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                validPlacementMaterial.SetInt("_ZWrite", 0);
+                validPlacementMaterial.DisableKeyword("_ALPHATEST_ON");
+                validPlacementMaterial.EnableKeyword("_ALPHABLEND_ON");
+                validPlacementMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+                validPlacementMaterial.renderQueue = 3000;
             }
             
             if (invalidPlacementMaterial == null)
             {
-                invalidPlacementMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-                invalidPlacementMaterial.color = new Color(1, 0, 0, 0.5f);
+                // ✅ FIX: Use Standard shader for simplicity
+                invalidPlacementMaterial = new Material(Shader.Find("Standard"));
+                invalidPlacementMaterial.color = new Color(1, 0, 0, 0.7f); // Red with alpha
+                invalidPlacementMaterial.SetFloat("_Mode", 3); // Transparent mode
+                invalidPlacementMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                invalidPlacementMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                invalidPlacementMaterial.SetInt("_ZWrite", 0);
+                invalidPlacementMaterial.DisableKeyword("_ALPHATEST_ON");
+                invalidPlacementMaterial.EnableKeyword("_ALPHABLEND_ON");
+                invalidPlacementMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+                invalidPlacementMaterial.renderQueue = 3000;
             }
         }
         

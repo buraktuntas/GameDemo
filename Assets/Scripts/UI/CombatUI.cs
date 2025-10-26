@@ -82,19 +82,17 @@ namespace TacticalCombat.UI
             
             foreach (var weapon in weapons)
             {
-                if (weapon.isLocalPlayer)
-                {
-                    weaponSystem = weapon;
-                    
-                    // Subscribe to events
-                    weapon.OnAmmoChanged += UpdateAmmoDisplay;
-                    weapon.OnWeaponFired += OnWeaponFired;
-                    weapon.OnReloadStarted += OnReloadStarted;
-                    weapon.OnReloadComplete += OnReloadComplete;
-                    
-                    Debug.Log("✅ Combat UI connected to local player weapon");
-                    break;
-                }
+                // ✅ FIX: No need for isLocalPlayer check - MonoBehaviour handles local player
+                weaponSystem = weapon;
+                
+                // Subscribe to events
+                weapon.OnAmmoChanged += UpdateAmmoDisplay;
+                weapon.OnWeaponFired += OnWeaponFired;
+                weapon.OnReloadStarted += OnReloadStarted;
+                weapon.OnReloadComplete += OnReloadComplete;
+                
+                Debug.Log("✅ Combat UI connected to local player weapon");
+                break;
             }
         }
         

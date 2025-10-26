@@ -13,7 +13,7 @@ namespace TacticalCombat.Combat
     /// ✅ Weapon state reset
     /// </summary>
     [RequireComponent(typeof(AudioSource))]
-    public class WeaponSystem : NetworkBehaviour
+    public class WeaponSystem : MonoBehaviour
     {
         [Header("📦 WEAPON CONFIG")]
         [SerializeField] private WeaponConfig currentWeapon;
@@ -38,9 +38,9 @@ namespace TacticalCombat.Combat
         [SerializeField] private AudioClip[] hitSounds;
         
         [Header("📊 WEAPON STATE")]
-        [SyncVar] private int currentAmmo;
-        [SyncVar] private int reserveAmmo;
-        [SyncVar] private bool isReloading;
+        private int currentAmmo;
+        private int reserveAmmo;
+        private bool isReloading;
         
         private float nextFireTime;
         private float recoilAmount;
@@ -148,17 +148,15 @@ namespace TacticalCombat.Combat
             }
         }
         
-        public override void OnStartLocalPlayer()
+        private void Start()
         {
-            base.OnStartLocalPlayer();
-            
             // ✅ FIX: InputManager referansı
             // Cache InputManager - her player'ın kendi InputManager'ı var
             inputManager = GetComponent<TacticalCombat.Player.InputManager>();
 
             if (debugInputs)
             {
-                Debug.Log($"✅ [WeaponSystem] OnStartLocalPlayer - InputManager: {(inputManager != null ? "Found" : "NULL")}");
+                Debug.Log($"✅ [WeaponSystem] Start - InputManager: {(inputManager != null ? "Found" : "NULL")}");
             }
 
             // ⚡ PERFORMANCE FIX: Cache camera reference
@@ -206,12 +204,26 @@ namespace TacticalCombat.Combat
         
         private void Update()
         {
-            if (!isLocalPlayer) return;
+            // ✅ FIX: No need for isLocalPlayer check - MonoBehaviour handles local player
             
             // ✅ FIX: InputManager null kontrolü
             if (inputManager == null)
             {
+                // Try to find InputManager on this object first
                 inputManager = GetComponent<TacticalCombat.Player.InputManager>();
+                
+                // If not found, try parent (Player prefab)
+                if (inputManager == null)
+                {
+                    inputManager = GetComponentInParent<TacticalCombat.Player.InputManager>();
+                }
+                
+                // If still not found, try to find in scene
+                if (inputManager == null)
+                {
+                    inputManager = FindFirstObjectByType<TacticalCombat.Player.InputManager>();
+                }
+                
                 if (inputManager == null)
                 {
                     if (debugInputs && Time.frameCount % 60 == 0)
@@ -219,6 +231,10 @@ namespace TacticalCombat.Combat
                         Debug.LogError("❌ [WeaponSystem] InputManager is NULL! Cannot check build mode.");
                     }
                     return;
+                }
+                else
+                {
+                    Debug.Log("✅ [WeaponSystem] InputManager found!");
                 }
             }
             
@@ -323,7 +339,7 @@ namespace TacticalCombat.Combat
             StartCoroutine(CameraShake(0.05f, 0.1f));
             
             // Network sync
-            CmdFire();
+            PlayFireEffects();
             
             // Events
             OnWeaponFired?.Invoke();
@@ -408,7 +424,7 @@ namespace TacticalCombat.Combat
                 // Apply damage
                 DamageInfo damageInfo = new DamageInfo(
                     Mathf.RoundToInt(damage),
-                    netId,
+                    0, // ✅ FIX: Local player ID (no network sync needed)
                     DamageType.Bullet,
                     hit.point,
                     hit.normal
@@ -501,18 +517,11 @@ namespace TacticalCombat.Combat
                 }
             }
             
-            // ✅ FIX: Network sync hit effects
-            CmdSpawnHitEffect(hit.point, hit.normal, surface);
+            // ✅ FIX: Direct hit effects (no network sync needed for local effects)
+            SpawnHitEffect(hit.point, hit.normal, surface);
         }
         
-        [Command]
-        private void CmdSpawnHitEffect(Vector3 position, Vector3 normal, SurfaceType surface)
-        {
-            RpcSpawnHitEffect(position, normal, surface);
-        }
-        
-        [ClientRpc]
-        private void RpcSpawnHitEffect(Vector3 position, Vector3 normal, SurfaceType surface)
+        private void SpawnHitEffect(Vector3 position, Vector3 normal, SurfaceType surface)
         {
             // ✅ FIX: Play hit effects for all players
             GameObject effectPrefab = null;
@@ -605,7 +614,7 @@ namespace TacticalCombat.Combat
             // Apply damage
             DamageInfo damageInfo = new DamageInfo(
                 Mathf.RoundToInt(damage),
-                netId,
+                0, // ✅ FIX: Local player ID (no network sync needed)
                 DamageType.Bullet,
                 hit.point,
                 hit.normal
@@ -829,20 +838,13 @@ namespace TacticalCombat.Combat
             Debug.Log($"🔄 [WeaponSystem] RELOADED: {currentAmmo}/{currentWeapon.magazineSize} (Reserve: {reserveAmmo})");
         }
         
-        [Command]
-        private void CmdFire()
+        private void PlayFireEffects()
         {
-            RpcFire();
-        }
-        
-        [ClientRpc]
-        private void RpcFire()
-        {
-            // ✅ FIX: Play effects for ALL players (including local player)
+            // ✅ FIX: Play effects directly (no network sync needed for local effects)
             PlayMuzzleFlash();
             PlayFireSound();
             
-            // ✅ FIX: Play weapon animation for other players
+            // ✅ FIX: Play weapon animation
             if (weaponAnimator != null)
             {
                 weaponAnimator.SetTrigger("Fire");
