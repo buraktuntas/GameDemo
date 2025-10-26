@@ -415,6 +415,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 453a38a7aa90de142aadb0a7e462f629, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.WeaponSystem
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
   currentWeapon: {fileID: 11400000, guid: 01bdf91161fdc2541b67845425b902bd, type: 2}
   playerCamera: {fileID: 0}
   weaponHolder: {fileID: 1628601356376872349}
@@ -1467,6 +1470,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 453a38a7aa90de142aadb0a7e462f629, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.WeaponSystem
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
   currentWeapon: {fileID: 11400000, guid: 01bdf91161fdc2541b67845425b902bd, type: 2}
   playerCamera: {fileID: 0}
   weaponHolder: {fileID: 1628601356376872349}
@@ -2132,6 +2138,8 @@ GameObject:
   - component: {fileID: 7190127478359227877}
   - component: {fileID: 8283056661691085702}
   - component: {fileID: 6222115655280801091}
+  - component: {fileID: -847034355606232779}
+  - component: {fileID: -4491745158567292518}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -2170,7 +2178,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Mirror::Mirror.NetworkIdentity
   sceneId: 0
-  _assetId: 0
+  _assetId: 2466588532
   serverOnly: 0
   visibility: 0
   hasSpawned: 0
@@ -2463,6 +2471,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 453a38a7aa90de142aadb0a7e462f629, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.WeaponSystem
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
   currentWeapon: {fileID: 11400000, guid: 4f4efd1c86a60cf498b97bb3376aca68, type: 2}
   playerCamera: {fileID: 3500998827890488163}
   weaponHolder: {fileID: 1628601356376872349}
@@ -2513,6 +2524,9 @@ MonoBehaviour:
   obstacleLayer:
     serializedVersion: 2
     m_Bits: 0
+  structureLayer:
+    serializedVersion: 2
+    m_Bits: 0
   placementDistance: 5
   rotationSpeed: 90
   buildModeKey: 98
@@ -2540,6 +2554,51 @@ MonoBehaviour:
   syncMode: 0
   syncInterval: 0
   roleDefinition: {fileID: 0}
+--- !u!114 &-847034355606232779
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8456604194486551462}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 29bca7bb79f41344f912a7e05c680d6f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.CharacterSelector
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  maleCharacterPrefab: {fileID: 7647134206250791342, guid: cc91c8ba8b9a34f4d99e70d721f60b64, type: 3}
+  femaleCharacterPrefab: {fileID: 7647134206250791342, guid: cc91c8ba8b9a34f4d99e70d721f60b64, type: 3}
+  randomizeCharacter: 1
+  useSpawnPoints: 1
+  showDebugInfo: 1
+--- !u!114 &-4491745158567292518
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8456604194486551462}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3757a85c844c15848aa1fe993328137c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.PlayerHitboxSetup
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  setupOnStart: 1
+  showDebug: 1
+  headRadius: 0.15
+  headOffset: {x: 0, y: 1.6, z: 0}
+  chestSize: {x: 0.4, y: 0.5, z: 0.25}
+  chestOffset: {x: 0, y: 1.2, z: 0}
+  stomachSize: {x: 0.35, y: 0.3, z: 0.25}
+  stomachOffset: {x: 0, y: 0.85, z: 0}
+  limbRadius: 0.1
+  limbHeight: 0.5
 --- !u!1 &8514595661847557571
 GameObject:
   m_ObjectHideFlags: 0
@@ -2777,6 +2836,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 453a38a7aa90de142aadb0a7e462f629, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.WeaponSystem
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
   currentWeapon: {fileID: 11400000, guid: 01bdf91161fdc2541b67845425b902bd, type: 2}
   playerCamera: {fileID: 0}
   weaponHolder: {fileID: 1628601356376872349}

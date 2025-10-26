@@ -2,12 +2,16 @@ using UnityEngine;
 
 namespace TacticalCombat.Effects
 {
+    /// <summary>
+    /// Simple script to automatically destroy GameObjects after a set lifetime
+    /// Used for effects like muzzle flash and hit effects
+    /// </summary>
     public class AutoDestroy : MonoBehaviour
     {
         [Header("Auto Destroy Settings")]
-        public float lifetime = 2f;
-        public bool destroyOnStart = true;
-
+        [SerializeField] private float lifetime = 1f;
+        [SerializeField] private bool destroyOnStart = true;
+        
         private void Start()
         {
             if (destroyOnStart)
@@ -15,10 +19,21 @@ namespace TacticalCombat.Effects
                 Destroy(gameObject, lifetime);
             }
         }
-
-        public void DestroyAfter(float delay)
+        
+        /// <summary>
+        /// Manually trigger destruction
+        /// </summary>
+        public void DestroyNow()
         {
-            Destroy(gameObject, delay);
+            Destroy(gameObject);
+        }
+        
+        /// <summary>
+        /// Destroy after specified time
+        /// </summary>
+        public void DestroyAfter(float time)
+        {
+            Destroy(gameObject, time);
         }
     }
 }

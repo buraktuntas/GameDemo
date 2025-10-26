@@ -24,7 +24,12 @@ namespace TacticalCombat.Network
             {
                 transport.port = port;
                 Debug.Log($"🎮 [SimpleNetworkHUD] Port: {port}");
-            }
+            
+            // Default to localhost in local testing unless overridden
+            if (string.IsNullOrWhiteSpace(networkManager.networkAddress))
+            {
+                networkManager.networkAddress = "127.0.0.1";
+            }            }
             
             // ✅ FIX: Spawnable prefabs kontrolü
             EnsurePlayerPrefabInSpawnableList();
@@ -211,6 +216,10 @@ namespace TacticalCombat.Network
         }
     }
 }
+
+
+
+
 
 
 

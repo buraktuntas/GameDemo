@@ -1,6 +1,8 @@
 using UnityEngine;
 using Mirror;
 using TacticalCombat.Core;
+using TacticalCombat.Effects;
+using TacticalCombat.Player; // ✅ FIX: InputManager için gerekli
 using System.Collections;
 using System.Collections.Generic; // ✅ FIX: Queue<GameObject> için gerekli
 
@@ -42,9 +44,13 @@ namespace TacticalCombat.Combat
         private int currentAmmo;
         private int reserveAmmo;
         private bool isReloading;
-        
+
         private float nextFireTime;
         private float recoilAmount;
+
+        // ✅ FIX: Track coroutines to prevent memory leaks
+        private Coroutine currentCameraShakeCoroutine;
+        private Coroutine currentReloadCoroutine;
         private Vector3 originalWeaponPos;
         private Quaternion originalWeaponRot;
         private bool isAiming;
@@ -54,11 +60,11 @@ namespace TacticalCombat.Combat
         [SerializeField] private bool debugAudio = true;
         [SerializeField] private bool debugInputs = true; // ✅ FIX: Debug aktif et
         
-        // Events
-        public System.Action<int, int> OnAmmoChanged;
-        public System.Action OnReloadStarted;
-        public System.Action OnReloadComplete;
-        public System.Action OnWeaponFired;
+        // ✅ FIX: Use 'event' keyword to prevent external null assignment and memory leaks
+        public event System.Action<int, int> OnAmmoChanged;
+        public event System.Action OnReloadStarted;
+        public event System.Action OnReloadComplete;
+        public event System.Action OnWeaponFired;
         
         // ✅ FIX: Build mode awareness
         private TacticalCombat.Player.InputManager inputManager;
@@ -130,10 +136,31 @@ namespace TacticalCombat.Combat
                 for (int i = 0; i < POOL_SIZE; i++)
                 {
                     GameObject flash = Instantiate(muzzleFlashPrefab);
+                    flash.transform.SetParent(transform); // ✅ FIX: Parent to player, not scene root
                     flash.SetActive(false);
+
+                    // Add AutoDestroy component if missing
+                    if (flash.GetComponent<AutoDestroy>() == null)
+                    {
+                        flash.AddComponent<AutoDestroy>();
+                    }
+
                     muzzleFlashPool.Enqueue(flash);
                 }
                 Debug.Log($"✅ [WeaponSystem] Muzzle flash pool initialized with {POOL_SIZE} objects");
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [WeaponSystem] MuzzleFlashPrefab is null - creating simple fallback");
+                // Create simple fallback muzzle flash
+                for (int i = 0; i < POOL_SIZE; i++)
+                {
+                    GameObject flash = new GameObject("MuzzleFlash");
+                    flash.transform.SetParent(transform); // ✅ FIX: Parent to player
+                    flash.SetActive(false);
+                    flash.AddComponent<AutoDestroy>();
+                    muzzleFlashPool.Enqueue(flash);
+                }
             }
             
             // Hit effect pool
@@ -142,22 +169,42 @@ namespace TacticalCombat.Combat
                 for (int i = 0; i < POOL_SIZE; i++)
                 {
                     GameObject effect = Instantiate(hitEffectPrefab);
+                    effect.transform.SetParent(transform); // ✅ FIX: Parent to player, not scene root
                     effect.SetActive(false);
+
+                    // Add AutoDestroy component if missing
+                    if (effect.GetComponent<AutoDestroy>() == null)
+                    {
+                        effect.AddComponent<AutoDestroy>();
+                    }
+
                     hitEffectPool.Enqueue(effect);
                 }
                 Debug.Log($"✅ [WeaponSystem] Hit effect pool initialized with {POOL_SIZE} objects");
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [WeaponSystem] HitEffectPrefab is null - creating simple fallback");
+                // Create simple fallback hit effect
+                for (int i = 0; i < POOL_SIZE; i++)
+                {
+                    GameObject effect = new GameObject("HitEffect");
+                    effect.transform.SetParent(transform); // ✅ FIX: Parent to player
+                    effect.SetActive(false);
+                    effect.AddComponent<AutoDestroy>();
+                    hitEffectPool.Enqueue(effect);
+                }
             }
         }
         
         private void Start()
         {
-            // ✅ FIX: InputManager referansı
-            // Cache InputManager - her player'ın kendi InputManager'ı var
+            // ✅ FIX: InputManager referansı - Start'ta bulunamayabilir, Update'te tekrar dene
             inputManager = GetComponent<TacticalCombat.Player.InputManager>();
 
             if (debugInputs)
             {
-                Debug.Log($"✅ [WeaponSystem] Start - InputManager: {(inputManager != null ? "Found" : "NULL")}");
+                Debug.Log($"✅ [WeaponSystem] Start - InputManager: {(inputManager != null ? "Found" : "NULL - will retry in Update")}");
             }
 
             // ⚡ PERFORMANCE FIX: Cache camera reference
@@ -206,39 +253,21 @@ namespace TacticalCombat.Combat
         private void Update()
         {
             // ✅ FIX: No need for isLocalPlayer check - MonoBehaviour handles local player
-            
-            // ✅ FIX: InputManager null kontrolü
+            // Throttle heavy InputManager scanning to avoid client hitch on join
+            const int searchIntervalFrames = 120; // ~2s @60fps
+            if (inputManager == null && (Time.frameCount % searchIntervalFrames) == 0)
+            {
+                // Only search for InputManager every 120 frames when missing
+                inputManager = FindFirstObjectByType<TacticalCombat.Player.InputManager>();
+                return;
+            }
+
+            // Early exit if still no InputManager after throttled search
             if (inputManager == null)
             {
-                // Try to find InputManager on this object first
-                inputManager = GetComponent<TacticalCombat.Player.InputManager>();
-                
-                // If not found, try parent (Player prefab)
-                if (inputManager == null)
-                {
-                    inputManager = GetComponentInParent<TacticalCombat.Player.InputManager>();
-                }
-                
-                // If still not found, try to find in scene
-                if (inputManager == null)
-                {
-                    inputManager = FindFirstObjectByType<TacticalCombat.Player.InputManager>();
-                }
-                
-                if (inputManager == null)
-                {
-                    if (debugInputs && Time.frameCount % 60 == 0)
-                    {
-                        Debug.LogError("❌ [WeaponSystem] InputManager is NULL! Cannot check build mode.");
-                    }
-                    return;
-                }
-                else
-                {
-                    Debug.Log("✅ [WeaponSystem] InputManager found!");
-                }
+                return;
             }
-            
+
             // ✅ FIX: Build modunda silah tamamen devre dışı
             if (inputManager.IsInBuildMode)
             {
@@ -347,10 +376,14 @@ namespace TacticalCombat.Combat
             
             // Raycast
             PerformRaycast();
-            
-            // Camera shake
-            StartCoroutine(CameraShake(0.05f, 0.1f));
-            
+
+            // ✅ FIX: Stop previous camera shake before starting new one to prevent coroutine leak
+            if (currentCameraShakeCoroutine != null)
+            {
+                StopCoroutine(currentCameraShakeCoroutine);
+            }
+            currentCameraShakeCoroutine = StartCoroutine(CameraShake(0.05f, 0.1f));
+
             // Network sync
             PlayFireEffects();
             
@@ -427,9 +460,13 @@ namespace TacticalCombat.Combat
         private void ShowClientSideHitFeedback(RaycastHit hit)
         {
             SurfaceType surface = DetermineSurfaceType(hit.collider);
+            bool isBodyHit = hit.collider.GetComponent<Hitbox>() != null || hit.collider.GetComponent<Health>() != null;
 
-            // Show hit effects immediately (client prediction)
-            SpawnHitEffect(hit.point, hit.normal, surface);
+            // ✅ PROFESSIONAL VFX: Use pooled impact effects (Battlefield quality)
+            if (ImpactVFXPool.Instance != null)
+            {
+                ImpactVFXPool.Instance.PlayImpact(hit.point, hit.normal, surface, isBodyHit);
+            }
 
             // Play hit sound
             PlayHitSound(surface);
@@ -505,6 +542,8 @@ namespace TacticalCombat.Combat
             Health health = null;
             float damage = currentWeapon.damage;
             bool isCritical = false;
+            SurfaceType surface = DetermineSurfaceType(hitCollider);
+            bool isBodyHit = hitbox != null || hitCollider.GetComponent<Health>() != null;
 
             if (hitbox != null)
             {
@@ -539,11 +578,40 @@ namespace TacticalCombat.Combat
 
                 health.ApplyDamage(damageInfo);
 
+                // ✅ BATTLEFIELD QUALITY: Show impact VFX to ALL clients
+                RpcShowImpactEffect(hitPoint, hitNormal, surface, isBodyHit, isCritical);
+
                 // Visual feedback
                 if (isCritical)
                 {
                     Debug.Log($"💥 [Server] CRITICAL HIT! Damage: {damage}");
                 }
+            }
+            else
+            {
+                // Hit environment - still show impact
+                RpcShowImpactEffect(hitPoint, hitNormal, surface, false, false);
+            }
+        }
+
+        /// <summary>
+        /// ✅ Network sync impact effects to all clients
+        /// </summary>
+        [ClientRpc]
+        private void RpcShowImpactEffect(Vector3 hitPoint, Vector3 hitNormal, SurfaceType surface, bool isBodyHit, bool isCritical)
+        {
+            // Show impact effect on all clients
+            if (ImpactVFXPool.Instance != null)
+            {
+                ImpactVFXPool.Instance.PlayImpact(hitPoint, hitNormal, surface, isBodyHit);
+            }
+
+            // Play hit sound
+            PlayHitSound(surface);
+
+            if (debugInputs)
+            {
+                Debug.Log($"🎨 [Client RPC] Impact effect at {hitPoint} - Surface: {surface}, Body: {isBodyHit}, Crit: {isCritical}");
             }
         }
         
@@ -885,30 +953,40 @@ namespace TacticalCombat.Combat
         
         private IEnumerator CameraShake(float intensity, float duration)
         {
-            if (playerCamera == null) yield break;
-            
+            if (playerCamera == null)
+            {
+                currentCameraShakeCoroutine = null; // ✅ FIX: Clear reference on early exit
+                yield break;
+            }
+
             Vector3 originalPos = playerCamera.transform.localPosition;
             float elapsed = 0f;
-            
+
             while (elapsed < duration)
             {
                 float x = Random.Range(-1f, 1f) * intensity;
                 float y = Random.Range(-1f, 1f) * intensity;
-                
+
                 playerCamera.transform.localPosition = originalPos + new Vector3(x, y, 0);
-                
+
                 elapsed += Time.deltaTime;
                 yield return null;
             }
-            
+
             playerCamera.transform.localPosition = originalPos;
+            currentCameraShakeCoroutine = null; // ✅ FIX: Clear coroutine reference when complete
         }
         
         private void StartReload()
         {
             if (isReloading) return;
-            
-            StartCoroutine(ReloadCoroutine());
+
+            // ✅ FIX: Stop previous reload coroutine before starting new one
+            if (currentReloadCoroutine != null)
+            {
+                StopCoroutine(currentReloadCoroutine);
+            }
+            currentReloadCoroutine = StartCoroutine(ReloadCoroutine());
         }
         
         private IEnumerator ReloadCoroutine()
@@ -942,9 +1020,10 @@ namespace TacticalCombat.Combat
             reserveAmmo -= ammoToReload;
             
             isReloading = false;
+            currentReloadCoroutine = null; // ✅ FIX: Clear coroutine reference
             OnReloadComplete?.Invoke();
             OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
-            
+
             Debug.Log($"🔄 [WeaponSystem] RELOADED: {currentAmmo}/{currentWeapon.magazineSize} (Reserve: {reserveAmmo})");
         }
         
@@ -1051,31 +1130,73 @@ namespace TacticalCombat.Combat
         }
 
         /// <summary>
-        /// ✅ FIX: Cleanup coroutines and events on destroy
+        /// ✅ FIX: Cleanup events and coroutines on disable (respawn, death, etc.)
+        /// </summary>
+        private void OnDisable()
+        {
+            // Stop tracked coroutines to prevent memory leaks
+            if (currentCameraShakeCoroutine != null)
+            {
+                StopCoroutine(currentCameraShakeCoroutine);
+                currentCameraShakeCoroutine = null;
+            }
+
+            if (currentReloadCoroutine != null)
+            {
+                StopCoroutine(currentReloadCoroutine);
+                currentReloadCoroutine = null;
+            }
+
+            // Clear event subscriptions to prevent memory leaks on respawn
+            // Using 'event' keyword prevents external null assignment but we need to clear internally
+            if (OnAmmoChanged != null)
+            {
+                foreach (System.Delegate d in OnAmmoChanged.GetInvocationList())
+                {
+                    OnAmmoChanged -= (System.Action<int, int>)d;
+                }
+            }
+
+            if (OnReloadStarted != null)
+            {
+                foreach (System.Delegate d in OnReloadStarted.GetInvocationList())
+                {
+                    OnReloadStarted -= (System.Action)d;
+                }
+            }
+
+            if (OnReloadComplete != null)
+            {
+                foreach (System.Delegate d in OnReloadComplete.GetInvocationList())
+                {
+                    OnReloadComplete -= (System.Action)d;
+                }
+            }
+
+            if (OnWeaponFired != null)
+            {
+                foreach (System.Delegate d in OnWeaponFired.GetInvocationList())
+                {
+                    OnWeaponFired -= (System.Action)d;
+                }
+            }
+
+            Debug.Log($"🔇 [WeaponSystem] OnDisable - {gameObject.name} | isServer: {isServer} | isClient: {isClient} | Frame: {Time.frameCount}");
+        }
+
+        /// <summary>
+        /// ✅ FIX: Cleanup coroutines on destroy
         /// </summary>
         private void OnDestroy()
         {
             // Stop all coroutines to prevent memory leaks
             StopAllCoroutines();
 
-            // Clear event subscriptions
-            OnAmmoChanged = null;
-            OnReloadStarted = null;
-            OnReloadComplete = null;
-            OnWeaponFired = null;
-
-            if (debugAudio)
+            // Safe debug logging
+            if (gameObject != null)
             {
-                Debug.Log("🗑️ [WeaponSystem] Cleanup completed - coroutines stopped, events cleared");
+                Debug.Log($"🗑️ [WeaponSystem] Cleanup completed - {gameObject.name}");
             }
-        }
-
-        /// <summary>
-        /// ✅ FIX: Stop coroutines on disable
-        /// </summary>
-        private void OnDisable()
-        {
-            StopAllCoroutines();
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -1127,3 +1248,4 @@ namespace TacticalCombat.Combat
         Stone
     }
 }
+

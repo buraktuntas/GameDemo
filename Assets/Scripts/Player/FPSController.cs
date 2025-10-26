@@ -1,5 +1,6 @@
 using UnityEngine;
 using Mirror;
+using UnityEngine.Rendering.Universal;
 using TacticalCombat.Core;
 
 namespace TacticalCombat.Player
@@ -108,15 +109,52 @@ namespace TacticalCombat.Player
             // Cache InputManager - her player'ın kendi InputManager'ı var
             inputManager = GetComponent<InputManager>();
 
-            // Setup camera
-            SetupCamera();
+            // ✅ FIX: Setup camera (creates if needed) - SAFE VERSION
+            try
+            {
+                SetupCamera();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Camera setup failed: {e.Message}");
+                Debug.LogError($"Stack trace: {e.StackTrace}");
+            }
+
+            // ✅ FIX: Disable ALL other audio listeners (only local player should hear)
+            try
+            {
+                var listeners = Object.FindObjectsByType<AudioListener>(FindObjectsSortMode.None);
+                foreach (var l in listeners)
+                {
+                    if (l == null) continue;
+                    // Only enable listener if it's OUR camera
+                    l.enabled = (playerCamera != null && l.gameObject == playerCamera.gameObject);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"⚠️ AudioListener cleanup failed: {e.Message}");
+            }
+
+            // ✅ FIX: Store base FOV for sprint effect
+            if (playerCamera != null)
+            {
+                baseFOV = playerCamera.fieldOfView;
+            }
 
             // Lock cursor
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
 
             // Register with match manager
-            RegisterPlayer();
+            try
+            {
+                RegisterPlayer();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"⚠️ Player registration failed: {e.Message}");
+            }
 
             if (showDebugInfo)
             {
@@ -154,58 +192,80 @@ namespace TacticalCombat.Player
         
         private void SetupCamera()
         {
-            // ⚡ PERFORMANCE FIX: Cache camera reference instead of using Camera.main
+            // ✅ FIX: NEVER use Camera.main (causes bootstrap camera conflicts)
             // Find camera if not assigned
             if (playerCamera == null)
             {
                 // First try to find child camera (best practice)
                 playerCamera = GetComponentInChildren<Camera>();
 
-                // Fallback to Camera.main (only once, then cached)
+                // ✅ FIX: DON'T fallback to Camera.main - create new camera instead
                 if (playerCamera == null)
                 {
-                    playerCamera = Camera.main;
-                    if (playerCamera == null)
+                    Debug.LogWarning("⚠️ No camera child found - creating runtime camera");
+                    var camGO = new GameObject("PlayerCamera");
+                    camGO.transform.SetParent(transform);
+                    playerCamera = camGO.AddComponent<Camera>();
+                    playerCamera.tag = "MainCamera";
+
+                    // Add AudioListener
+                    var listener = camGO.AddComponent<AudioListener>();
+                    listener.enabled = true;
+
+                    // URP Additional Data - safe add
+                    try
                     {
-                        Debug.LogError("❌ No camera found! Player prefab should have a Camera child.");
-                        return;
+                        camGO.AddComponent<UniversalAdditionalCameraData>();
                     }
+                    catch (System.Exception e)
+                    {
+                        Debug.LogWarning($"⚠️ Could not add UniversalAdditionalCameraData: {e.Message}");
+                    }
+
+                    Debug.Log("✅ Created runtime PlayerCamera");
                 }
             }
 
             // Enable camera
-            playerCamera.enabled = true;
-
-            // Make camera child of player if not already
-            if (playerCamera.transform.parent != transform)
+            if (playerCamera != null)
             {
-                playerCamera.transform.SetParent(transform);
-            }
+                playerCamera.enabled = true;
 
-            // Position at eye level
-            originalCameraPos = new Vector3(0, 1.6f, 0);
-            playerCamera.transform.localPosition = originalCameraPos;
-            playerCamera.transform.localRotation = Quaternion.identity;
+                // Make camera child of player if not already
+                if (playerCamera.transform.parent != transform)
+                {
+                    playerCamera.transform.SetParent(transform);
+                }
 
-            // Store base FOV
-            baseFOV = playerCamera.fieldOfView;
+                // Position at eye level
+                originalCameraPos = new Vector3(0, 1.6f, 0);
+                playerCamera.transform.localPosition = originalCameraPos;
+                playerCamera.transform.localRotation = Quaternion.identity;
 
-            // 🔧 AUDIO LISTENER FIX: Sadece local player'da AudioListener aktif olsun
-            AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
-            if (audioListener != null)
-            {
-                // Sadece local player'da AudioListener aktif
-                audioListener.enabled = isLocalPlayer;
-                
+                // Store base FOV
+                baseFOV = playerCamera.fieldOfView;
+
+                // 🔧 AUDIO LISTENER FIX: Sadece local player'da AudioListener aktif olsun
+                AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
+                if (audioListener != null)
+                {
+                    // Sadece local player'da AudioListener aktif
+                    audioListener.enabled = isLocalPlayer;
+                    
+                    if (showDebugInfo)
+                    {
+                        Debug.Log($"🔊 AudioListener enabled: {audioListener.enabled} (isLocalPlayer: {isLocalPlayer})");
+                    }
+                }
+
                 if (showDebugInfo)
                 {
-                    Debug.Log($"🔊 AudioListener enabled: {audioListener.enabled} (isLocalPlayer: {isLocalPlayer})");
+                    Debug.Log("📷 Camera setup complete (cached reference)");
                 }
             }
-
-            if (showDebugInfo)
+            else
             {
-                Debug.Log("📷 Camera setup complete (cached reference)");
+                Debug.LogError("❌ Failed to setup camera - playerCamera is null!");
             }
         }
         
@@ -576,3 +636,4 @@ namespace TacticalCombat.Player
         }
     }
 }
+

@@ -30,6 +30,13 @@ namespace TacticalCombat.Network
             Transform spawnPoint = GetSpawnPoint(assignedTeam);
             Debug.Log($"   Spawn Point: {spawnPoint.position}");
 
+            // ✅ FIX: Ensure playerPrefab is valid
+            if (playerPrefab == null)
+            {
+                Debug.LogError("❌ Player prefab is null! Cannot spawn player.");
+                return;
+            }
+
             // Spawn player
             GameObject player = Instantiate(playerPrefab, spawnPoint.position, spawnPoint.rotation);
             Debug.Log($"   Player GameObject oluşturuldu: {player.name}");

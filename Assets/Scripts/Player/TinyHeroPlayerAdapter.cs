@@ -189,6 +189,46 @@ namespace TacticalCombat.Player
 
         #endregion
 
+        #region Hitbox Setup
+
+        /// <summary>
+        /// Configure hitboxes on the spawned character visual.
+        /// Adds Hitbox components to child colliders and assigns sensible zones
+        /// based on common humanoid bone names. Safe to call multiple times.
+        /// </summary>
+        public void SetupHitboxes(GameObject visualRoot)
+        {
+            if (visualRoot == null) return;
+
+            var colliders = visualRoot.GetComponentsInChildren<Collider>(true);
+            if (colliders == null || colliders.Length == 0) return;
+
+            foreach (var col in colliders)
+            {
+                if (col == null) continue;
+
+                // Skip triggers used for other systems
+                // We still allow them as hitboxes if needed, but typically solid body colliders are used
+                var hb = col.GetComponent<TacticalCombat.Combat.Hitbox>();
+                if (hb == null)
+                {
+                    hb = col.gameObject.AddComponent<TacticalCombat.Combat.Hitbox>();
+                }
+
+                // Assign zone by name heuristics
+                string n = col.gameObject.name.ToLowerInvariant();
+                if (n.Contains("head")) hb.zone = TacticalCombat.Combat.HitZone.Head;
+                else if (n.Contains("chest") || n.Contains("spine") || n.Contains("upper") || n.Contains("torso")) hb.zone = TacticalCombat.Combat.HitZone.Chest;
+                else if (n.Contains("hips") || n.Contains("pelvis") || n.Contains("stomach")) hb.zone = TacticalCombat.Combat.HitZone.Stomach;
+                else if (n.Contains("arm") || n.Contains("hand") || n.Contains("leg") || n.Contains("calf") || n.Contains("thigh") || n.Contains("foot")) hb.zone = TacticalCombat.Combat.HitZone.Limbs;
+                else hb.zone = TacticalCombat.Combat.HitZone.Chest;
+            }
+
+            Debug.Log("✅ [TinyHeroPlayerAdapter] Hitboxes configured on character visual");
+        }
+
+        #endregion
+
         #region Gizmos
 
         private void OnDrawGizmosSelected()

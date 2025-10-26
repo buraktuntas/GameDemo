@@ -83,10 +83,11 @@ namespace TacticalCombat.Building
         private Color cachedStabilityColor;
         private Vector3 lastStabilityPosition;
 
-        // ✅ FIX: Toggle cooldown to prevent race condition
+        // ✅ FIX: Toggle cooldown and reentrant guard to prevent race condition
         private float lastToggleTime = 0f;
         private const float TOGGLE_COOLDOWN = 0.3f;
-        
+        private bool isTogglingBuildMode = false; // Prevents recursive toggle
+
         // NonAlloc buffers
         private static readonly Collider[] stabilityBuffer = new Collider[256];
         private static readonly Collider[] overlapBoxBuffer = new Collider[64];
@@ -270,27 +271,50 @@ namespace TacticalCombat.Building
         
         private void HandleBuildModeToggle()
         {
+            // ✅ FIX: Reentrant guard prevents state corruption from recursive calls
+            if (isTogglingBuildMode)
+            {
+                return;
+            }
+
             // ✅ FIX: Add cooldown to prevent rapid toggle causing state corruption
             if (Input.GetKeyDown(buildModeKey) && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
             {
+                isTogglingBuildMode = true;
                 lastToggleTime = Time.time;
                 Debug.Log($"🏗️ [SimpleBuildMode] B key pressed - Current state: {isBuildModeActive}");
 
-                if (isBuildModeActive)
+                try
                 {
-                    ExitBuildMode();
+                    if (isBuildModeActive)
+                    {
+                        ExitBuildMode();
+                    }
+                    else
+                    {
+                        EnterBuildMode();
+                    }
                 }
-                else
+                finally
                 {
-                    EnterBuildMode();
+                    isTogglingBuildMode = false;
                 }
             }
 
-            // ESC also exits build mode (with same cooldown)
-            if (isBuildModeActive && Input.GetKeyDown(KeyCode.Escape) && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
+            // ESC also exits build mode (with same cooldown and guard)
+            if (isBuildModeActive && Input.GetKeyDown(KeyCode.Escape) && Time.time - lastToggleTime > TOGGLE_COOLDOWN && !isTogglingBuildMode)
             {
+                isTogglingBuildMode = true;
                 lastToggleTime = Time.time;
-                ExitBuildMode();
+
+                try
+                {
+                    ExitBuildMode();
+                }
+                finally
+                {
+                    isTogglingBuildMode = false;
+                }
             }
         }
         

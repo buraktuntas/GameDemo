@@ -157,8 +157,54 @@ namespace TacticalCombat.Combat
         public void PlayHitEffect(Vector3 hitPosition, HitType hitType = HitType.Normal)
         {
             if (!useHitEffects) return;
-            
+
+            // Prefer pooled battlefield-grade impact effects if available
+            if (ImpactVFXPool.Instance != null)
+            {
+                bool body = (hitType == HitType.Critical || hitType == HitType.Headshot);
+                SurfaceType surface = hitType switch
+                {
+                    HitType.Metal => SurfaceType.Metal,
+                    _ => SurfaceType.Generic
+                };
+                ImpactVFXPool.Instance.PlayImpact(hitPosition, Vector3.up, surface, body);
+
+                // Additional local feedback (audio/screen shake/screen FX)
+                StartCoroutine(PlayLocalFeedback(hitPosition, hitType));
+                return;
+            }
+
+            // Fallback: legacy particle workflow
             StartCoroutine(PlayHitEffectCoroutine(hitPosition, hitType));
+        }
+
+        private IEnumerator PlayLocalFeedback(Vector3 hitPosition, HitType hitType)
+        {
+            // Audio
+            AudioClip selectedSound = hitType switch
+            {
+                HitType.Critical => criticalHitSound,
+                HitType.Headshot => headshotSound,
+                _ => hitSound
+            };
+            if (selectedSound != null && audioSource != null)
+            {
+                audioSource.PlayOneShot(selectedSound);
+            }
+
+            // Screen shake
+            if (useScreenShake && playerCamera != null)
+            {
+                yield return StartCoroutine(ScreenShakeCoroutine());
+            }
+
+            // Hit screen effect
+            if (hitScreenEffect != null)
+            {
+                yield return StartCoroutine(ShowHitScreenEffect());
+            }
+
+            yield return null;
         }
         
         private IEnumerator PlayHitEffectCoroutine(Vector3 hitPosition, HitType hitType)
