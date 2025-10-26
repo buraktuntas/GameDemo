@@ -63,6 +63,9 @@ namespace TacticalCombat.Building
         private Material[] ghostOriginalMaterials;
         private bool lastCanPlaceState = false;
         private Color lastStabilityColor;
+
+        // ✅ FIX: Material pooling to prevent memory leak
+        private Material[] ghostMaterialInstances; // One material per renderer
         
         [Header("Structure Selection")]
         public int currentStructureIndex = 0;
@@ -371,13 +374,19 @@ namespace TacticalCombat.Building
             // Cache renderers
             ghostRenderers = ghostPreview.GetComponentsInChildren<Renderer>();
             ghostOriginalMaterials = new Material[ghostRenderers.Length];
-            
+
+            // ✅ FIX: Create material instances ONCE to prevent memory leak
+            ghostMaterialInstances = new Material[ghostRenderers.Length];
+
             for (int i = 0; i < ghostRenderers.Length; i++)
             {
                 ghostOriginalMaterials[i] = ghostRenderers[i].material;
-                ghostRenderers[i].material = validPlacementMaterial;
+
+                // Create ONE material instance per renderer
+                ghostMaterialInstances[i] = new Material(validPlacementMaterial);
+                ghostRenderers[i].material = ghostMaterialInstances[i];
             }
-            
+
             lastCanPlaceState = true;
             lastStabilityColor = Color.clear;
         }
@@ -386,6 +395,19 @@ namespace TacticalCombat.Building
         {
             if (ghostPreview != null)
             {
+                // ✅ FIX: Cleanup material instances to prevent memory leak
+                if (ghostMaterialInstances != null)
+                {
+                    foreach (var mat in ghostMaterialInstances)
+                    {
+                        if (mat != null)
+                        {
+                            Destroy(mat);
+                        }
+                    }
+                    ghostMaterialInstances = null;
+                }
+
                 Destroy(ghostPreview);
                 ghostPreview = null;
                 ghostRenderers = null;
@@ -431,23 +453,24 @@ namespace TacticalCombat.Building
         
         private void UpdateGhostMaterials()
         {
-            if (ghostRenderers == null) return;
-            
+            if (ghostRenderers == null || ghostMaterialInstances == null) return;
+
             if (canPlace)
             {
-                Color stabilityColor = showStabilityPreview 
-                    ? GetStabilityPreviewColor(placementPosition) 
+                Color stabilityColor = showStabilityPreview
+                    ? GetStabilityPreviewColor(placementPosition)
                     : validPlacementMaterial.color;
-                
+
+                // ✅ FIX: Only update colors if changed, DON'T create new materials!
                 if (lastCanPlaceState != canPlace || !ColorsEqual(lastStabilityColor, stabilityColor))
                 {
-                    foreach (var renderer in ghostRenderers)
+                    for (int i = 0; i < ghostRenderers.Length; i++)
                     {
-                        Material mat = new Material(validPlacementMaterial);
-                        mat.color = stabilityColor;
-                        renderer.material = mat;
+                        // Reuse existing material instance, just change color
+                        ghostMaterialInstances[i].color = stabilityColor;
+                        ghostRenderers[i].material = ghostMaterialInstances[i];
                     }
-                    
+
                     lastStabilityColor = stabilityColor;
                 }
             }
@@ -461,7 +484,7 @@ namespace TacticalCombat.Building
                     }
                 }
             }
-            
+
             lastCanPlaceState = canPlace;
         }
         

@@ -339,26 +339,27 @@ namespace TacticalCombat.Combat
         private void PerformRaycast()
         {
             if (playerCamera == null) return;
-            
+
             // Calculate spread
             Vector3 spread = CalculateSpread();
             Vector3 direction = playerCamera.transform.forward + spread;
-            
+
             Ray ray = new Ray(playerCamera.transform.position, direction);
-            
+
             if (Physics.Raycast(ray, out RaycastHit hit, currentWeapon.range, currentWeapon.hitMask))
             {
                 // Hit something!
+                // ✅ FIX: ProcessHit() already applies damage, no need for ApplyDamage(hit)
                 ProcessHit(hit);
-                
+
                 // Visual feedback
                 SpawnHitEffect(hit);
-                
+
                 // Audio feedback
                 PlayHitSound();
-                
-                // Damage
-                ApplyDamage(hit);
+
+                // ❌ REMOVED: ApplyDamage(hit) - This was causing DOUBLE DAMAGE!
+                // ProcessHit() already handles damage with hitbox multipliers
             }
         }
         

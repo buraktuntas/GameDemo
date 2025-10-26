@@ -45,14 +45,15 @@ namespace TacticalCombat.Network
 
             // KRITIK: NetworkIdentity kontrolü
             var netIdentity = player.GetComponent<NetworkIdentity>();
-            if (netIdentity != null)
-            {
-                Debug.Log($"   NetworkIdentity VAR - NetID: {netIdentity.netId}");
-            }
-            else
+            if (netIdentity == null)
             {
                 Debug.LogError("   ❌ NetworkIdentity YOK! Player spawn edilemez!");
+                Debug.LogError("   Player prefab'a NetworkIdentity component eklemelisiniz!");
+                Destroy(player); // Cleanup
+                return; // ✅ FIX: STOP execution if no NetworkIdentity!
             }
+
+            Debug.Log($"   NetworkIdentity VAR - NetID: {netIdentity.netId}");
 
             NetworkServer.AddPlayerForConnection(conn, player);
             Debug.Log($"   ✅ NetworkServer.AddPlayerForConnection çağrıldı");
