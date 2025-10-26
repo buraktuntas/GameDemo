@@ -2,6 +2,7 @@ using UnityEngine;
 using Mirror;
 using TacticalCombat.Core;
 using System.Collections;
+using System.Collections.Generic; // ✅ FIX: Queue<GameObject> için gerekli
 
 namespace TacticalCombat.Combat
 {
@@ -50,7 +51,7 @@ namespace TacticalCombat.Combat
         // ✅ FIX: Audio debug flag
         [Header("🐛 DEBUG")]
         [SerializeField] private bool debugAudio = true;
-        [SerializeField] private bool debugInputs = false;
+        [SerializeField] private bool debugInputs = true; // ✅ FIX: Debug aktif et
         
         // Events
         public System.Action<int, int> OnAmmoChanged;
@@ -60,6 +61,11 @@ namespace TacticalCombat.Combat
         
         // ✅ FIX: Build mode awareness
         private TacticalCombat.Player.InputManager inputManager;
+        
+        // ✅ FIX: Performance - Object pooling for effects
+        private Queue<GameObject> muzzleFlashPool = new Queue<GameObject>();
+        private Queue<GameObject> hitEffectPool = new Queue<GameObject>();
+        private const int POOL_SIZE = 10;
         
         private void Awake()
         {
@@ -109,6 +115,36 @@ namespace TacticalCombat.Combat
             {
                 originalWeaponPos = weaponHolder.localPosition;
                 originalWeaponRot = weaponHolder.localRotation;
+            }
+            
+            // ✅ FIX: Initialize object pools
+            InitializeObjectPools();
+        }
+        
+        private void InitializeObjectPools()
+        {
+            // Muzzle flash pool
+            if (muzzleFlashPrefab != null)
+            {
+                for (int i = 0; i < POOL_SIZE; i++)
+                {
+                    GameObject flash = Instantiate(muzzleFlashPrefab);
+                    flash.SetActive(false);
+                    muzzleFlashPool.Enqueue(flash);
+                }
+                Debug.Log($"✅ [WeaponSystem] Muzzle flash pool initialized with {POOL_SIZE} objects");
+            }
+            
+            // Hit effect pool
+            if (hitEffectPrefab != null)
+            {
+                for (int i = 0; i < POOL_SIZE; i++)
+                {
+                    GameObject effect = Instantiate(hitEffectPrefab);
+                    effect.SetActive(false);
+                    hitEffectPool.Enqueue(effect);
+                }
+                Debug.Log($"✅ [WeaponSystem] Hit effect pool initialized with {POOL_SIZE} objects");
             }
         }
         
@@ -172,14 +208,28 @@ namespace TacticalCombat.Combat
         {
             if (!isLocalPlayer) return;
             
-            // ✅ FIX: Build modunda silah kullanımını engelle
-            if (inputManager != null && inputManager.IsInBuildMode)
+            // ✅ FIX: InputManager null kontrolü
+            if (inputManager == null)
+            {
+                inputManager = GetComponent<TacticalCombat.Player.InputManager>();
+                if (inputManager == null)
+                {
+                    if (debugInputs && Time.frameCount % 60 == 0)
+                    {
+                        Debug.LogError("❌ [WeaponSystem] InputManager is NULL! Cannot check build mode.");
+                    }
+                    return;
+                }
+            }
+            
+            // ✅ FIX: Build modunda silah tamamen devre dışı
+            if (inputManager.IsInBuildMode)
             {
                 if (debugInputs && Time.frameCount % 60 == 0)
                 {
                     Debug.Log("🏗️ [WeaponSystem] Build mode active - weapon disabled");
                 }
-                return;
+                return; // Build mode'da silah hiç çalışmasın
             }
             
             HandleInput();
@@ -437,8 +487,41 @@ namespace TacticalCombat.Combat
             
             if (effectPrefab != null)
             {
-                GameObject effect = Instantiate(effectPrefab, hit.point, Quaternion.LookRotation(hit.normal));
-                // AutoDestroy script will handle cleanup
+                // ✅ FIX: Use object pooling for hit effects
+                GameObject effect = GetPooledHitEffect();
+                if (effect != null)
+                {
+                    effect.transform.position = hit.point;
+                    effect.transform.rotation = Quaternion.LookRotation(hit.normal);
+                    effect.SetActive(true);
+                    
+                    // Return to pool after duration
+                    StartCoroutine(ReturnHitEffectToPool(effect, 2f));
+                }
+            }
+        }
+        
+        private GameObject GetPooledHitEffect()
+        {
+            if (hitEffectPool.Count > 0)
+            {
+                return hitEffectPool.Dequeue();
+            }
+            
+            // Pool empty, create new one
+            GameObject effect = Instantiate(hitEffectPrefab);
+            effect.SetActive(false);
+            return effect;
+        }
+        
+        private IEnumerator ReturnHitEffectToPool(GameObject effect, float duration)
+        {
+            yield return new WaitForSeconds(duration);
+            
+            if (effect != null)
+            {
+                effect.SetActive(false);
+                hitEffectPool.Enqueue(effect);
             }
         }
         
@@ -514,10 +597,42 @@ namespace TacticalCombat.Combat
         {
             if (muzzleFlashPrefab == null || weaponHolder == null) return;
             
-            // Spawn at weapon tip
-            Vector3 muzzlePos = weaponHolder.position + weaponHolder.forward * 0.5f;
-            GameObject flash = Instantiate(muzzleFlashPrefab, muzzlePos, weaponHolder.rotation);
-            Destroy(flash, 0.1f);
+            // ✅ FIX: Use object pooling instead of instantiate/destroy
+            GameObject flash = GetPooledMuzzleFlash();
+            if (flash != null)
+            {
+                Vector3 muzzlePos = weaponHolder.position + weaponHolder.forward * 0.5f;
+                flash.transform.position = muzzlePos;
+                flash.transform.rotation = weaponHolder.rotation;
+                flash.SetActive(true);
+                
+                // Return to pool after duration
+                StartCoroutine(ReturnMuzzleFlashToPool(flash, 0.1f));
+            }
+        }
+        
+        private GameObject GetPooledMuzzleFlash()
+        {
+            if (muzzleFlashPool.Count > 0)
+            {
+                return muzzleFlashPool.Dequeue();
+            }
+            
+            // Pool empty, create new one
+            GameObject flash = Instantiate(muzzleFlashPrefab);
+            flash.SetActive(false);
+            return flash;
+        }
+        
+        private IEnumerator ReturnMuzzleFlashToPool(GameObject flash, float duration)
+        {
+            yield return new WaitForSeconds(duration);
+            
+            if (flash != null)
+            {
+                flash.SetActive(false);
+                muzzleFlashPool.Enqueue(flash);
+            }
         }
         
         /// <summary>

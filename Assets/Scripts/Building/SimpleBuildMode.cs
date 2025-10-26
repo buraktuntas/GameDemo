@@ -284,39 +284,18 @@ namespace TacticalCombat.Building
             isBuildModeActive = true;
             currentRotationY = 0f;
             
-            // ✅ FIX: InputManager configuration
+            // ✅ FIX: InputManager'ı override etme, kendi state'ini kullan
             if (inputManager != null)
             {
                 inputManager.IsInBuildMode = true;
                 inputManager.BlockShootInput = true; // ← Silah kullanımını engelle
                 
-                if (allowCameraInBuildMode && allowMovementInBuildMode)
-                {
-                    // VALHEIM STYLE
-                    Cursor.lockState = CursorLockMode.Confined;
-                    Cursor.visible = true;
-                    inputManager.BlockCameraInput = false;
-                    inputManager.BlockMovementInput = false;
-                    Debug.Log("🏗️ [SimpleBuildMode] Build mode: Valheim style (Movement + Camera)");
-                }
-                else if (allowMovementInBuildMode && !allowCameraInBuildMode)
-                {
-                    // FORTNITE STYLE
-                    Cursor.lockState = CursorLockMode.None;
-                    Cursor.visible = true;
-                    inputManager.BlockCameraInput = true;
-                    inputManager.BlockMovementInput = false;
-                    Debug.Log("🏗️ [SimpleBuildMode] Build mode: Fortnite style (Movement only)");
-                }
-                else
-                {
-                    // STATIC BUILD
-                    Cursor.lockState = CursorLockMode.None;
-                    Cursor.visible = true;
-                    inputManager.BlockCameraInput = true;
-                    inputManager.BlockMovementInput = true;
-                    Debug.Log("🏗️ [SimpleBuildMode] Build mode: Static (No movement)");
-                }
+                // Valheim tarzı: Hareket + Kamera çalışsın, ama cursor gizli olsun
+                Cursor.lockState = CursorLockMode.Locked; // ← Cursor gizli
+                Cursor.visible = false; // ← Cursor gizli
+                inputManager.BlockCameraInput = false;  // ← Kamera çalışsın
+                inputManager.BlockMovementInput = false; // ← Hareket çalışsın
+                Debug.Log("🏗️ [SimpleBuildMode] Build mode: Valheim style (Movement + Camera + Hidden Cursor)");
             }
             
             // ✅ FIX: Silahı devre dışı bırak

@@ -213,6 +213,9 @@ namespace TacticalCombat.Player
         {
             if (!isLocalPlayer) return;
             
+            // ✅ FIX: Time.timeScale = 0 durumunda da çalışsın
+            if (Time.timeScale == 0f) return;
+            
             // Sadece rotation ve UI Update'de
             HandleRotation();
             
@@ -249,6 +252,12 @@ namespace TacticalCombat.Player
         private Vector3 GetMovementInput()
         {
             if (inputManager != null && inputManager.BlockMovementInput)
+            {
+                return Vector3.zero;
+            }
+            
+            // ✅ FIX: Build mode'da hareket çalışsın (Cursor.visible = false ama hareket çalışsın)
+            if (Cursor.visible && inputManager != null && !inputManager.IsInBuildMode)
             {
                 return Vector3.zero;
             }
@@ -321,6 +330,12 @@ namespace TacticalCombat.Player
         {
             // Check if camera input is blocked
             if (inputManager != null && inputManager.BlockCameraInput)
+            {
+                return;
+            }
+            
+            // ✅ FIX: Build mode'da kamera çalışsın (Cursor.visible = false ama kamera dönsün)
+            if (Cursor.visible && inputManager != null && !inputManager.IsInBuildMode)
             {
                 return;
             }

@@ -27,7 +27,7 @@ namespace TacticalCombat.UI
             InputManager localInputManager = FindLocalPlayerInputManager();
             if (localInputManager != null)
             {
-                bool currentBuildMode = localInputManager.IsInBuildMode || localInputManager.IsInMenu;
+                bool currentBuildMode = localInputManager.IsInBuildMode || localInputManager.IsInMenu || localInputManager.IsPaused;
                 InputManager.CursorMode currentCursorMode = localInputManager.GetCurrentMode();
                 
                 // Debug logları sadece state değiştiğinde göster
@@ -46,8 +46,15 @@ namespace TacticalCombat.UI
                     }
                 }
                 
-                // Build mode'da veya menu'de crosshair gizle
+                // ✅ FIX: Build mode'da crosshair görünmeli
                 if (currentBuildMode)
+                {
+                    // Build mode'da crosshair görünmeli (cursor gizli olduğu için)
+                    // return; // ← Bu satırı kaldır
+                }
+                
+                // ✅ FIX: İmleç görünürse crosshair gizle (ama build mode hariç)
+                if (Cursor.visible && !currentBuildMode)
                 {
                     return; // Crosshair gizle
                 }
