@@ -17,6 +17,20 @@ namespace TacticalCombat.Network
         private int teamACount = 0;
         private int teamBCount = 0;
 
+        public override void OnStartServer()
+        {
+            base.OnStartServer();
+            teamACount = 0;
+            teamBCount = 0;
+        }
+
+        public override void OnStopServer()
+        {
+            base.OnStopServer();
+            teamACount = 0;
+            teamBCount = 0;
+        }
+
         public override void OnServerAddPlayer(NetworkConnectionToClient conn)
         {
             Debug.Log("═══════════════════════════════════════");

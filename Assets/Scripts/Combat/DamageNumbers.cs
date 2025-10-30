@@ -155,11 +155,28 @@ namespace TacticalCombat.Combat
             
             Text text = textGO.AddComponent<Text>();
             
-            // Unity 6 font fix - Dynamic font creation
-            text.font = Font.CreateDynamicFontFromOSFont("Arial", 24);
+            // Unity 6 font fix - Robust font fallback chain
+            text.font = null;
+            try
+            {
+                text.font = Font.CreateDynamicFontFromOSFont("Arial", 24);
+            }
+            catch {}
             if (text.font == null)
             {
+                // Try built-in Arial
+                try { text.font = Resources.GetBuiltinResource<Font>("Arial.ttf"); }
+                catch { }
+            }
+            if (text.font == null)
+            {
+                // Last resort: use any available font in Resources
                 text.font = Resources.Load<Font>("Arial");
+            }
+            if (text.font == null)
+            {
+                Debug.LogWarning("⚠️ [DamageNumbers] No font found. Using default dynamic font.");
+                text.font = Font.CreateDynamicFontFromOSFont("Verdana", 24);
             }
             
             text.fontSize = 24;

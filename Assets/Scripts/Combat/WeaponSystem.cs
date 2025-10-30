@@ -1,5 +1,6 @@
 using UnityEngine;
 using Mirror;
+using UnityEngine.InputSystem; // Optional Input System bridge
 using TacticalCombat.Core;
 using TacticalCombat.Effects;
 using TacticalCombat.Player; // ✅ FIX: InputManager için gerekli
@@ -54,6 +55,14 @@ namespace TacticalCombat.Combat
         private Vector3 originalWeaponPos;
         private Quaternion originalWeaponRot;
         private bool isAiming;
+        
+        // ✅ Input System bridge (optional)
+        private PlayerInput playerInput;
+        private InputAction fireAction;
+        private InputAction reloadAction;
+        private bool fireHeld;
+        private bool firePressed;
+        private bool reloadPressed;
         
         // ✅ FIX: Audio debug flag
         [Header("🐛 DEBUG")]
@@ -249,6 +258,37 @@ namespace TacticalCombat.Combat
                 }
             }
         }
+
+        private void OnEnable()
+        {
+            // Try to hook new Input System if available
+            try
+            {
+                playerInput = GetComponent<PlayerInput>();
+                if (playerInput != null)
+                {
+                    var map = playerInput.actions?.FindActionMap("Player", true);
+                    if (map != null)
+                    {
+                        fireAction = map.FindAction("Fire", false);
+                        reloadAction = map.FindAction("Reload", false);
+
+                        if (fireAction != null)
+                        {
+                            fireAction.performed += OnFirePerformed;
+                            fireAction.canceled += OnFireCanceled;
+                            fireAction.Enable();
+                        }
+                        if (reloadAction != null)
+                        {
+                            reloadAction.performed += OnReloadPerformed;
+                            reloadAction.Enable();
+                        }
+                    }
+                }
+            }
+            catch { /* Input System not present or not configured */ }
+        }
         
         private void Update()
         {
@@ -297,14 +337,18 @@ namespace TacticalCombat.Combat
             // Fire - ✅ FIX: Separate auto and semi-auto to prevent stuck shooting
             if (currentWeapon != null)
             {
+                // Determine fire inputs (Input System + legacy)
+                bool fireHeldInput = fireHeld || Input.GetButton("Fire1");
+                bool firePressedInput = firePressed || Input.GetButtonDown("Fire1");
+
                 if (currentWeapon.fireMode == FireMode.Auto)
                 {
                     // Auto mode: Hold to fire continuously
-                    if (Input.GetButton("Fire1") && CanFire())
+                    if (fireHeldInput && CanFire())
                     {
                         Fire();
                     }
-                    else if (Input.GetButton("Fire1") && currentAmmo <= 0 && Time.frameCount % 30 == 0)
+                    else if (fireHeldInput && currentAmmo <= 0 && Time.frameCount % 30 == 0)
                     {
                         // Empty gun sound (throttled)
                         PlayEmptySound();
@@ -313,11 +357,11 @@ namespace TacticalCombat.Combat
                 else
                 {
                     // Semi-auto/Burst: Press to fire once
-                    if (Input.GetButtonDown("Fire1") && CanFire())
+                    if (firePressedInput && CanFire())
                     {
                         Fire();
                     }
-                    else if (Input.GetButtonDown("Fire1") && currentAmmo <= 0)
+                    else if (firePressedInput && currentAmmo <= 0)
                     {
                         PlayEmptySound();
                     }
@@ -325,9 +369,10 @@ namespace TacticalCombat.Combat
             }
             
             // Reload
-            if (Input.GetKeyDown(KeyCode.R) && CanReload())
+            if ((reloadPressed || Input.GetKeyDown(KeyCode.R)) && CanReload())
             {
                 StartReload();
+                reloadPressed = false;
             }
             
             // Aim (optional)
@@ -645,11 +690,15 @@ namespace TacticalCombat.Combat
         {
             SurfaceType surface = DetermineSurfaceType(hit.collider);
             
-            // Skip bullet holes for ground
-            if (surface == SurfaceType.Generic && hit.collider.CompareTag("Ground"))
+            // Skip bullet holes for ground (safe tag check)
+            try
             {
-                return;
+                if (surface == SurfaceType.Generic && hit.collider.CompareTag("Ground"))
+                {
+                    return;
+                }
             }
+            catch { }
             
             GameObject effectPrefab = null;
             
@@ -666,10 +715,14 @@ namespace TacticalCombat.Combat
                     effectPrefab = bulletHolePrefab;
                     break;
                 default:
-                    if (hit.collider.CompareTag("Structure"))
+                    try
                     {
-                        effectPrefab = bulletHolePrefab;
+                        if (hit.collider.CompareTag("Structure"))
+                        {
+                            effectPrefab = bulletHolePrefab;
+                        }
                     }
+                    catch { }
                     break;
             }
             
@@ -772,11 +825,15 @@ namespace TacticalCombat.Combat
             // Calculate damage (headshot multiplier, distance falloff)
             float damage = currentWeapon.damage;
             
-            // Headshot check
-            if (hit.collider.CompareTag("Head"))
+            // Headshot check (safe tag check)
+            try
             {
-                damage *= currentWeapon.headshotMultiplier;
+                if (hit.collider.CompareTag("Head"))
+                {
+                    damage *= currentWeapon.headshotMultiplier;
+                }
             }
+            catch { }
             
             // Distance falloff
             float distanceFactor = Mathf.Clamp01(1f - (hit.distance / currentWeapon.range));
@@ -942,6 +999,26 @@ namespace TacticalCombat.Combat
             {
                 audioSource.PlayOneShot(clip, 0.3f);
             }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // INPUT SYSTEM BRIDGE HANDLERS
+        // ═══════════════════════════════════════════════════════════
+        private void OnFirePerformed(InputAction.CallbackContext ctx)
+        {
+            fireHeld = true;
+            firePressed = true;
+        }
+
+        private void OnFireCanceled(InputAction.CallbackContext ctx)
+        {
+            fireHeld = false;
+            firePressed = false;
+        }
+
+        private void OnReloadPerformed(InputAction.CallbackContext ctx)
+        {
+            reloadPressed = true;
         }
 
         private void PlayHitSound(SurfaceType surface)
@@ -1134,6 +1211,23 @@ namespace TacticalCombat.Combat
         /// </summary>
         private void OnDisable()
         {
+            // Unhook Input System actions
+            try
+            {
+                if (fireAction != null)
+                {
+                    fireAction.performed -= OnFirePerformed;
+                    fireAction.canceled -= OnFireCanceled;
+                    fireAction.Disable();
+                }
+                if (reloadAction != null)
+                {
+                    reloadAction.performed -= OnReloadPerformed;
+                    reloadAction.Disable();
+                }
+            }
+            catch { }
+
             // Stop tracked coroutines to prevent memory leaks
             if (currentCameraShakeCoroutine != null)
             {

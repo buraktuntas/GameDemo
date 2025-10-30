@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using Mirror;
 using TMPro;
 using System.Collections;
 
@@ -56,10 +57,7 @@ namespace TacticalCombat.UI
         {
             _instance = this;
             
-            if (crosshairImage != null)
-            {
-                originalCrosshairSize = crosshairImage.rectTransform.sizeDelta;
-            }
+            EnsureCanvasAndCrosshair();
             
             // Hide reload bar initially
             if (reloadProgressBar != null)
@@ -70,30 +68,175 @@ namespace TacticalCombat.UI
         {
             // Find local player's weapon system
             StartCoroutine(FindLocalPlayerWeapon());
+
+            // Ensure Canvas targets the local player's camera if needed
+            var canvas = GetComponentInParent<Canvas>();
+            if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+            {
+                // Try to find local player's camera
+                var controllers = FindObjectsByType<TacticalCombat.Player.FPSController>(FindObjectsSortMode.None);
+                foreach (var ctrl in controllers)
+                {
+                    if (ctrl != null && ctrl.isLocalPlayer)
+                    {
+                        var cam = ctrl.GetCamera();
+                        if (cam != null)
+                        {
+                            canvas.worldCamera = cam;
+                            // Ensure canvas is enabled and on top
+                            canvas.sortingOrder = Mathf.Max(canvas.sortingOrder, 100);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // As a final safety, ensure crosshair GameObject is active if found
+            if (crosshairImage != null)
+            {
+                crosshairImage.gameObject.SetActive(true);
+                crosshairImage.enabled = true;
+            }
+        }
+
+        private void EnsureCanvasAndCrosshair()
+        {
+            // Ensure we have a Canvas in parents; otherwise create one
+            var canvas = GetComponentInParent<Canvas>();
+            if (canvas == null)
+            {
+                var canvasGO = new GameObject("Canvas");
+                canvas = canvasGO.AddComponent<Canvas>();
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                canvasGO.AddComponent<UnityEngine.UI.CanvasScaler>();
+                canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+                transform.SetParent(canvasGO.transform, false);
+            }
+
+            // If crosshair already assigned, cache its size
+            if (crosshairImage != null)
+            {
+                originalCrosshairSize = crosshairImage.rectTransform.sizeDelta;
+                return;
+            }
+
+            // Try to find existing crosshair Image in children by name
+            var images = GetComponentsInChildren<UnityEngine.UI.Image>(true);
+            foreach (var img in images)
+            {
+                var n = img.name.ToLower();
+                if (n.Contains("cross") || n.Contains("reticle") || n.Contains("aim"))
+                {
+                    crosshairImage = img;
+                    originalCrosshairSize = crosshairImage.rectTransform.sizeDelta;
+                    return;
+                }
+            }
+
+            // Create a minimal crosshair if none found
+            var go = new GameObject("Crosshair");
+            go.transform.SetParent(canvas.transform, false);
+            var rt = go.AddComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = new Vector2(16, 16);
+
+            crosshairImage = go.AddComponent<Image>();
+            crosshairImage.raycastTarget = false;
+            crosshairImage.color = normalColor;
+
+            // Create a simple white sprite from built-in texture
+            var tex = Texture2D.whiteTexture;
+            var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+            crosshairImage.sprite = sprite;
+
+            // Shape crosshair as plus: use child lines
+            CreateCrosshairLines(go.transform, tex);
+
+            originalCrosshairSize = crosshairImage.rectTransform.sizeDelta;
+        }
+
+        private void CreateCrosshairLines(Transform parent, Texture2D tex)
+        {
+            // Horizontal
+            var h = new GameObject("H");
+            h.transform.SetParent(parent, false);
+            var hImg = h.AddComponent<Image>();
+            hImg.raycastTarget = false;
+            hImg.color = normalColor;
+            hImg.sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+            var hrt = h.GetComponent<RectTransform>();
+            hrt.sizeDelta = new Vector2(24, 2);
+            hrt.anchoredPosition = Vector2.zero;
+
+            // Vertical
+            var v = new GameObject("V");
+            v.transform.SetParent(parent, false);
+            var vImg = v.AddComponent<Image>();
+            vImg.raycastTarget = false;
+            vImg.color = normalColor;
+            vImg.sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+            var vrt = v.GetComponent<RectTransform>();
+            vrt.sizeDelta = new Vector2(2, 24);
+            vrt.anchoredPosition = Vector2.zero;
         }
         
         private System.Collections.IEnumerator FindLocalPlayerWeapon()
         {
             // Wait for local player to spawn
-            yield return new WaitForSeconds(1f);
-            
-            // Find all weapon systems
-            var weapons = FindObjectsByType<Combat.WeaponSystem>(FindObjectsSortMode.None);
-            
-            foreach (var weapon in weapons)
+            yield return new WaitForSeconds(0.5f);
+
+            // Prefer weapon under local player's hierarchy
+            var controllers = FindObjectsByType<TacticalCombat.Player.FPSController>(FindObjectsSortMode.None);
+            foreach (var ctrl in controllers)
             {
-                // ✅ FIX: No need for isLocalPlayer check - MonoBehaviour handles local player
-                weaponSystem = weapon;
-                
-                // Subscribe to events
-                weapon.OnAmmoChanged += UpdateAmmoDisplay;
-                weapon.OnWeaponFired += OnWeaponFired;
-                weapon.OnReloadStarted += OnReloadStarted;
-                weapon.OnReloadComplete += OnReloadComplete;
-                
-                Debug.Log("✅ Combat UI connected to local player weapon");
-                break;
+                if (ctrl != null && ctrl.isLocalPlayer)
+                {
+                    var weapon = ctrl.GetComponentInChildren<Combat.WeaponSystem>(true);
+                    if (weapon != null)
+                    {
+                        BindWeapon(weapon);
+                        yield break;
+                    }
+                }
             }
+
+            // Fallback: bind weapon associated with our canvas camera if any
+            var weapons = FindObjectsByType<Combat.WeaponSystem>(FindObjectsSortMode.None);
+            var canvas = GetComponentInParent<Canvas>();
+            Camera cam = canvas != null ? canvas.worldCamera : null;
+            if (cam != null)
+            {
+                foreach (var w in weapons)
+                {
+                    if (w == null) continue;
+                    var owningCam = w.GetComponentInParent<Camera>(true);
+                    if (owningCam == cam)
+                    {
+                        BindWeapon(w);
+                        yield break;
+                    }
+                }
+            }
+
+            // Final fallback: first available weapon
+            if (weapons.Length > 0 && weapons[0] != null)
+            {
+                BindWeapon(weapons[0]);
+            }
+        }
+
+        private void BindWeapon(Combat.WeaponSystem weapon)
+        {
+            weaponSystem = weapon;
+
+            weapon.OnAmmoChanged += UpdateAmmoDisplay;
+            weapon.OnWeaponFired += OnWeaponFired;
+            weapon.OnReloadStarted += OnReloadStarted;
+            weapon.OnReloadComplete += OnReloadComplete;
+
+            Debug.Log("✅ [CombatUI] Bound to local weapon system");
         }
         
         // ═══════════════════════════════════════════════════════════

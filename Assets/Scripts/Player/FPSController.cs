@@ -35,10 +35,9 @@ namespace TacticalCombat.Player
         public float staminaDrainRate = 10f;
         public float staminaRegenRate = 5f;
         
-        [Header("Network Sync")]
-        [SyncVar] public Team team;
-        [SyncVar] public RoleId role;
-        [SyncVar] public ulong playerId;
+        [Header("Network Sync (read-only view)")]
+        // Read network state from PlayerController to avoid duplication
+        private PlayerController playerController;
         
         [Header("Audio (Optional)")]
         public AudioClip jumpSound;
@@ -101,13 +100,14 @@ namespace TacticalCombat.Player
             Debug.Log($"   isLocalPlayer: {isLocalPlayer}");
             Debug.Log($"   isServer: {isServer}");
             Debug.Log($"   isClient: {isClient}");
-            Debug.Log($"   Team: {team}");
+            Debug.Log($"   Team: {playerController?.team}");
             Debug.Log($"   Position: {transform.position}");
             Debug.Log($"   Scene: {gameObject.scene.name}");
             Debug.Log("═══════════════════════════════════════");
 
-            // Cache InputManager - her player'ın kendi InputManager'ı var
+            // Cache InputManager & PlayerController - her player'ın kendi component'ları var
             inputManager = GetComponent<InputManager>();
+            playerController = GetComponent<PlayerController>();
 
             // ✅ FIX: Setup camera (creates if needed) - SAFE VERSION
             try
@@ -120,21 +120,7 @@ namespace TacticalCombat.Player
                 Debug.LogError($"Stack trace: {e.StackTrace}");
             }
 
-            // ✅ FIX: Disable ALL other audio listeners (only local player should hear)
-            try
-            {
-                var listeners = Object.FindObjectsByType<AudioListener>(FindObjectsSortMode.None);
-                foreach (var l in listeners)
-                {
-                    if (l == null) continue;
-                    // Only enable listener if it's OUR camera
-                    l.enabled = (playerCamera != null && l.gameObject == playerCamera.gameObject);
-                }
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogWarning($"⚠️ AudioListener cleanup failed: {e.Message}");
-            }
+            // Local camera kendi AudioListener'ına sahip; sahnedeki diğerlerini değiştirmeyin
 
             // ✅ FIX: Store base FOV for sprint effect
             if (playerCamera != null)
@@ -146,15 +132,7 @@ namespace TacticalCombat.Player
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
 
-            // Register with match manager
-            try
-            {
-                RegisterPlayer();
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogWarning($"⚠️ Player registration failed: {e.Message}");
-            }
+            // Player registration server tarafından PlayerController'da yönetilir
 
             if (showDebugInfo)
             {
@@ -163,32 +141,7 @@ namespace TacticalCombat.Player
             }
         }
         
-        private void RegisterPlayer()
-        {
-            if (MatchManager.Instance == null) return;
-            
-            if (isServer)
-            {
-                MatchManager.Instance.RegisterPlayer(playerId, team, role);
-            }
-            else
-            {
-                CmdRegisterPlayer(team, role);
-            }
-        }
-        
-        [Command]
-        private void CmdRegisterPlayer(Team playerTeam, RoleId playerRole)
-        {
-            team = playerTeam;
-            role = playerRole;
-            playerId = netId;
-            
-            if (MatchManager.Instance != null)
-            {
-                MatchManager.Instance.RegisterPlayer(playerId, playerTeam, playerRole);
-            }
-        }
+        // Registration handled by PlayerController on server
         
         private void SetupCamera()
         {
@@ -206,7 +159,6 @@ namespace TacticalCombat.Player
                     var camGO = new GameObject("PlayerCamera");
                     camGO.transform.SetParent(transform);
                     playerCamera = camGO.AddComponent<Camera>();
-                    playerCamera.tag = "MainCamera";
 
                     // Add AudioListener
                     var listener = camGO.AddComponent<AudioListener>();

@@ -26,6 +26,12 @@ namespace TacticalCombat.Player
             playerVisuals = GetComponent<PlayerVisuals>();
             playerId = netId; // Network ID'yi set et
         }
+
+        public override void OnStartServer()
+        {
+            base.OnStartServer();
+            RegisterWithMatchManager();
+        }
         
         public override void OnStartLocalPlayer()
         {

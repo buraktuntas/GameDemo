@@ -139,9 +139,9 @@ namespace TacticalCombat.Editor
             gameManager.AddComponent<MatchManager>();
             gameManager.AddComponent<NetworkIdentity>();
 
-            // Create NetworkManager
+            // Create NetworkManager (use custom NetworkGameManager)
             var networkManager = new GameObject("NetworkManager");
-            networkManager.AddComponent<NetworkManager>();
+            networkManager.AddComponent<NetworkGameManager>();
             networkManager.AddComponent<kcp2k.KcpTransport>();
 
             // Create UI Canvas
@@ -174,8 +174,7 @@ namespace TacticalCombat.Editor
         {
             var core = new GameObject(name);
             core.AddComponent<Health>();
-            // ✅ FIX: CoreStructure yerine basit MonoBehaviour kullan
-            var coreComponent = core.AddComponent<MonoBehaviour>();
+            // Remove invalid MonoBehaviour add; ensure NetworkIdentity exists
             core.AddComponent<NetworkIdentity>();
             
             Debug.Log($"✅ Created {name} for {team}");
@@ -186,7 +185,8 @@ namespace TacticalCombat.Editor
             var player = new GameObject("Player");
             player.AddComponent<CharacterController>();
             player.AddComponent<NetworkIdentity>();
-            player.AddComponent<NetworkTransformReliable>();
+            // Use Mirror's reliable NetworkTransform variant present in this project
+            player.AddComponent<Mirror.NetworkTransformReliable>();
             player.AddComponent<PlayerController>();
             player.AddComponent<FPSController>();
             player.AddComponent<WeaponSystem>();
