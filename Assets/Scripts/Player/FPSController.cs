@@ -121,7 +121,13 @@ namespace TacticalCombat.Player
                 playerInput = GetComponent<PlayerInput>();
                 if (playerInput == null)
                 {
-                    playerInput = gameObject.AddComponent<PlayerInput>();
+                    // ⚠️ Don't add PlayerInput at runtime - should be on prefab
+                    // Using InputManager as fallback
+                    if (showDebugInfo)
+                    {
+                        Debug.LogWarning("[FPSController] PlayerInput not found - using InputManager fallback");
+                    }
+                    return; // Exit early, InputManager will handle input
                 }
 
                 // Ensure an actions asset is assigned

@@ -12,23 +12,32 @@ namespace TacticalCombat.UI
         [SerializeField] private Color crosshairColor = Color.white;
         [SerializeField] private float size = 10f;
         [SerializeField] private float thickness = 2f;
-        
+
         [Header("Debug")]
         [SerializeField] private bool showDebugInfo = false;
-        
+
         // Debug state tracking
         private bool lastBuildModeState = false;
         private InputManager.CursorMode lastCursorMode = InputManager.CursorMode.Locked;
 
+        // ✅ PERFORMANCE FIX: Cache local InputManager instead of finding every frame
+        private InputManager cachedLocalInputManager;
+        private float lastCacheTime;
+        private const float CACHE_REFRESH_INTERVAL = 2f; // Refresh every 2 seconds
+
         private void OnGUI()
         {
-            // ⭐ Sadece FPS mode'da crosshair göster
-            // InputManager singleton olmadığı için local player'ı bul
-            InputManager localInputManager = FindLocalPlayerInputManager();
-            if (localInputManager != null)
+            // ✅ PERFORMANCE FIX: Use cached InputManager, refresh periodically
+            if (cachedLocalInputManager == null || Time.time - lastCacheTime > CACHE_REFRESH_INTERVAL)
             {
-                bool currentBuildMode = localInputManager.IsInBuildMode || localInputManager.IsInMenu || localInputManager.IsPaused;
-                InputManager.CursorMode currentCursorMode = localInputManager.GetCurrentMode();
+                cachedLocalInputManager = FindLocalPlayerInputManager();
+                lastCacheTime = Time.time;
+            }
+
+            if (cachedLocalInputManager != null)
+            {
+                bool currentBuildMode = cachedLocalInputManager.IsInBuildMode || cachedLocalInputManager.IsInMenu || cachedLocalInputManager.IsPaused;
+                InputManager.CursorMode currentCursorMode = cachedLocalInputManager.GetCurrentMode();
                 
                 // Debug logları sadece state değiştiğinde göster
                 if (showDebugInfo)

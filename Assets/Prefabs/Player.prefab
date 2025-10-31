@@ -2206,6 +2206,7 @@ GameObject:
   - component: {fileID: 9178948777531747454}
   - component: {fileID: 853497036812079008}
   - component: {fileID: 6823508762743587216}
+  - component: {fileID: 2290740148077667609}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -2857,7 +2858,7 @@ MonoBehaviour:
   syncInterval: 0
   playerController: {fileID: 5762293426446655826}
   fpsController: {fileID: 8007000623490364514}
-  inputManager: {fileID: 0}
+  inputManager: {fileID: 2290740148077667609}
   health: {fileID: 4297764120733403557}
   weaponSystem: {fileID: 7190127478359227877}
   abilityController: {fileID: 6222115655280801091}
@@ -2868,6 +2869,20 @@ MonoBehaviour:
   footstepAudio: {fileID: 3444147668471724516}
   weaponAudio: {fileID: 9178948777531747454}
   voiceAudio: {fileID: 853497036812079008}
+--- !u!114 &2290740148077667609
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8456604194486551462}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2669a5ec0fda93140aeaf2d52d515237, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Player.InputManager
+  allowPauseInBuildMode: 0
+  showDebugInfo: 0
 --- !u!1 &8514595661847557571
 GameObject:
   m_ObjectHideFlags: 0
