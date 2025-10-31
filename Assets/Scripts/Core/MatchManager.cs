@@ -210,9 +210,20 @@ namespace TacticalCombat.Core
         [Server]
         private IEnumerator CombatPhaseTimer()
         {
-            while (remainingTime > 0 && !IsWinConditionMet())
+            const float winCheckInterval = 0.5f;
+            float nextCheck = 0f;
+
+            while (remainingTime > 0)
             {
                 remainingTime -= Time.deltaTime;
+
+                // Check win condition every 0.5s, not every frame
+                if (Time.time >= nextCheck)
+                {
+                    if (IsWinConditionMet()) break;
+                    nextCheck = Time.time + winCheckInterval;
+                }
+
                 yield return null;
             }
 

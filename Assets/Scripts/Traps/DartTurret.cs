@@ -15,21 +15,26 @@ namespace TacticalCombat.Traps
 
         private float lastFireTime;
         private float lastScanTime;
-        private const float SCAN_INTERVAL = 0.2f;  // Scan every 200ms instead of every frame
-        private static readonly Collider[] scanBuffer = new Collider[16];  // NonAlloc buffer
+        private const float SCAN_INTERVAL = 0.2f;
+        private static readonly Collider[] scanBuffer = new Collider[16];
+        private static int playerLayerMask = -1;  // Cache layer mask
 
         private void Awake()
         {
             trapType = TrapType.Mechanical;
+
+            // Cache layer mask once
+            if (playerLayerMask == -1)
+            {
+                playerLayerMask = LayerMask.GetMask("Player");
+            }
         }
 
-        protected override void Update()
+        private void Update()
         {
-            base.Update();
-
             if (!isServer || !isArmed) return;
 
-            // ✅ PERFORMANCE FIX: Throttled scanning instead of every frame
+            // Throttled scanning every 200ms
             if (Time.time - lastScanTime >= SCAN_INTERVAL)
             {
                 lastScanTime = Time.time;
@@ -42,12 +47,11 @@ namespace TacticalCombat.Traps
         {
             if (Time.time < lastFireTime + fireRate) return;
 
-            // ✅ PERFORMANCE FIX: Use NonAlloc to avoid GC allocations
             int hitCount = Physics.OverlapSphereNonAlloc(
                 transform.position,
                 detectionRange,
                 scanBuffer,
-                LayerMask.GetMask("Player")  // Only check player layer
+                playerLayerMask
             );
 
             for (int i = 0; i < hitCount; i++)

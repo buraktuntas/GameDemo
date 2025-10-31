@@ -37,20 +37,18 @@ namespace TacticalCombat.Building
             StructureCategory category = Structure.GetStructureCategory(request.type);
             int cost = Structure.GetStructureCost(request.type);
 
-            // Budget check
-            if (!MatchManager.Instance.SpendBudget(request.playerId, category, cost))
-            {
-                Debug.Log($"Insufficient budget for {request.type}");
-                return false;
-            }
-
-            // Overlap check
+            // Validation checks BEFORE spending budget
             Collider[] overlaps = Physics.OverlapSphere(request.position, minDistanceBetweenStructures, obstacleMask);
             if (overlaps.Length > 0)
             {
                 Debug.Log("Placement overlaps with existing structure");
-                // Refund budget
-                // Note: Would need a refund method in MatchManager
+                return false;
+            }
+
+            // Spend budget last (after all validation passes)
+            if (!MatchManager.Instance.SpendBudget(request.playerId, category, cost))
+            {
+                Debug.Log($"Insufficient budget for {request.type}");
                 return false;
             }
 
@@ -69,17 +67,24 @@ namespace TacticalCombat.Building
                 return;
             }
 
-            GameObject structureObj = Instantiate(prefab, request.position, request.rotation);
-            
+            // Use NetworkObjectPool if available (prevents Instantiate/Destroy GC spikes)
+            GameObject structureObj;
+            if (NetworkObjectPool.Instance != null)
+            {
+                structureObj = NetworkObjectPool.Instance.Get(prefab, request.position, request.rotation);
+            }
+            else
+            {
+                structureObj = Instantiate(prefab, request.position, request.rotation);
+                NetworkServer.Spawn(structureObj);
+            }
+
             // Initialize structure
             Structure structure = structureObj.GetComponent<Structure>();
             if (structure != null)
             {
                 structure.Initialize(team, request.type, Structure.GetStructureCategory(request.type), request.playerId);
             }
-
-            // Spawn on network
-            NetworkServer.Spawn(structureObj);
         }
 
         private GameObject GetStructurePrefab(StructureType type)

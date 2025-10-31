@@ -95,16 +95,20 @@ namespace TacticalCombat.Building
         [Server]
         private void OnStructureDestroyed()
         {
-            Debug.Log($"{structureType} of {team} destroyed!");
-
             if (isCore)
             {
-                // Notify MatchManager that a core was destroyed
                 MatchManager.Instance?.NotifyCoreDestroyed(team);
             }
 
-            // Destroy the structure
-            NetworkServer.Destroy(gameObject);
+            // Return to pool if available, otherwise destroy
+            if (NetworkObjectPool.Instance != null)
+            {
+                NetworkObjectPool.Instance.Release(gameObject);
+            }
+            else
+            {
+                NetworkServer.Destroy(gameObject);
+            }
         }
 
         public static int GetStructureCost(StructureType type)

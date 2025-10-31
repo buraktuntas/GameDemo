@@ -56,13 +56,18 @@ namespace TacticalCombat.Combat
         private Quaternion originalWeaponRot;
         private bool isAiming;
         
+        [Header("Input System")]
+        [SerializeField] private InputActionAsset actionsAsset; // Assign InputSystem_Actions in Inspector
+        
         // ✅ Input System bridge (optional)
         private PlayerInput playerInput;
         private InputAction fireAction;
         private InputAction reloadAction;
+        private InputAction aimAction;
         private bool fireHeld;
         private bool firePressed;
         private bool reloadPressed;
+        private bool aimHeld;
         
         // ✅ FIX: Audio debug flag
         [Header("🐛 DEBUG")]
@@ -85,6 +90,15 @@ namespace TacticalCombat.Combat
         
         private void Awake()
         {
+            // Validate NetworkIdentity placement: WeaponSystem must live on the same GameObject
+            // as the root NetworkIdentity (no child NetworkIdentity allowed by Mirror)
+            var myIdentity = GetComponent<NetworkIdentity>();
+            var parentIdentity = GetComponentInParent<NetworkIdentity>();
+            if (parentIdentity != null && parentIdentity.gameObject != gameObject && myIdentity != null)
+            {
+                Debug.LogError("[WeaponSystem] NetworkIdentity detected on child. Please move WeaponSystem to the root object with NetworkIdentity and remove child NetworkIdentity.", this);
+            }
+
             // ✅ FIX: AudioSource'u garanti et
             if (audioSource == null)
             {
@@ -139,68 +153,32 @@ namespace TacticalCombat.Combat
         
         private void InitializeObjectPools()
         {
-            // Muzzle flash pool
+            // Muzzle flash pool - no parenting to avoid transform sync overhead
             if (muzzleFlashPrefab != null)
             {
                 for (int i = 0; i < POOL_SIZE; i++)
                 {
                     GameObject flash = Instantiate(muzzleFlashPrefab);
-                    flash.transform.SetParent(transform); // ✅ FIX: Parent to player, not scene root
                     flash.SetActive(false);
-
-                    // Add AutoDestroy component if missing
                     if (flash.GetComponent<AutoDestroy>() == null)
                     {
                         flash.AddComponent<AutoDestroy>();
                     }
-
-                    muzzleFlashPool.Enqueue(flash);
-                }
-                Debug.Log($"✅ [WeaponSystem] Muzzle flash pool initialized with {POOL_SIZE} objects");
-            }
-            else
-            {
-                Debug.LogWarning("⚠️ [WeaponSystem] MuzzleFlashPrefab is null - creating simple fallback");
-                // Create simple fallback muzzle flash
-                for (int i = 0; i < POOL_SIZE; i++)
-                {
-                    GameObject flash = new GameObject("MuzzleFlash");
-                    flash.transform.SetParent(transform); // ✅ FIX: Parent to player
-                    flash.SetActive(false);
-                    flash.AddComponent<AutoDestroy>();
                     muzzleFlashPool.Enqueue(flash);
                 }
             }
             
-            // Hit effect pool
+            // Hit effect pool - no parenting
             if (hitEffectPrefab != null)
             {
                 for (int i = 0; i < POOL_SIZE; i++)
                 {
                     GameObject effect = Instantiate(hitEffectPrefab);
-                    effect.transform.SetParent(transform); // ✅ FIX: Parent to player, not scene root
                     effect.SetActive(false);
-
-                    // Add AutoDestroy component if missing
                     if (effect.GetComponent<AutoDestroy>() == null)
                     {
                         effect.AddComponent<AutoDestroy>();
                     }
-
-                    hitEffectPool.Enqueue(effect);
-                }
-                Debug.Log($"✅ [WeaponSystem] Hit effect pool initialized with {POOL_SIZE} objects");
-            }
-            else
-            {
-                Debug.LogWarning("⚠️ [WeaponSystem] HitEffectPrefab is null - creating simple fallback");
-                // Create simple fallback hit effect
-                for (int i = 0; i < POOL_SIZE; i++)
-                {
-                    GameObject effect = new GameObject("HitEffect");
-                    effect.transform.SetParent(transform); // ✅ FIX: Parent to player
-                    effect.SetActive(false);
-                    effect.AddComponent<AutoDestroy>();
                     hitEffectPool.Enqueue(effect);
                 }
             }
@@ -208,12 +186,11 @@ namespace TacticalCombat.Combat
         
         private void Start()
         {
-            // ✅ FIX: InputManager referansı - Start'ta bulunamayabilir, Update'te tekrar dene
             inputManager = GetComponent<TacticalCombat.Player.InputManager>();
 
             if (debugInputs)
             {
-                Debug.Log($"✅ [WeaponSystem] Start - InputManager: {(inputManager != null ? "Found" : "NULL - will retry in Update")}");
+                Debug.Log($"[WeaponSystem] Start - InputManager: {(inputManager != null ? "Found" : "Not found yet, will retry")}");
             }
 
             // ⚡ PERFORMANCE FIX: Cache camera reference
@@ -265,13 +242,28 @@ namespace TacticalCombat.Combat
             try
             {
                 playerInput = GetComponent<PlayerInput>();
-                if (playerInput != null)
+                if (playerInput == null)
                 {
-                    var map = playerInput.actions?.FindActionMap("Player", true);
+                    playerInput = gameObject.AddComponent<PlayerInput>();
+                }
+
+                if (playerInput.actions == null && actionsAsset != null)
+                {
+                    playerInput.actions = actionsAsset;
+                }
+
+                if (playerInput.actions != null)
+                {
+                    var map = playerInput.actions.FindActionMap("Player", true);
                     if (map != null)
                     {
-                        fireAction = map.FindAction("Fire", false);
+                        playerInput.defaultActionMap = "Player";
+                        map.Enable();
+
+                        // Map to existing actions in InputSystem_Actions: Attack/Reload/Aim
+                        fireAction = map.FindAction("Attack", false);
                         reloadAction = map.FindAction("Reload", false);
+                        aimAction = map.FindAction("Aim", false);
 
                         if (fireAction != null)
                         {
@@ -284,6 +276,12 @@ namespace TacticalCombat.Combat
                             reloadAction.performed += OnReloadPerformed;
                             reloadAction.Enable();
                         }
+                        if (aimAction != null)
+                        {
+                            aimAction.performed += OnAimPerformed;
+                            aimAction.canceled += OnAimCanceled;
+                            aimAction.Enable();
+                        }
                     }
                 }
             }
@@ -292,52 +290,27 @@ namespace TacticalCombat.Combat
         
         private void Update()
         {
-            // ✅ FIX: No need for isLocalPlayer check - MonoBehaviour handles local player
-            // Throttle heavy InputManager scanning to avoid client hitch on join
-            const int searchIntervalFrames = 120; // ~2s @60fps
-            if (inputManager == null && (Time.frameCount % searchIntervalFrames) == 0)
-            {
-                // Only search for InputManager every 120 frames when missing
-                inputManager = FindFirstObjectByType<TacticalCombat.Player.InputManager>();
-                return;
-            }
-
-            // Early exit if still no InputManager after throttled search
+            // Retry finding InputManager if missing
             if (inputManager == null)
             {
-                return;
+                inputManager = GetComponent<TacticalCombat.Player.InputManager>();
+                if (inputManager == null) return;
             }
 
-            // ✅ FIX: Build modunda silah tamamen devre dışı
-            if (inputManager.IsInBuildMode)
-            {
-                if (debugInputs && Time.frameCount % 60 == 0)
-                {
-                    Debug.Log("🏗️ [WeaponSystem] Build mode active - weapon disabled");
-                }
-                return; // Build mode'da silah hiç çalışmasın
-            }
-            
+            if (inputManager.IsInBuildMode) return;
+
             HandleInput();
             UpdateRecoil();
         }
         
         private void HandleInput()
         {
-            // ✅ FIX: Ekstra güvenlik kontrolü
-            if (inputManager != null && inputManager.BlockShootInput)
-            {
-                if (debugInputs && Time.frameCount % 60 == 0)
-                {
-                    Debug.Log("🚫 [WeaponSystem] Shoot input blocked");
-                }
-                return;
-            }
+            if (inputManager == null || inputManager.BlockShootInput) return;
             
             // Fire - ✅ FIX: Separate auto and semi-auto to prevent stuck shooting
             if (currentWeapon != null)
             {
-                // Determine fire inputs (Input System + legacy)
+                // Determine fire inputs (Input System + legacy fallback)
                 bool fireHeldInput = fireHeld || Input.GetButton("Fire1");
                 bool firePressedInput = firePressed || Input.GetButtonDown("Fire1");
 
@@ -376,14 +349,10 @@ namespace TacticalCombat.Combat
             }
             
             // Aim (optional)
-            if (Input.GetButton("Fire2"))
-            {
-                isAiming = true;
-            }
-            else
-            {
-                isAiming = false;
-            }
+            isAiming = aimHeld || Input.GetButton("Fire2");
+
+            // Reset one-shot press
+            firePressed = false;
         }
         
         private bool CanFire()
@@ -403,12 +372,6 @@ namespace TacticalCombat.Combat
         
         private void Fire()
         {
-            // ✅ FIX: Throttle debug logs to prevent console spam
-            if (debugInputs && Time.frameCount % 60 == 0)
-            {
-                Debug.Log($"🔥 [WeaponSystem] FIRE() executing - Weapon: {currentWeapon?.weaponName}, Ammo: {currentAmmo}");
-            }
-
             nextFireTime = Time.time + (1f / currentWeapon.fireRate);
             currentAmmo--;
             
@@ -654,10 +617,6 @@ namespace TacticalCombat.Combat
             // Play hit sound
             PlayHitSound(surface);
 
-            if (debugInputs)
-            {
-                Debug.Log($"🎨 [Client RPC] Impact effect at {hitPoint} - Surface: {surface}, Body: {isBodyHit}, Crit: {isCritical}");
-            }
         }
         
         private SurfaceType DetermineSurfaceType(Collider collider)
@@ -1021,6 +980,16 @@ namespace TacticalCombat.Combat
             reloadPressed = true;
         }
 
+        private void OnAimPerformed(InputAction.CallbackContext ctx)
+        {
+            aimHeld = true;
+        }
+
+        private void OnAimCanceled(InputAction.CallbackContext ctx)
+        {
+            aimHeld = false;
+        }
+
         private void PlayHitSound(SurfaceType surface)
         {
             // TODO: Add surface-specific hit sounds
@@ -1224,6 +1193,12 @@ namespace TacticalCombat.Combat
                 {
                     reloadAction.performed -= OnReloadPerformed;
                     reloadAction.Disable();
+                }
+                if (aimAction != null)
+                {
+                    aimAction.performed -= OnAimPerformed;
+                    aimAction.canceled -= OnAimCanceled;
+                    aimAction.Disable();
                 }
             }
             catch { }

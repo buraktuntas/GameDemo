@@ -1,6 +1,7 @@
 using UnityEngine;
 using Mirror;
 using UnityEngine.Rendering.Universal;
+using UnityEngine.InputSystem; // Optional Input System bridge
 using TacticalCombat.Core;
 
 namespace TacticalCombat.Player
@@ -70,6 +71,19 @@ namespace TacticalCombat.Player
         // Cached references
         private InputManager inputManager;
         
+        // ✅ Input System bridge (optional)
+        [Header("Input System")]
+        [SerializeField] private InputActionAsset actionsAsset; // Assign InputSystem_Actions in Inspector
+        private PlayerInput playerInput;
+        private InputAction moveAction;
+        private InputAction lookAction;
+        private InputAction jumpAction;
+        private InputAction sprintAction;
+        private Vector2 moveAxis;
+        private Vector2 lookDelta;
+        private bool jumpPressed;
+        private bool sprintHeld;
+        
         private void Awake()
         {
             characterController = GetComponent<CharacterController>();
@@ -92,22 +106,72 @@ namespace TacticalCombat.Player
         {
             base.OnStartLocalPlayer();
 
-            // KRITIK DEBUG
-            Debug.Log("═══════════════════════════════════════");
-            Debug.Log($"🎮 FPSController.OnStartLocalPlayer() ÇAĞRILDI!");
-            Debug.Log($"   GameObject: {gameObject.name}");
-            Debug.Log($"   NetID: {netId}");
-            Debug.Log($"   isLocalPlayer: {isLocalPlayer}");
-            Debug.Log($"   isServer: {isServer}");
-            Debug.Log($"   isClient: {isClient}");
-            Debug.Log($"   Team: {playerController?.team}");
-            Debug.Log($"   Position: {transform.position}");
-            Debug.Log($"   Scene: {gameObject.scene.name}");
-            Debug.Log("═══════════════════════════════════════");
+            if (showDebugInfo)
+            {
+                Debug.Log($"FPSController init | NetID:{netId} | Pos:{transform.position}");
+            }
 
             // Cache InputManager & PlayerController - her player'ın kendi component'ları var
             inputManager = GetComponent<InputManager>();
             playerController = GetComponent<PlayerController>();
+
+            // ✅ Try hook Input System actions (optional)
+            try
+            {
+                playerInput = GetComponent<PlayerInput>();
+                if (playerInput == null)
+                {
+                    playerInput = gameObject.AddComponent<PlayerInput>();
+                }
+
+                // Ensure an actions asset is assigned
+                if (playerInput.actions == null)
+                {
+                    if (actionsAsset != null)
+                    {
+                        playerInput.actions = actionsAsset;
+                    }
+                }
+
+                if (playerInput.actions != null)
+                {
+                    // Make sure Player map is active
+                    var map = playerInput.actions.FindActionMap("Player", true);
+                    if (map != null)
+                    {
+                        playerInput.defaultActionMap = "Player";
+                        map.Enable();
+
+                        moveAction = map.FindAction("Move", false);
+                        lookAction = map.FindAction("Look", false);
+                        jumpAction = map.FindAction("Jump", false);
+                        sprintAction = map.FindAction("Sprint", false);
+
+                        if (moveAction != null) moveAction.Enable();
+                        if (lookAction != null) lookAction.Enable();
+                        if (jumpAction != null)
+                        {
+                            jumpAction.performed += OnJumpPerformed;
+                            jumpAction.Enable();
+                        }
+                        if (sprintAction != null)
+                        {
+                            sprintAction.performed += OnSprintPerformed;
+                            sprintAction.canceled += OnSprintCanceled;
+                            sprintAction.Enable();
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogWarning("⚠️ [FPSController] 'Player' action map not found in assigned InputActionAsset.");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("⚠️ [FPSController] No InputActionAsset assigned to PlayerInput. Assign 'InputSystem_Actions'.");
+                }
+            }
+            catch { }
 
             // ✅ FIX: Setup camera (creates if needed) - SAFE VERSION
             try
@@ -132,13 +196,7 @@ namespace TacticalCombat.Player
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
 
-            // Player registration server tarafından PlayerController'da yönetilir
-
-            if (showDebugInfo)
-            {
-                Debug.Log("✅ FPSController initialized for local player");
-                Debug.Log($"Controls: WASD = Move | Mouse = Look | Shift = Sprint | Space = Jump | ESC = Menu");
-            }
+            // Player registration handled by PlayerController
         }
         
         // Registration handled by PlayerController on server
@@ -223,21 +281,25 @@ namespace TacticalCombat.Player
         
         private void Update()
         {
-            if (!isLocalPlayer) return;
-            
-            // ✅ FIX: Time.timeScale = 0 durumunda da çalışsın
-            if (Time.timeScale == 0f) return;
-            
-            // Sadece rotation ve UI Update'de
+            if (!isLocalPlayer || Time.timeScale == 0f) return;
+
             HandleRotation();
-            
-            // Optional features
+        }
+
+        private void LateUpdate()
+        {
+            if (!isLocalPlayer) return;
+
+            // Visual effects only
             if (useStamina) HandleStamina();
             if (useHeadBob) UpdateHeadBob();
             if (useFOVKick) UpdateFOV();
-            
             UpdateFootsteps();
             CheckGroundState();
+
+            // Reset per-frame flags
+            jumpPressed = false;
+            lookDelta = Vector2.zero;
         }
         
         private void FixedUpdate()
@@ -275,7 +337,13 @@ namespace TacticalCombat.Player
             }
             
             if (!canMove) return Vector3.zero;
-            
+
+            // Prefer Input System; fallback to legacy to ensure controls always work
+            if (moveAction != null)
+            {
+                moveAxis = moveAction.ReadValue<Vector2>();
+                return new Vector3(moveAxis.x, 0, moveAxis.y);
+            }
             return new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
         }
         
@@ -292,7 +360,7 @@ namespace TacticalCombat.Player
             right.Normalize();
             
             // Check if can sprint
-            bool wantsToSprint = Input.GetKey(KeyCode.LeftShift);
+            bool wantsToSprint = sprintHeld || Input.GetKey(KeyCode.LeftShift);
             bool canSprint = !useStamina || currentStamina > 0;
             
             // ⭐ Check if sprint is blocked
@@ -317,7 +385,7 @@ namespace TacticalCombat.Player
             {
                 // Skip jump check
             }
-            else if (Input.GetButtonDown("Jump") && canMove && grounded)
+            else if ((jumpPressed || Input.GetButtonDown("Jump")) && canMove && grounded)
             {
                 return jumpPower;
             }
@@ -354,8 +422,19 @@ namespace TacticalCombat.Player
             
             if (!canMove) return;
             
-            float mouseX = Input.GetAxis("Mouse X");
-            float mouseY = Input.GetAxis("Mouse Y");
+            float mouseX;
+            float mouseY;
+            if (lookAction != null)
+            {
+                lookDelta = lookAction.ReadValue<Vector2>();
+                mouseX = lookDelta.x;
+                mouseY = lookDelta.y;
+            }
+            else
+            {
+                mouseX = Input.GetAxis("Mouse X");
+                mouseY = Input.GetAxis("Mouse Y");
+            }
             
             // Mouse Y -> Camera pitch (up/down)
             rotationX += -mouseY * lookSpeed;
@@ -533,15 +612,33 @@ namespace TacticalCombat.Player
         
         public float GetStaminaPercent() => currentStamina / maxStamina;
         
-        public bool IsSprinting() => Input.GetKey(KeyCode.LeftShift) && IsMoving() && IsGrounded();
+        public bool IsSprinting() => (sprintHeld || Input.GetKey(KeyCode.LeftShift)) && IsMoving() && IsGrounded();
+
+        // ═══════════════════════════════════════════════════════════
+        // INPUT SYSTEM BRIDGE HANDLERS
+        // ═══════════════════════════════════════════════════════════
+        private void OnJumpPerformed(InputAction.CallbackContext ctx)
+        {
+            jumpPressed = true;
+        }
+
+        private void OnSprintPerformed(InputAction.CallbackContext ctx)
+        {
+            sprintHeld = true;
+        }
+
+        private void OnSprintCanceled(InputAction.CallbackContext ctx)
+        {
+            sprintHeld = false;
+        }
         
         // ═══════════════════════════════════════════════════════════
         // DEBUG VISUALIZATION
         // ═══════════════════════════════════════════════════════════
         
-        private void OnDrawGizmos()
+        private void OnDrawGizmosSelected()
         {
-            if (!Application.isPlaying || !showDebugInfo) return;
+            if (!Application.isPlaying || !showDebugInfo || !isLocalPlayer) return;
             
             // Draw player forward direction (BLUE)
             Gizmos.color = Color.blue;

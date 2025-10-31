@@ -27,8 +27,9 @@ namespace TacticalCombat.Vision
         // ✅ PERFORMANCE FIX: Cache player health components
         private Dictionary<Player.PlayerController, Combat.Health> playerHealthCache = new Dictionary<Player.PlayerController, Combat.Health>();
 
-        // ✅ PERFORMANCE FIX: NonAlloc buffer for vision pulse
+        // ✅ PERFORMANCE FIX: NonAlloc buffers
         private static readonly Collider[] visionBuffer = new Collider[32];
+        private readonly Vector3[] positionBuffer = new Vector3[32];
 
         public System.Action<Team> OnControlChanged;
 
@@ -175,25 +176,22 @@ namespace TacticalCombat.Vision
         [Server]
         private void ApplyVisionPulse()
         {
-            // ✅ PERFORMANCE FIX: Use NonAlloc to avoid GC allocations
             int hitCount = Physics.OverlapSphereNonAlloc(
                 transform.position,
                 visionPulseRadius,
                 visionBuffer
             );
 
-            List<Vector3> revealedPositions = new List<Vector3>();
+            int revealCount = 0;
 
             for (int i = 0; i < hitCount; i++)
             {
                 Collider hit = visionBuffer[i];
 
-                // ✅ PERFORMANCE FIX: Use TryGetComponent
                 if (hit.TryGetComponent<Player.PlayerController>(out var player))
                 {
                     if (player.team != controllingTeam)
                     {
-                        // ✅ PERFORMANCE FIX: Use cached health component
                         if (!playerHealthCache.TryGetValue(player, out var health))
                         {
                             if (player.TryGetComponent<Combat.Health>(out health))
@@ -204,28 +202,28 @@ namespace TacticalCombat.Vision
 
                         if (health != null && !health.IsDead())
                         {
-                            revealedPositions.Add(player.transform.position);
+                            if (revealCount < positionBuffer.Length)
+                            {
+                                positionBuffer[revealCount] = player.transform.position;
+                                revealCount++;
+                            }
                         }
                     }
                 }
             }
 
-            if (revealedPositions.Count > 0)
+            if (revealCount > 0)
             {
-                RpcRevealEnemies(revealedPositions.ToArray(), controllingTeam);
+                RpcRevealEnemies(positionBuffer, revealCount, controllingTeam);
             }
         }
 
         [ClientRpc]
-        private void RpcRevealEnemies(Vector3[] positions, Team revealingTeam)
+        private void RpcRevealEnemies(Vector3[] positions, int count, Team revealingTeam)
         {
-            // Show revealed positions on minimap/UI for the controlling team
-            Debug.Log($"{revealingTeam} vision pulse revealed {positions.Length} enemies");
-            
-            foreach (var pos in positions)
+            for (int i = 0; i < count; i++)
             {
-                // Create temporary marker or ping
-                CreateRevealMarker(pos);
+                CreateRevealMarker(positions[i]);
             }
         }
 

@@ -24,16 +24,9 @@ namespace TacticalCombat.Traps
         public virtual void Initialize(Team team)
         {
             ownerTeam = team;
-            armingTime = Time.time + armingDelay;
-        }
-
-        protected virtual void Update()
-        {
-            if (!isServer) return;
-
-            if (!isArmed && Time.time >= armingTime)
+            if (isServer)
             {
-                Arm();
+                Invoke(nameof(Arm), armingDelay);
             }
         }
 

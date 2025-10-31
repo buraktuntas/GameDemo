@@ -252,79 +252,40 @@ namespace TacticalCombat.Player
     // Helper components for abilities
     public class GuardianShield : MonoBehaviour
     {
-        private float duration;
-        private float elapsed;
-
         public void Initialize(float dur)
         {
-            duration = dur;
-            elapsed = 0f;
+            Destroy(this, dur);
         }
 
-        private void Update()
-        {
-            elapsed += Time.deltaTime;
-            if (elapsed >= duration)
-            {
-                Destroy(this);
-            }
-        }
-
-        // This would be used in projectile collision detection
         public bool BlocksProjectiles() => true;
     }
 
     public class SaboteurStealth : MonoBehaviour
     {
-        private float duration;
-        private float elapsed;
-
-        // ✅ PERFORMANCE FIX: Cache renderers and material instances
         private Renderer[] cachedRenderers;
         private Material[] originalMaterials;
         private Material[] stealthMaterials;
 
         public void Initialize(float dur)
         {
-            duration = dur;
-            elapsed = 0f;
-
-            // ✅ PERFORMANCE FIX: Cache renderers once (not every frame)
             cachedRenderers = GetComponentsInChildren<Renderer>();
             originalMaterials = new Material[cachedRenderers.Length];
             stealthMaterials = new Material[cachedRenderers.Length];
 
-            // Reduce visibility
             for (int i = 0; i < cachedRenderers.Length; i++)
             {
                 Renderer rend = cachedRenderers[i];
-
-                // ✅ PERFORMANCE FIX: Store original material reference
                 originalMaterials[i] = rend.sharedMaterial;
-
-                // ✅ PERFORMANCE FIX: Create single material instance per renderer
                 stealthMaterials[i] = new Material(originalMaterials[i]);
                 Color c = stealthMaterials[i].color;
                 c.a = 0.3f;
                 stealthMaterials[i].color = c;
-
                 rend.material = stealthMaterials[i];
             }
+
+            Invoke(nameof(RestoreVisibility), dur);
         }
 
-        private void Update()
-        {
-            elapsed += Time.deltaTime;
-            if (elapsed >= duration)
-            {
-                RestoreVisibility();
-                Destroy(this);
-            }
-        }
-
-        /// <summary>
-        /// ✅ PERFORMANCE FIX: Restore visibility using cached materials
-        /// </summary>
         private void RestoreVisibility()
         {
             if (cachedRenderers == null) return;
@@ -333,31 +294,25 @@ namespace TacticalCombat.Player
             {
                 if (cachedRenderers[i] != null)
                 {
-                    // Restore original material
                     cachedRenderers[i].sharedMaterial = originalMaterials[i];
                 }
 
-                // Clean up stealth material instance
                 if (stealthMaterials[i] != null)
                 {
                     Destroy(stealthMaterials[i]);
                 }
             }
+
+            Destroy(this);
         }
 
-        /// <summary>
-        /// ✅ PERFORMANCE FIX: Clean up material instances on destroy
-        /// </summary>
         private void OnDestroy()
         {
             if (stealthMaterials != null)
             {
                 foreach (var mat in stealthMaterials)
                 {
-                    if (mat != null)
-                    {
-                        Destroy(mat);
-                    }
+                    if (mat != null) Destroy(mat);
                 }
             }
         }

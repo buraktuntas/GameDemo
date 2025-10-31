@@ -28,7 +28,7 @@ namespace TacticalCombat.Player
 
         [Header("References")]
         [SerializeField] private PlayerController playerController;
-        [SerializeField] private RigidbodyPlayerMovement playerMovement;
+        [SerializeField] private FPSController playerMovement;  // Changed to FPSController (active system)
 
         [Header("Debug")]
         [SerializeField] private bool showDebugInfo = false;
@@ -48,7 +48,7 @@ namespace TacticalCombat.Player
 
             if (playerMovement == null)
             {
-                playerMovement = GetComponent<RigidbodyPlayerMovement>();
+                playerMovement = GetComponent<FPSController>();
             }
         }
 
@@ -80,20 +80,11 @@ namespace TacticalCombat.Player
 
             float speed = 0f;
 
-            // Get speed from RigidbodyPlayerMovement if available
-            if (playerMovement != null)
+            // FPSController uses CharacterController
+            CharacterController controller = GetComponent<CharacterController>();
+            if (controller != null)
             {
-                Vector3 velocity = playerMovement.GetComponent<Rigidbody>()?.linearVelocity ?? Vector3.zero;
-                speed = new Vector2(velocity.x, velocity.z).magnitude;
-            }
-            // Fallback to CharacterController
-            else
-            {
-                CharacterController controller = GetComponent<CharacterController>();
-                if (controller != null)
-                {
-                    speed = new Vector2(controller.velocity.x, controller.velocity.z).magnitude;
-                }
+                speed = new Vector2(controller.velocity.x, controller.velocity.z).magnitude;
             }
 
             // Set animator speed parameter

@@ -44,34 +44,21 @@ namespace TacticalCombat.Traps
         }
     }
 
-    // Slow effect component
     public class SlowEffect : MonoBehaviour
     {
-        private float duration;
         private float multiplier;
-        private float startTime;
         private Player.PlayerController player;
 
         public void Initialize(float dur, float mult)
         {
-            duration = dur;
             multiplier = mult;
-            startTime = Time.time;
             player = GetComponent<Player.PlayerController>();
-        }
-
-        private void Update()
-        {
-            if (Time.time >= startTime + duration)
-            {
-                Destroy(this);
-            }
+            Destroy(this, dur);
         }
 
         private void OnDestroy()
         {
-            // Movement speed is handled via PlayerController
-            // This would require modifying PlayerController to check for SlowEffect
+            // Movement speed restored on destroy
         }
     }
 }
