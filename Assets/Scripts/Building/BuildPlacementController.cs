@@ -64,9 +64,24 @@ namespace TacticalCombat.Building
         public override void OnStartLocalPlayer()
         {
             base.OnStartLocalPlayer();
-            
-            // Unity 6: Cache Camera.main for performance
-            mainCamera = Camera.main;
+
+            // ✅ PERFORMANCE FIX: Get camera from FPSController instead of Camera.main
+            var fpsController = GetComponent<FPSController>();
+            if (fpsController != null)
+            {
+                mainCamera = fpsController.GetCamera();
+            }
+
+            if (mainCamera == null)
+            {
+                Debug.LogWarning("⚠️ [BuildPlacementController] FPSController camera not found - trying child camera");
+                mainCamera = GetComponentInChildren<Camera>();
+            }
+
+            if (mainCamera == null)
+            {
+                Debug.LogError("❌ [BuildPlacementController] No camera found!");
+            }
 
             var layerCfg = TacticalCombat.Core.LayerConfigProvider.Instance;
             if (layerCfg != null)
@@ -264,27 +279,32 @@ namespace TacticalCombat.Building
         [Command]
         private void CmdRequestPlace(BuildRequest request)
         {
-            // Prefer injected dependency (server)
-            var validator = buildValidator;
-            if (validator == null)
+            // ✅ PERFORMANCE FIX: Cache BuildValidator (avoid FindFirstObjectByType on every placement)
+            if (buildValidator == null)
             {
-                // Fallback: attempt to find once on server
-                validator = FindFirstObjectByType<BuildValidator>();
-                buildValidator = validator;
-                if (validator == null)
+                // First try: Use singleton pattern (recommended)
+                buildValidator = BuildValidator.Instance;
+
+                // Fallback: Find once and cache (only on first placement)
+                if (buildValidator == null)
                 {
-                    Debug.LogWarning("No BuildValidator found on server!");
+                    buildValidator = FindFirstObjectByType<BuildValidator>();
+                }
+
+                if (buildValidator == null)
+                {
+                    Debug.LogWarning("❌ [BuildPlacementController] No BuildValidator found on server! Assign in Inspector or use singleton.");
                     return;
                 }
             }
 
-            if (validator.ValidateAndPlace(request, playerController.team))
+            if (buildValidator.ValidateAndPlace(request, playerController.team))
             {
-                if (verboseLogging) Debug.Log($"Structure {request.type} placed successfully");
+                if (verboseLogging) Debug.Log($"✅ Structure {request.type} placed successfully");
             }
             else
             {
-                if (verboseLogging) Debug.Log($"Structure {request.type} placement failed validation");
+                if (verboseLogging) Debug.Log($"⚠️ Structure {request.type} placement failed validation");
             }
         }
 

@@ -22,11 +22,11 @@ namespace TacticalCombat.UI
         {
             base.OnStartLocalPlayer();
 
-            // Unity 6: Use FindFirstObjectByType for better performance
-            hud = FindFirstObjectByType<GameHUD>();
+            // ✅ PERFORMANCE FIX: Use singleton instead of FindFirstObjectByType
+            hud = GameHUD.Instance;
             if (hud == null)
             {
-                Debug.LogWarning("GameHUD not found in scene!");
+                Debug.LogWarning("❌ [PlayerHUDController] GameHUD.Instance is null! Make sure GameHUD exists in scene.");
                 return;
             }
 

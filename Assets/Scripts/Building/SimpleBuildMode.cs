@@ -116,21 +116,22 @@ namespace TacticalCombat.Building
                 Debug.Log("✅ [SimpleBuildMode] InputManager created and assigned");
             }
             
-            // Get FPSController and camera
+            // ✅ PERFORMANCE FIX: Get camera from FPSController (NEVER use Camera.main)
             var fpsController = GetComponent<FPSController>();
             if (fpsController != null)
             {
                 playerCamera = fpsController.GetCamera();
             }
-            
+
             if (playerCamera == null)
             {
-                playerCamera = Camera.main;
+                Debug.LogWarning("⚠️ [SimpleBuildMode] FPSController camera not found - trying child camera");
+                playerCamera = GetComponentInChildren<Camera>();
             }
-            
+
             if (playerCamera == null)
             {
-                Debug.LogError("❌ [SimpleBuildMode] Player camera not found!");
+                Debug.LogError("❌ [SimpleBuildMode] No camera found! Camera.main usage is BANNED in Unity 6 for performance.");
             }
             
             if (structureLayer == 0)

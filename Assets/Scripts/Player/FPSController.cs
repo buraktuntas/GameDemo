@@ -100,6 +100,46 @@ namespace TacticalCombat.Player
             }
             
             currentStamina = maxStamina;
+            
+            // ✅ PERFORMANCE: Initialize PlayerInput once in Awake (earlier than OnStartLocalPlayer)
+            // This ensures it exists for both FPSController and WeaponSystem to share
+            InitializePlayerInput();
+        }
+        
+        private void InitializePlayerInput()
+        {
+            // Only initialize if actionsAsset is assigned (optional feature)
+            if (actionsAsset == null) return;
+            
+            try
+            {
+                playerInput = GetComponent<PlayerInput>();
+                if (playerInput == null)
+                {
+                    // Add once in Awake - shared by FPSController and WeaponSystem
+                    playerInput = gameObject.AddComponent<PlayerInput>();
+                    playerInput.actions = actionsAsset;
+                    playerInput.defaultActionMap = "Player";
+                    
+                    if (showDebugInfo)
+                    {
+                        Debug.Log("[FPSController] PlayerInput initialized in Awake");
+                    }
+                }
+                else if (playerInput.actions == null && actionsAsset != null)
+                {
+                    // PlayerInput exists but no asset assigned - assign it
+                    playerInput.actions = actionsAsset;
+                    playerInput.defaultActionMap = "Player";
+                }
+            }
+            catch (System.Exception e)
+            {
+                if (showDebugInfo)
+                {
+                    Debug.LogWarning($"[FPSController] Failed to initialize PlayerInput: {e.Message}");
+                }
+            }
         }
         
         public override void OnStartLocalPlayer()
@@ -115,28 +155,20 @@ namespace TacticalCombat.Player
             inputManager = GetComponent<InputManager>();
             playerController = GetComponent<PlayerController>();
 
-            // ✅ Try hook Input System actions (optional)
+            // ✅ Hook Input System actions (PlayerInput already initialized in Awake)
             try
             {
-                playerInput = GetComponent<PlayerInput>();
+                // PlayerInput should already exist from Awake, but check anyway
                 if (playerInput == null)
                 {
-                    // ⚠️ Don't add PlayerInput at runtime - should be on prefab
-                    // Using InputManager as fallback
-                    if (showDebugInfo)
-                    {
-                        Debug.LogWarning("[FPSController] PlayerInput not found - using InputManager fallback");
-                    }
-                    return; // Exit early, InputManager will handle input
+                    playerInput = GetComponent<PlayerInput>();
                 }
 
-                // Ensure an actions asset is assigned
-                if (playerInput.actions == null)
+                // Ensure actions are assigned (should be done in Awake)
+                if (playerInput != null && playerInput.actions == null && actionsAsset != null)
                 {
-                    if (actionsAsset != null)
-                    {
-                        playerInput.actions = actionsAsset;
-                    }
+                    playerInput.actions = actionsAsset;
+                    playerInput.defaultActionMap = "Player";
                 }
 
                 if (playerInput.actions != null)

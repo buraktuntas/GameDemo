@@ -2546,8 +2546,8 @@ MonoBehaviour:
   weaponHolder: {fileID: 1628601356376872349}
   audioSource: {fileID: 3444147668471724516}
   weaponAnimator: {fileID: 0}
-  muzzleFlashPrefab: {fileID: 7458452467103069023, guid: 2653a64256c53f44e90b51ec38c307ac, type: 3}
-  hitEffectPrefab: {fileID: 9177995865525488987, guid: 960362c32df12924d8b247204523ad8c, type: 3}
+  muzzleFlashPrefab: {fileID: 162584487599433031, guid: 39f852c28f9c3fd45a427c24f3564ba7, type: 3}
+  hitEffectPrefab: {fileID: 362261158077530393, guid: 20fda529c996a334da7fd65b48ea40df, type: 3}
   bulletHolePrefab: {fileID: 3543283723937687351, guid: f489f1502d040e14d8ac01feba7fa958, type: 3}
   bloodEffectPrefab: {fileID: 4668478797857733774, guid: 8a99e8381c7d29b41adf07a76c7bc468, type: 3}
   metalSparksPrefab: {fileID: 3402532944140807308, guid: cbeca7b542bd1f34ab42ad6be9c08e18, type: 3}

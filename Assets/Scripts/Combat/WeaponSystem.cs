@@ -149,6 +149,47 @@ namespace TacticalCombat.Combat
             
             // ✅ FIX: Initialize object pools
             InitializeObjectPools();
+            
+            // ✅ PERFORMANCE: Initialize PlayerInput once in Awake (shared with FPSController)
+            // This avoids runtime AddComponent calls in OnEnable/OnStartLocalPlayer
+            InitializePlayerInput();
+        }
+        
+        private void InitializePlayerInput()
+        {
+            // Only initialize if actionsAsset is assigned (optional feature)
+            if (actionsAsset == null) return;
+            
+            try
+            {
+                playerInput = GetComponent<PlayerInput>();
+                if (playerInput == null)
+                {
+                    // Add once in Awake - shared by FPSController and WeaponSystem
+                    // FPSController usually runs Awake first, but if not, we add it here
+                    playerInput = gameObject.AddComponent<PlayerInput>();
+                    playerInput.actions = actionsAsset;
+                    playerInput.defaultActionMap = "Player";
+                    
+                    if (debugInputs)
+                    {
+                        Debug.Log("[WeaponSystem] PlayerInput initialized in Awake");
+                    }
+                }
+                else if (playerInput.actions == null && actionsAsset != null)
+                {
+                    // PlayerInput exists but no asset assigned - assign it
+                    playerInput.actions = actionsAsset;
+                    playerInput.defaultActionMap = "Player";
+                }
+            }
+            catch (System.Exception e)
+            {
+                if (debugInputs)
+                {
+                    Debug.LogWarning($"[WeaponSystem] Failed to initialize PlayerInput: {e.Message}");
+                }
+            }
         }
         
         private void InitializeObjectPools()
@@ -238,18 +279,20 @@ namespace TacticalCombat.Combat
 
         private void OnEnable()
         {
-            // Try to hook new Input System if available
+            // ✅ Hook Input System actions (PlayerInput already initialized in Awake)
             try
             {
-                playerInput = GetComponent<PlayerInput>();
+                // PlayerInput should already exist from Awake, but check anyway
                 if (playerInput == null)
                 {
-                    playerInput = gameObject.AddComponent<PlayerInput>();
+                    playerInput = GetComponent<PlayerInput>();
                 }
 
-                if (playerInput.actions == null && actionsAsset != null)
+                // Ensure actions are assigned (should be done in Awake)
+                if (playerInput != null && playerInput.actions == null && actionsAsset != null)
                 {
                     playerInput.actions = actionsAsset;
+                    playerInput.defaultActionMap = "Player";
                 }
 
                 if (playerInput.actions != null)

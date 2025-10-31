@@ -6,6 +6,9 @@ namespace TacticalCombat.Building
 {
     public class BuildValidator : NetworkBehaviour
     {
+        // ✅ PERFORMANCE FIX: Singleton pattern to avoid FindFirstObjectByType
+        public static BuildValidator Instance { get; private set; }
+
         [Header("Validation Settings")]
         [SerializeField] private LayerMask obstacleMask;
         [SerializeField] private float minDistanceBetweenStructures = 0.5f;
@@ -14,6 +17,28 @@ namespace TacticalCombat.Building
         [SerializeField] private GameObject wallPrefab;
         [SerializeField] private GameObject platformPrefab;
         [SerializeField] private GameObject rampPrefab;
+
+        private void Awake()
+        {
+            // ✅ Singleton setup
+            if (Instance == null)
+            {
+                Instance = this;
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [BuildValidator] Multiple instances detected! Destroying duplicate.");
+                Destroy(gameObject);
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+        }
 
         [Server]
         public bool ValidateAndPlace(BuildRequest request, Team team)

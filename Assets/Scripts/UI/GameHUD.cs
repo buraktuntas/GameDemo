@@ -7,6 +7,9 @@ namespace TacticalCombat.UI
 {
     public class GameHUD : MonoBehaviour
     {
+        // ✅ PERFORMANCE FIX: Singleton pattern to avoid FindFirstObjectByType
+        public static GameHUD Instance { get; private set; }
+
         [Header("Phase & Timer")]
         [SerializeField] private TextMeshProUGUI phaseText;
         [SerializeField] private TextMeshProUGUI timerText;
@@ -46,6 +49,24 @@ namespace TacticalCombat.UI
         [SerializeField] private Slider controlPointBar;
         [SerializeField] private GameObject controlPointPanel;
 
+        // ✅ PERFORMANCE FIX: Throttle UI updates to avoid 60 FPS string allocations
+        private float lastUIUpdateTime;
+        private const float UI_UPDATE_INTERVAL = 0.1f; // 10 Hz instead of 60 Hz
+
+        private void Awake()
+        {
+            // ✅ Singleton setup
+            if (Instance == null)
+            {
+                Instance = this;
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [GameHUD] Multiple instances detected! Destroying duplicate.");
+                Destroy(gameObject);
+            }
+        }
+
         private void Start()
         {
             // Subscribe to MatchManager events
@@ -61,8 +82,13 @@ namespace TacticalCombat.UI
 
         private void Update()
         {
-            UpdateTimer();
-            UpdateRoundInfo();
+            // ✅ PERFORMANCE FIX: Throttle UI updates (60 FPS → 10 Hz)
+            if (Time.time - lastUIUpdateTime >= UI_UPDATE_INTERVAL)
+            {
+                UpdateTimer();
+                UpdateRoundInfo();
+                lastUIUpdateTime = Time.time;
+            }
         }
 
         private void UpdateTimer()
@@ -216,6 +242,11 @@ namespace TacticalCombat.UI
 
         private void OnDestroy()
         {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+
             if (MatchManager.Instance != null)
             {
                 MatchManager.Instance.OnPhaseChangedEvent -= OnPhaseChanged;
