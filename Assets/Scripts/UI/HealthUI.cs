@@ -42,29 +42,36 @@ namespace TacticalCombat.UI
             playerHealth = GetComponent<Health>();
             if (playerHealth == null)
             {
-                Debug.LogError("❌ Health component not found!");
+                Debug.LogError("❌ [HealthUI] Health component not found!");
                 return;
             }
-            
-            // UI elementlerini bul
+
+            // ⚠️ WARNING: UI elements should be assigned in Inspector for better performance
+            // GameObject.Find and FindFirstObjectByType are slow and should be avoided
+
+            // ✅ RECOMMENDATION: Assign these in Inspector instead
             if (healthSlider == null)
             {
-                healthSlider = FindFirstObjectByType<Slider>();
+                Debug.LogWarning("⚠️ [HealthUI] healthSlider not assigned! Please assign in Inspector for better performance.");
+                // Fallback: search once on init (not ideal but acceptable)
+                healthSlider = GameHUD.Instance?.GetComponentInChildren<Slider>();
             }
-            
+
             if (healthFill == null && healthSlider != null)
             {
                 healthFill = healthSlider.fillRect.GetComponent<Image>();
             }
-            
+
+            // ❌ REMOVED: GameObject.Find usage (very slow!)
+            // healthText and playerNameText should be assigned in Inspector
             if (healthText == null)
             {
-                healthText = GameObject.Find("HealthText")?.GetComponent<Text>();
+                Debug.LogWarning("⚠️ [HealthUI] healthText not assigned in Inspector! UI will not show text.");
             }
-            
+
             if (playerNameText == null)
             {
-                playerNameText = GameObject.Find("PlayerNameText")?.GetComponent<Text>();
+                Debug.LogWarning("⚠️ [HealthUI] playerNameText not assigned in Inspector! Player name will not show.");
             }
             
             // Health değerini başlat
@@ -159,17 +166,23 @@ namespace TacticalCombat.UI
                 // playerHealth.OnHealthChanged -= OnHealthChanged;
             }
         }
-        
-        // Debug için OnGUI
-        private void OnGUI()
+
+        // ✅ PERFORMANCE FIX: OnGUI removed (use TextMeshPro UI instead)
+        // OnGUI runs every frame and is very slow!
+        // All debug info should be shown via GameHUD singleton
+
+        #if UNITY_EDITOR
+        // ✅ EDITOR ONLY: Debug visualization with Gizmos (zero runtime cost)
+        private void OnDrawGizmosSelected()
         {
-            if (!isLocalPlayer || !isInitialized) return;
-            
-            // Health bilgilerini ekranda göster
-            GUILayout.BeginArea(new Rect(10, 10, 200, 100));
-            GUILayout.Label($"Health: {Mathf.RoundToInt(targetHealthValue)}/{playerHealth.MaxHealth}");
-            GUILayout.Label($"Player: {netId}");
-            GUILayout.EndArea();
+            if (!isLocalPlayer || !isInitialized || playerHealth == null) return;
+
+            // Draw health bar above player in scene view
+            UnityEditor.Handles.Label(
+                transform.position + Vector3.up * 2.5f,
+                $"HP: {Mathf.RoundToInt(targetHealthValue)}/{playerHealth.MaxHealth}"
+            );
         }
+        #endif
     }
 }

@@ -53,13 +53,29 @@ namespace TacticalCombat.Combat
         {
             weaponSystem = GetComponent<WeaponSystem>();
             fpsController = GetComponent<TacticalCombat.Player.FPSController>();
-            
+
+            // ✅ PERFORMANCE FIX: Get camera from FPSController instead of Camera.main
             if (playerCamera == null)
-                playerCamera = Camera.main;
-            
+            {
+                if (fpsController != null)
+                {
+                    playerCamera = fpsController.GetCamera();
+                }
+
+                if (playerCamera == null)
+                {
+                    playerCamera = GetComponentInChildren<Camera>();
+                }
+
+                if (playerCamera == null)
+                {
+                    Debug.LogError("❌ [ADSSystem] No camera found! Camera.main usage is BANNED for performance.");
+                }
+            }
+
             if (playerCamera != null)
                 normalFOV = playerCamera.fieldOfView;
-            
+
             currentFOV = normalFOV;
             currentWeaponPosition = normalPosition;
         }
@@ -181,21 +197,22 @@ namespace TacticalCombat.Combat
             adsPosition = position;
         }
         
-        // Debug
-        private void OnGUI()
+        // ✅ PERFORMANCE FIX: OnGUI removed (runs every frame - very slow!)
+        // Use Unity's new UI system or TextMeshPro for runtime debug info
+
+        #if UNITY_EDITOR
+        // ✅ EDITOR ONLY: Debug visualization with Gizmos (zero runtime cost)
+        private void OnDrawGizmosSelected()
         {
-            if (!showDebug) return;
-            
-            GUILayout.BeginArea(new Rect(10, 250, 300, 150));
-            GUILayout.BeginVertical("box");
-            
-            GUILayout.Label("<b>ADS System</b>");
-            GUILayout.Label($"Aiming: {(isAiming ? "<color=green>YES</color>" : "<color=red>NO</color>")}");
-            GUILayout.Label($"FOV: {currentFOV:F1}° (Target: {(isAiming ? adsFOV : normalFOV):F1}°)");
-            GUILayout.Label($"Spread: {GetCurrentSpread():F3}");
-            
-            GUILayout.EndVertical();
-            GUILayout.EndArea();
+            if (!showDebug || playerCamera == null) return;
+
+            // Draw ADS FOV cone in scene view
+            UnityEditor.Handles.color = isAiming ? Color.green : Color.white;
+            UnityEditor.Handles.Label(
+                playerCamera.transform.position + playerCamera.transform.forward * 2f,
+                $"ADS: {(isAiming ? "ON" : "OFF")}\nFOV: {currentFOV:F1}°\nSpread: {GetCurrentSpread():F3}"
+            );
         }
+        #endif
     }
 }

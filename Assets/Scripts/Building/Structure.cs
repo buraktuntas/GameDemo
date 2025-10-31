@@ -100,6 +100,12 @@ namespace TacticalCombat.Building
                 MatchManager.Instance?.NotifyCoreDestroyed(team);
             }
 
+            // ✅ MEMORY LEAK FIX: Unsubscribe from event before destruction
+            if (health != null)
+            {
+                health.OnDeathEvent -= OnStructureDestroyed;
+            }
+
             // Return to pool if available, otherwise destroy
             if (NetworkObjectPool.Instance != null)
             {
@@ -108,6 +114,15 @@ namespace TacticalCombat.Building
             else
             {
                 NetworkServer.Destroy(gameObject);
+            }
+        }
+
+        private void OnDestroy()
+        {
+            // ✅ MEMORY LEAK FIX: Cleanup event subscription on destroy
+            if (health != null)
+            {
+                health.OnDeathEvent -= OnStructureDestroyed;
             }
         }
 
