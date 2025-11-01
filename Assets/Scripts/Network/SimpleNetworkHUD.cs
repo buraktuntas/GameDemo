@@ -204,15 +204,7 @@ namespace TacticalCombat.Network
                 }
             }
 
-            // Instructions (bottom-left)
-            y = Screen.height - 120;
-            GUI.Label(new Rect(x, y, 400, 25), "CONTROLS:", labelStyle);
-            y += 30;
-            GUI.Label(new Rect(x, y, 400, 25), "• WASD - Hareket", labelStyle);
-            y += 25;
-            GUI.Label(new Rect(x, y, 400, 25), "• Mouse - Kamera", labelStyle);
-            y += 25;
-            GUI.Label(new Rect(x, y, 400, 25), "• Space - Zıpla", labelStyle);
+            // ✅ REMOVED: Controls help UI (user requested removal - health already shows in bottom left)
         }
     }
 }

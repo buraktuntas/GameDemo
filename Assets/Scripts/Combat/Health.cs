@@ -55,7 +55,10 @@ namespace TacticalCombat.Combat
             // ✅ FIX: Manual RPC notification instead of SyncVar hook
             RpcNotifyHealthChanged(currentHealth);
 
-            Debug.Log($"{gameObject.name} took {finalDamage} damage ({info.Type}). Health: {currentHealth}/{maxHealth}");
+            // ✅ HIT FEEDBACK: Camera shake for victim
+            RpcNotifyHit(finalDamage);
+
+            Debug.Log($"💥 [Server] {gameObject.name} took {finalDamage} damage ({info.Type}). Health: {currentHealth}/{maxHealth}");
 
             if (currentHealth <= 0)
             {
@@ -227,6 +230,25 @@ namespace TacticalCombat.Combat
         private void RpcNotifyHealthChanged(int newHealth)
         {
             OnHealthChangedEvent?.Invoke(newHealth, maxHealth);
+        }
+
+        /// <summary>
+        /// ✅ HIT FEEDBACK: Notify victim player for camera shake
+        /// </summary>
+        [ClientRpc]
+        private void RpcNotifyHit(int damage)
+        {
+            // Only apply feedback to local player (victim)
+            if (!isLocalPlayer) return;
+
+            // Camera shake
+            if (TryGetComponent<TacticalCombat.Player.CameraShake>(out var cameraShake))
+            {
+                cameraShake.ShakeOnHit(damage, maxHealth);
+            }
+
+            // Optional: Add screen flash, damage indicator, sound, etc.
+            Debug.Log($"🎯 [Client] HIT! Took {damage} damage");
         }
 
         // ⭐ IDamageable interface properties

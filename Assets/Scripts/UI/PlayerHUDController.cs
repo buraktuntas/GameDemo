@@ -15,6 +15,7 @@ namespace TacticalCombat.UI
         private GameHUD hud;
         private PlayerController player;
         private Health health;
+        private Combat.WeaponSystem weaponSystem;
         private AbilityController abilityController;
         private SabotageController sabotageController;
 
@@ -33,6 +34,7 @@ namespace TacticalCombat.UI
             // Get components
             player = GetComponent<PlayerController>();
             health = GetComponent<Health>();
+            weaponSystem = GetComponent<Combat.WeaponSystem>();
             abilityController = GetComponent<AbilityController>();
             sabotageController = GetComponent<SabotageController>();
 
@@ -40,6 +42,13 @@ namespace TacticalCombat.UI
             if (health != null)
             {
                 health.OnHealthChangedEvent += OnHealthChanged;
+                // Initial health update
+                hud.UpdateHealth(health.CurrentHealth, health.MaxHealth);
+            }
+
+            if (weaponSystem != null)
+            {
+                weaponSystem.OnAmmoChanged += OnAmmoChanged;
             }
 
             if (abilityController != null)
@@ -86,6 +95,14 @@ namespace TacticalCombat.UI
             }
         }
 
+        private void OnAmmoChanged(int current, int reserve)
+        {
+            if (hud != null)
+            {
+                hud.UpdateAmmo(current, reserve);
+            }
+        }
+
         private void OnAbilityCooldownChanged(float remaining)
         {
             // Handled in Update for smoother visualization
@@ -116,6 +133,11 @@ namespace TacticalCombat.UI
             if (health != null)
             {
                 health.OnHealthChangedEvent -= OnHealthChanged;
+            }
+
+            if (weaponSystem != null)
+            {
+                weaponSystem.OnAmmoChanged -= OnAmmoChanged;
             }
 
             if (abilityController != null)

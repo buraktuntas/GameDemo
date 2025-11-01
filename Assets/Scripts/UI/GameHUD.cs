@@ -26,6 +26,11 @@ namespace TacticalCombat.UI
         [SerializeField] private Slider healthSlider;
         [SerializeField] private TextMeshProUGUI healthText;
 
+        [Header("Ammo")]
+        [SerializeField] private TextMeshProUGUI ammoText;
+        [SerializeField] private TextMeshProUGUI reserveAmmoText;
+        [SerializeField] private GameObject ammoPanel;
+
         [Header("Ability")]
         [SerializeField] private Image abilityIcon;
         [SerializeField] private TextMeshProUGUI abilityCooldownText;
@@ -112,16 +117,14 @@ namespace TacticalCombat.UI
             if (roundText != null)
             {
                 int round = MatchManager.Instance.GetCurrentRound();
-                int teamAWins = MatchManager.Instance.GetTeamAWins();
-                int teamBWins = MatchManager.Instance.GetTeamBWins();
-                roundText.text = $"Round {round} | Team A: {teamAWins} - Team B: {teamBWins}";
+                roundText.text = $"Round {round}";
             }
 
             if (teamScoreText != null)
             {
                 int teamAWins = MatchManager.Instance.GetTeamAWins();
                 int teamBWins = MatchManager.Instance.GetTeamBWins();
-                teamScoreText.text = $"Score: {teamAWins} - {teamBWins}";
+                teamScoreText.text = $"{teamAWins} - {teamBWins}";
             }
         }
 
@@ -161,7 +164,21 @@ namespace TacticalCombat.UI
 
             if (healthText != null)
             {
-                healthText.text = $"{current}/{max}";
+                // FPS Standard: Show only current health (like Valorant/CS:GO)
+                healthText.text = current.ToString();
+            }
+        }
+
+        public void UpdateAmmo(int current, int reserve)
+        {
+            if (ammoText != null)
+            {
+                ammoText.text = current.ToString();
+            }
+
+            if (reserveAmmoText != null)
+            {
+                reserveAmmoText.text = $"/ {reserve}";
             }
         }
 
