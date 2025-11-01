@@ -293,16 +293,26 @@ namespace TacticalCombat.Player
                 // Store base FOV
                 baseFOV = playerCamera.fieldOfView;
 
-                // 🔧 AUDIO LISTENER FIX: Sadece local player'da AudioListener aktif olsun
+                // 🔧 AUDIO LISTENER FIX: Only local player has AudioListener
                 AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
                 if (audioListener != null)
                 {
-                    // Sadece local player'da AudioListener aktif
-                    audioListener.enabled = isLocalPlayer;
-                    
-                    if (showDebugInfo)
+                    if (!isLocalPlayer)
                     {
-                        Debug.Log($"🔊 AudioListener enabled: {audioListener.enabled} (isLocalPlayer: {isLocalPlayer})");
+                        // Destroy AudioListener on non-local players
+                        Destroy(audioListener);
+                        if (showDebugInfo)
+                        {
+                            Debug.Log($"🔇 AudioListener destroyed (not local player)");
+                        }
+                    }
+                    else
+                    {
+                        audioListener.enabled = true;
+                        if (showDebugInfo)
+                        {
+                            Debug.Log($"🔊 AudioListener enabled (local player)");
+                        }
                     }
                 }
 
@@ -321,7 +331,40 @@ namespace TacticalCombat.Player
         {
             if (!isLocalPlayer || Time.timeScale == 0f) return;
 
+            // ESC to unlock, click to re-lock (standard FPS behavior)
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+            else if (Cursor.lockState != CursorLockMode.Locked)
+            {
+                // ANY mouse button click re-locks cursor
+                if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2))
+                {
+                    Cursor.lockState = CursorLockMode.Locked;
+                    Cursor.visible = false;
+                }
+            }
+
             HandleRotation();
+        }
+
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            if (!isLocalPlayer) return;
+
+            if (hasFocus)
+            {
+                // Always re-lock cursor when window gains focus
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+
+                // Re-enable movement (fix for multi-window freeze)
+                canMove = true;
+
+                Debug.Log($"🎮 Focus gained - Controls restored");
+            }
         }
 
         private void LateUpdate()

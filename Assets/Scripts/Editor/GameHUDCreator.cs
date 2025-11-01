@@ -25,7 +25,7 @@ namespace TacticalCombat.Editor
             GUILayout.Space(10);
 
             // Check if GameHUD exists
-            GameHUD existingHUD = FindObjectOfType<GameHUD>();
+            GameHUD existingHUD = FindFirstObjectByType<GameHUD>();
 
             if (existingHUD != null)
             {
@@ -110,7 +110,7 @@ namespace TacticalCombat.Editor
         static void CreateCompleteGameHUD()
         {
             // Find or create Canvas
-            Canvas canvas = FindObjectOfType<Canvas>();
+            Canvas canvas = FindFirstObjectByType<Canvas>();
             if (canvas == null)
             {
                 GameObject canvasObj = new GameObject("Canvas");
@@ -140,6 +140,9 @@ namespace TacticalCombat.Editor
             CreateAmmoUI(hudObj, gameHUD);
             CreateTimerUI(hudObj, gameHUD);
             CreateScoreUI(hudObj, gameHUD);
+            CreateRoundWinUI(hudObj, gameHUD);
+            CreateKillFeedUI(hudObj, gameHUD);
+            CreateRespawnUI(hudObj, gameHUD);
 
             // Select the created object
             Selection.activeGameObject = hudObj;
@@ -350,6 +353,76 @@ namespace TacticalCombat.Editor
             so.ApplyModifiedProperties();
 
             Debug.Log("  ✅ Score UI created");
+        }
+
+        static void CreateRoundWinUI(GameObject parent, GameHUD gameHUD)
+        {
+            // Center screen - big victory message
+            GameObject winPanel = CreatePanel(parent, "RoundWinPanel", new Vector2(600, 200),
+                Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+
+            Image winBg = winPanel.GetComponent<Image>();
+            winBg.color = new Color(0, 0, 0, 0.8f);
+            winPanel.SetActive(false);
+
+            GameObject winTextObj = CreateText(winPanel, "RoundWinText", "TEAM A WINS!\n3 - 2", 48,
+                Vector2.zero, TextAlignmentOptions.Center, new Vector2(580, 180));
+            TextMeshProUGUI winText = winTextObj.GetComponent<TextMeshProUGUI>();
+            winText.fontStyle = FontStyles.Bold;
+            winText.color = Color.yellow;
+
+            SerializedObject so = new SerializedObject(gameHUD);
+            so.FindProperty("roundWinPanel").objectReferenceValue = winPanel;
+            so.FindProperty("roundWinText").objectReferenceValue = winText;
+            so.ApplyModifiedProperties();
+
+            Debug.Log("  ✅ Round Win UI created");
+        }
+
+        static void CreateKillFeedUI(GameObject parent, GameHUD gameHUD)
+        {
+            // Top right - kill notifications
+            GameObject feedPanel = CreatePanel(parent, "KillFeedPanel", new Vector2(300, 50),
+                new Vector2(-20, -80), new Vector2(1, 1), new Vector2(1, 1));
+
+            Image feedBg = feedPanel.GetComponent<Image>();
+            feedBg.color = new Color(0, 0, 0, 0.6f);
+            feedPanel.SetActive(false);
+
+            GameObject feedTextObj = CreateText(feedPanel, "KillFeedText", "Player1 → Player2", 18,
+                Vector2.zero, TextAlignmentOptions.Center, new Vector2(280, 40));
+            TextMeshProUGUI feedText = feedTextObj.GetComponent<TextMeshProUGUI>();
+            feedText.color = Color.white;
+
+            SerializedObject so = new SerializedObject(gameHUD);
+            so.FindProperty("killFeedPanel").objectReferenceValue = feedPanel;
+            so.FindProperty("killFeedText").objectReferenceValue = feedText;
+            so.ApplyModifiedProperties();
+
+            Debug.Log("  ✅ Kill Feed UI created");
+        }
+
+        static void CreateRespawnUI(GameObject parent, GameHUD gameHUD)
+        {
+            // Center screen - respawn countdown
+            GameObject respawnPanel = CreatePanel(parent, "RespawnPanel", new Vector2(400, 100),
+                Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+
+            Image respawnBg = respawnPanel.GetComponent<Image>();
+            respawnBg.color = new Color(0, 0, 0, 0.7f);
+            respawnPanel.SetActive(false);
+
+            GameObject respawnTextObj = CreateText(respawnPanel, "RespawnText", "Respawning in 5...", 32,
+                Vector2.zero, TextAlignmentOptions.Center, new Vector2(380, 80));
+            TextMeshProUGUI respawnText = respawnTextObj.GetComponent<TextMeshProUGUI>();
+            respawnText.color = Color.white;
+
+            SerializedObject so = new SerializedObject(gameHUD);
+            so.FindProperty("respawnPanel").objectReferenceValue = respawnPanel;
+            so.FindProperty("respawnText").objectReferenceValue = respawnText;
+            so.ApplyModifiedProperties();
+
+            Debug.Log("  ✅ Respawn UI created");
         }
 
         static GameObject CreatePanel(GameObject parent, string name, Vector2 size, Vector2 position,

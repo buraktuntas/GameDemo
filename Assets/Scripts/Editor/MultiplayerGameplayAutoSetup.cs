@@ -120,7 +120,7 @@ namespace TacticalCombat.Editor
 
         private void AutoFindGameHUD()
         {
-            GameHUD hud = FindObjectOfType<GameHUD>();
+            GameHUD hud = FindFirstObjectByType<GameHUD>();
             if (hud != null)
             {
                 gameHUDObject = hud.gameObject;

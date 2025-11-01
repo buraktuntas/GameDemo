@@ -357,7 +357,7 @@ namespace TacticalCombat.Building
         }
         
         private float lastPlacementTime = 0f;
-        private const float PLACEMENT_COOLDOWN = 0.15f;  // 150ms minimum between placements
+        private const float PLACEMENT_COOLDOWN = 0.3f;  // 300ms minimum between placements (prevents spam freeze)
 
         private void HandlePlacement()
         {
@@ -674,15 +674,33 @@ namespace TacticalCombat.Building
         }
         
         private float lastServerPlacementTime = 0f;
-        private const float SERVER_PLACEMENT_COOLDOWN = 0.1f;  // Server-side cooldown
+        private const float SERVER_PLACEMENT_COOLDOWN = 0.25f;  // Server-side cooldown (increased to prevent freeze)
+        private int placementCountThisSecond = 0;
+        private float placementCountResetTime = 0f;
+        private const int MAX_PLACEMENTS_PER_SECOND = 4; // Max 4 structures per second
 
         [Command]
         private void CmdPlaceStructure(Vector3 position, Quaternion rotation, int structureIndex)
         {
+            // ✅ ANTI-SPAM: Rate limiting per second
+            if (Time.time - placementCountResetTime >= 1f)
+            {
+                placementCountThisSecond = 0;
+                placementCountResetTime = Time.time;
+            }
+
+            if (placementCountThisSecond >= MAX_PLACEMENTS_PER_SECOND)
+            {
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Rate limit: Max {MAX_PLACEMENTS_PER_SECOND} placements/second");
+                return;
+            }
+
+            placementCountThisSecond++;
+
             // ✅ ANTI-CHEAT: Server-side cooldown to prevent spam
             if (Time.time - lastServerPlacementTime < SERVER_PLACEMENT_COOLDOWN)
             {
-                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Rate limit exceeded from player {netId}");
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Cooldown active ({SERVER_PLACEMENT_COOLDOWN}s)");
                 return;
             }
             lastServerPlacementTime = Time.time;

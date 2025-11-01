@@ -124,7 +124,7 @@ namespace TacticalCombat.Player
         }
 
         // Debug helper
-        private void OnValidate()
+        private new void OnValidate()
         {
             if (Application.isPlaying) return;
             CacheComponents();

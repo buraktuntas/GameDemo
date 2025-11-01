@@ -459,14 +459,34 @@ namespace TacticalCombat.Combat
 
             Ray ray = new Ray(playerCamera.transform.position, direction);
 
-            if (Physics.Raycast(ray, out RaycastHit hit, currentWeapon.range, currentWeapon.hitMask))
+            // ✅ FIX: Raycast all hits, skip our own colliders
+            RaycastHit[] hits = Physics.RaycastAll(ray, currentWeapon.range, currentWeapon.hitMask);
+
+            // Find first valid hit (not ourselves)
+            RaycastHit? validHit = null;
+            float closestDistance = float.MaxValue;
+
+            foreach (var hit in hits)
+            {
+                // Skip our own colliders
+                if (hit.collider.transform.IsChildOf(transform) || hit.collider.transform == transform)
+                    continue;
+
+                // Find closest valid hit
+                if (hit.distance < closestDistance)
+                {
+                    closestDistance = hit.distance;
+                    validHit = hit;
+                }
+            }
+
+            if (validHit.HasValue)
             {
                 // Hit something!
-                // ✅ FIX: ProcessHit() already applies damage, no need for ApplyDamage(hit)
-                ProcessHit(hit);
+                ProcessHit(validHit.Value);
 
                 // Visual feedback
-                SpawnHitEffect(hit);
+                SpawnHitEffect(validHit.Value);
 
                 // Audio feedback
                 PlayHitSound();
@@ -498,7 +518,17 @@ namespace TacticalCombat.Combat
             else
             {
                 // Client sends hit data to server for validation
-                CmdProcessHit(hit.point, hit.normal, hit.distance, hit.collider.gameObject);
+                // Only send if hit object has NetworkIdentity (can be synced)
+                GameObject hitObj = hit.collider?.gameObject;
+                if (hitObj != null && hitObj.GetComponent<NetworkIdentity>() != null)
+                {
+                    CmdProcessHit(hit.point, hit.normal, hit.distance, hitObj);
+                }
+                else
+                {
+                    // Hit non-networked object (wall, floor, etc) - still send for validation
+                    CmdProcessHit(hit.point, hit.normal, hit.distance, null);
+                }
             }
 
             // CLIENT-SIDE: Immediate visual/audio feedback (optimistic prediction)

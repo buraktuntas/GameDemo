@@ -16,7 +16,7 @@ namespace TacticalCombat.Editor
         private bool removeCharacterSelector = true;
         private bool fixAudioSources = true;
         private bool validateCrosshair = true;
-        private bool showReport = true;
+        
 
         [MenuItem("Tools/Tactical Combat/Clean Up Player Components")]
         static void ShowWindow()

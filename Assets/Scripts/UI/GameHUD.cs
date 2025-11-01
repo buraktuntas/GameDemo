@@ -49,6 +49,18 @@ namespace TacticalCombat.UI
         [SerializeField] private Slider sabotageProgressBar;
         [SerializeField] private GameObject sabotagePanel;
 
+        [Header("Round Win")]
+        [SerializeField] private GameObject roundWinPanel;
+        [SerializeField] private TextMeshProUGUI roundWinText;
+
+        [Header("Kill Feed")]
+        [SerializeField] private GameObject killFeedPanel;
+        [SerializeField] private TextMeshProUGUI killFeedText;
+
+        [Header("Respawn")]
+        [SerializeField] private GameObject respawnPanel;
+        [SerializeField] private TextMeshProUGUI respawnText;
+
         [Header("Control Point")]
         [SerializeField] private TextMeshProUGUI controlPointText;
         [SerializeField] private Slider controlPointBar;
@@ -98,7 +110,11 @@ namespace TacticalCombat.UI
 
         private void UpdateTimer()
         {
-            if (MatchManager.Instance == null) return;
+            if (MatchManager.Instance == null)
+            {
+                if (timerText != null) timerText.text = "0:00";
+                return;
+            }
 
             float remaining = MatchManager.Instance.GetRemainingTime();
             int minutes = Mathf.FloorToInt(remaining / 60f);
@@ -112,7 +128,11 @@ namespace TacticalCombat.UI
 
         private void UpdateRoundInfo()
         {
-            if (MatchManager.Instance == null) return;
+            if (MatchManager.Instance == null)
+            {
+                if (roundText != null) roundText.text = "Round 0";
+                return;
+            }
 
             if (roundText != null)
             {
@@ -221,6 +241,60 @@ namespace TacticalCombat.UI
             if (buildFeedbackPanel != null)
             {
                 buildFeedbackPanel.SetActive(false);
+            }
+        }
+
+        public void ShowRoundWin(string winnerTeam, int teamAScore, int teamBScore)
+        {
+            if (roundWinPanel != null && roundWinText != null)
+            {
+                roundWinText.text = $"{winnerTeam} WINS!\n{teamAScore} - {teamBScore}";
+                roundWinPanel.SetActive(true);
+                Invoke(nameof(HideRoundWin), 3f);
+            }
+        }
+
+        private void HideRoundWin()
+        {
+            if (roundWinPanel != null)
+            {
+                roundWinPanel.SetActive(false);
+            }
+        }
+
+        public void ShowKillFeed(string killerName, string victimName)
+        {
+            if (killFeedPanel != null && killFeedText != null)
+            {
+                killFeedText.text = $"{killerName} → {victimName}";
+                killFeedPanel.SetActive(true);
+                CancelInvoke(nameof(HideKillFeed));
+                Invoke(nameof(HideKillFeed), 3f);
+            }
+        }
+
+        private void HideKillFeed()
+        {
+            if (killFeedPanel != null)
+            {
+                killFeedPanel.SetActive(false);
+            }
+        }
+
+        public void ShowRespawnCountdown(float seconds)
+        {
+            if (respawnPanel != null && respawnText != null)
+            {
+                respawnText.text = $"Respawning in {Mathf.CeilToInt(seconds)}...";
+                respawnPanel.SetActive(true);
+            }
+        }
+
+        public void HideRespawnCountdown()
+        {
+            if (respawnPanel != null)
+            {
+                respawnPanel.SetActive(false);
             }
         }
 

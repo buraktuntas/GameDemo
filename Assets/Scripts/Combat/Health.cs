@@ -28,6 +28,27 @@ namespace TacticalCombat.Combat
             }
         }
 
+        public override void OnStartClient()
+        {
+            base.OnStartClient();
+
+            // Initial health update for UI (after SyncVar is synced)
+            if (isLocalPlayer)
+            {
+                // Wait one frame to ensure all components are initialized
+                StartCoroutine(NotifyInitialHealth());
+            }
+        }
+
+        private System.Collections.IEnumerator NotifyInitialHealth()
+        {
+            yield return null; // Wait one frame for all components to subscribe
+
+            // Fire initial event so UI shows correct health
+            OnHealthChangedEvent?.Invoke(currentHealth, maxHealth);
+            Debug.Log($"🏥 [Client] Initial health: {currentHealth}/{maxHealth}");
+        }
+
         // ⭐ Interface implementation
         public void ApplyDamage(DamageInfo info)
         {
@@ -106,6 +127,9 @@ namespace TacticalCombat.Combat
                 MatchManager.Instance?.NotifyPlayerDeath(player.playerId);
             }
 
+            // Show kill feed
+            RpcShowKillFeed(killerId, netId);
+
             RpcOnDeath();
 
             // Auto-respawn after delay (Battlefield style)
@@ -142,10 +166,17 @@ namespace TacticalCombat.Combat
         [Server]
         private System.Collections.IEnumerator RespawnAfterDelay(float delay)
         {
-            yield return new WaitForSeconds(delay);
+            RpcShowRespawnCountdown(delay);
+
+            for (int i = Mathf.CeilToInt(delay); i > 0; i--)
+            {
+                RpcUpdateRespawnCountdown(i);
+                yield return new WaitForSeconds(1f);
+            }
 
             if (isDead)
             {
+                RpcHideRespawnCountdown();
                 Respawn();
             }
         }
@@ -249,6 +280,60 @@ namespace TacticalCombat.Combat
 
             // Optional: Add screen flash, damage indicator, sound, etc.
             Debug.Log($"🎯 [Client] HIT! Took {damage} damage");
+        }
+
+        [ClientRpc]
+        private void RpcShowKillFeed(ulong killerId, ulong victimId)
+        {
+            if (TacticalCombat.UI.GameHUD.Instance == null) return;
+
+            string killerName = GetPlayerName(killerId);
+            string victimName = GetPlayerName(victimId);
+
+            TacticalCombat.UI.GameHUD.Instance.ShowKillFeed(killerName, victimName);
+        }
+
+        private string GetPlayerName(ulong playerId)
+        {
+            var players = FindObjectsByType<TacticalCombat.Player.PlayerController>(FindObjectsSortMode.None);
+            foreach (var p in players)
+            {
+                if (p.netId == playerId)
+                {
+                    return $"Player {playerId}";
+                }
+            }
+            return $"Player {playerId}";
+        }
+
+        [ClientRpc]
+        private void RpcShowRespawnCountdown(float seconds)
+        {
+            if (!isLocalPlayer) return;
+            if (TacticalCombat.UI.GameHUD.Instance != null)
+            {
+                TacticalCombat.UI.GameHUD.Instance.ShowRespawnCountdown(seconds);
+            }
+        }
+
+        [ClientRpc]
+        private void RpcUpdateRespawnCountdown(float seconds)
+        {
+            if (!isLocalPlayer) return;
+            if (TacticalCombat.UI.GameHUD.Instance != null)
+            {
+                TacticalCombat.UI.GameHUD.Instance.ShowRespawnCountdown(seconds);
+            }
+        }
+
+        [ClientRpc]
+        private void RpcHideRespawnCountdown()
+        {
+            if (!isLocalPlayer) return;
+            if (TacticalCombat.UI.GameHUD.Instance != null)
+            {
+                TacticalCombat.UI.GameHUD.Instance.HideRespawnCountdown();
+            }
         }
 
         // ⭐ IDamageable interface properties

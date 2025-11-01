@@ -145,16 +145,33 @@ namespace TacticalCombat.Network
 
         private void CheckAutoStart()
         {
+            Debug.Log($"🎮 CheckAutoStart: TeamA={teamACount}, TeamB={teamBCount}");
+
             // Auto-start when we have at least 2 players (1 per team) for testing
-            // In production, this would be controlled by a lobby system
             if (teamACount >= 1 && teamBCount >= 1)
             {
-                // Start match after a delay
-                if (MatchManager.Instance != null && 
-                    MatchManager.Instance.GetCurrentPhase() == Phase.Lobby)
+                if (MatchManager.Instance == null)
                 {
+                    Debug.LogError("❌ MatchManager.Instance is NULL!");
+                    return;
+                }
+
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                Debug.Log($"🎮 Current phase: {currentPhase}");
+
+                if (currentPhase == Phase.Lobby)
+                {
+                    Debug.Log($"🎮 Starting match in 3 seconds...");
                     Invoke(nameof(StartMatch), 3f);
                 }
+                else
+                {
+                    Debug.Log($"⚠️ Already started (phase: {currentPhase})");
+                }
+            }
+            else
+            {
+                Debug.Log($"⚠️ Not enough players yet");
             }
         }
 

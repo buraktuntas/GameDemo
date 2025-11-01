@@ -2,6 +2,7 @@ using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 using Mirror;
+using TacticalCombat.UI;
 
 namespace TacticalCombat.Core
 {
@@ -147,8 +148,45 @@ namespace TacticalCombat.Core
         {
             if (!playerStates.ContainsKey(playerId))
             {
-                playerStates[playerId] = new PlayerState(playerId, team, role);
-                Debug.Log($"Player {playerId} registered: Team {team}, Role {role}");
+                // Auto-balance teams: assign to team with fewer players
+                Team assignedTeam = AssignTeamAutoBalance();
+
+                playerStates[playerId] = new PlayerState(playerId, assignedTeam, role);
+                Debug.Log($"✅ Player {playerId} registered: Team {assignedTeam}, Role {role}");
+
+                // Update player's team
+                UpdatePlayerTeam(playerId, assignedTeam);
+            }
+        }
+
+        [Server]
+        private Team AssignTeamAutoBalance()
+        {
+            int teamACount = 0;
+            int teamBCount = 0;
+
+            foreach (var state in playerStates.Values)
+            {
+                if (state.team == Team.TeamA) teamACount++;
+                else if (state.team == Team.TeamB) teamBCount++;
+            }
+
+            // Assign to team with fewer players (or TeamA if equal)
+            return teamACount <= teamBCount ? Team.TeamA : Team.TeamB;
+        }
+
+        [Server]
+        private void UpdatePlayerTeam(ulong playerId, Team team)
+        {
+            // Find player GameObject and update their team
+            foreach (var playerObj in FindObjectsByType<TacticalCombat.Player.PlayerController>(FindObjectsSortMode.None))
+            {
+                if (playerObj.netId == playerId)
+                {
+                    playerObj.team = team;
+                    Debug.Log($"🎨 Updated Player {playerId} visual team to {team}");
+                    break;
+                }
             }
         }
 
@@ -237,8 +275,11 @@ namespace TacticalCombat.Core
             int teamAAlive = 0;
             int teamBAlive = 0;
 
-            foreach (var state in playerStates.Values)
+            Debug.Log($"📊 Checking {playerStates.Count} player states:");
+            foreach (var kvp in playerStates)
             {
+                var state = kvp.Value;
+                Debug.Log($"  Player {kvp.Key}: Team={state.team}, Alive={state.isAlive}");
                 if (state.isAlive)
                 {
                     if (state.team == Team.TeamA) teamAAlive++;
@@ -246,7 +287,9 @@ namespace TacticalCombat.Core
                 }
             }
 
-            return teamAAlive == 0 || teamBAlive == 0;
+            bool winCondition = teamAAlive == 0 || teamBAlive == 0;
+            Debug.Log($"📊 IsWinConditionMet: TeamA={teamAAlive}, TeamB={teamBAlive}, Result={winCondition}");
+            return winCondition;
         }
 
         [Server]
@@ -255,12 +298,10 @@ namespace TacticalCombat.Core
             if (playerStates.ContainsKey(playerId))
             {
                 playerStates[playerId].isAlive = false;
-                Debug.Log($"Player {playerId} died");
-                
-                if (currentPhase == Phase.Combat)
-                {
-                    CheckWinCondition();
-                }
+                Debug.Log($"💀 Player {playerId} died. Current phase: {currentPhase}");
+
+                // Check win condition in any phase (not just Combat)
+                CheckWinCondition();
             }
         }
 
@@ -275,7 +316,13 @@ namespace TacticalCombat.Core
         [Server]
         private void CheckWinCondition()
         {
-            if (!IsWinConditionMet()) return;
+            Debug.Log($"🔍 Checking win condition...");
+
+            if (!IsWinConditionMet())
+            {
+                Debug.Log($"❌ Win condition not met yet");
+                return;
+            }
 
             int teamAAlive = 0;
             int teamBAlive = 0;
@@ -289,6 +336,8 @@ namespace TacticalCombat.Core
                 }
             }
 
+            Debug.Log($"⚔️ Alive count: TeamA={teamAAlive}, TeamB={teamBAlive}");
+
             Team winner = Team.None;
             if (teamAAlive > 0 && teamBAlive == 0)
                 winner = Team.TeamA;
@@ -297,7 +346,12 @@ namespace TacticalCombat.Core
 
             if (winner != Team.None)
             {
+                Debug.Log($"🏆 Winner: {winner}");
                 AwardRoundWin(winner);
+            }
+            else
+            {
+                Debug.Log($"⚠️ No winner yet (both teams have players alive or both dead)");
             }
         }
 
@@ -401,6 +455,13 @@ namespace TacticalCombat.Core
         private void RpcOnRoundWon(Team winner)
         {
             OnRoundWonEvent?.Invoke(winner);
+
+            // Show UI
+            if (GameHUD.Instance != null)
+            {
+                string winnerName = winner == Team.TeamA ? "TEAM A" : "TEAM B";
+                GameHUD.Instance.ShowRoundWin(winnerName, teamAWins, teamBWins);
+            }
         }
 
         [ClientRpc]
