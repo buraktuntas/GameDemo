@@ -146,17 +146,37 @@ namespace TacticalCombat.Core
         [Server]
         public void RegisterPlayer(ulong playerId, Team team, RoleId role)
         {
+            // ✅ CRITICAL FIX: Honor the team parameter from UI selection!
+            Team assignedTeam;
+
+            if (team != Team.None)
+            {
+                // Player selected a specific team - use it
+                assignedTeam = team;
+                Debug.Log($"✅ Player {playerId} registered with SELECTED team: {assignedTeam}, Role {role}");
+            }
+            else
+            {
+                // Team was not selected (Auto-balance) - assign automatically
+                assignedTeam = AssignTeamAutoBalance();
+                Debug.Log($"✅ Player {playerId} registered with AUTO-BALANCED team: {assignedTeam}, Role {role}");
+            }
+
+            // Register or update player state
             if (!playerStates.ContainsKey(playerId))
             {
-                // Auto-balance teams: assign to team with fewer players
-                Team assignedTeam = AssignTeamAutoBalance();
-
                 playerStates[playerId] = new PlayerState(playerId, assignedTeam, role);
-                Debug.Log($"✅ Player {playerId} registered: Team {assignedTeam}, Role {role}");
-
-                // Update player's team
-                UpdatePlayerTeam(playerId, assignedTeam);
             }
+            else
+            {
+                // Update existing player (re-registration with new team/role)
+                playerStates[playerId].team = assignedTeam;
+                playerStates[playerId].role = role;
+                Debug.Log($"♻️ Player {playerId} RE-registered: Team {assignedTeam}, Role {role}");
+            }
+
+            // Update player's team visually
+            UpdatePlayerTeam(playerId, assignedTeam);
         }
 
         [Server]
@@ -306,10 +326,9 @@ namespace TacticalCombat.Core
         }
 
         [Server]
-        public void NotifyCoreDestroyed(Team team)
+        public void OnCoreDestroyed(Team winner)
         {
-            Debug.Log($"{team} core destroyed!");
-            Team winner = team == Team.TeamA ? Team.TeamB : Team.TeamA;
+            Debug.Log($"💥 Core destroyed! Winner: {winner}");
             AwardRoundWin(winner);
         }
 

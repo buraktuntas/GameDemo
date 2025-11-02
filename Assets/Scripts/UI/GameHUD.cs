@@ -57,6 +57,10 @@ namespace TacticalCombat.UI
         [SerializeField] private GameObject killFeedPanel;
         [SerializeField] private TextMeshProUGUI killFeedText;
 
+        [Header("Headshot Indicator")]
+        [SerializeField] private GameObject headshotPanel;
+        [SerializeField] private TextMeshProUGUI headshotText;
+
         [Header("Respawn")]
         [SerializeField] private GameObject respawnPanel;
         [SerializeField] private TextMeshProUGUI respawnText;
@@ -262,14 +266,21 @@ namespace TacticalCombat.UI
             }
         }
 
-        public void ShowKillFeed(string killerName, string victimName)
+        public void ShowKillFeed(string killerName, string victimName, bool isHeadshot = false)
         {
             if (killFeedPanel != null && killFeedText != null)
             {
-                killFeedText.text = $"{killerName} → {victimName}";
+                string headshotIcon = isHeadshot ? " 💀" : "";
+                killFeedText.text = $"{killerName}{headshotIcon} → {victimName}";
                 killFeedPanel.SetActive(true);
                 CancelInvoke(nameof(HideKillFeed));
                 Invoke(nameof(HideKillFeed), 3f);
+            }
+
+            // Show headshot indicator for local player
+            if (isHeadshot)
+            {
+                ShowHeadshotIndicator();
             }
         }
 
@@ -278,6 +289,25 @@ namespace TacticalCombat.UI
             if (killFeedPanel != null)
             {
                 killFeedPanel.SetActive(false);
+            }
+        }
+
+        public void ShowHeadshotIndicator()
+        {
+            if (headshotPanel != null && headshotText != null)
+            {
+                headshotText.text = "HEADSHOT!";
+                headshotPanel.SetActive(true);
+                CancelInvoke(nameof(HideHeadshotIndicator));
+                Invoke(nameof(HideHeadshotIndicator), 2f);
+            }
+        }
+
+        private void HideHeadshotIndicator()
+        {
+            if (headshotPanel != null)
+            {
+                headshotPanel.SetActive(false);
             }
         }
 

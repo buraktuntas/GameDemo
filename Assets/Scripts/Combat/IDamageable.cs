@@ -26,8 +26,9 @@ namespace TacticalCombat.Combat
         public Vector3 HitPoint;
         public Vector3 HitNormal;
         public float Force; // For knockback effects
-        
-        public DamageInfo(int amount, ulong attackerId, DamageType type, Vector3 hitPoint, Vector3 hitNormal = default, float force = 0f)
+        public bool IsHeadshot; // For headshot indicator
+
+        public DamageInfo(int amount, ulong attackerId, DamageType type, Vector3 hitPoint, Vector3 hitNormal = default, float force = 0f, bool isHeadshot = false)
         {
             Amount = amount;
             AttackerID = attackerId;
@@ -35,6 +36,7 @@ namespace TacticalCombat.Combat
             HitPoint = hitPoint;
             HitNormal = hitNormal;
             Force = force;
+            IsHeadshot = isHeadshot;
         }
     }
     

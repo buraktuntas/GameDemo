@@ -42,6 +42,14 @@ namespace TacticalCombat.Network
 
             // Get spawn point
             Transform spawnPoint = GetSpawnPoint(assignedTeam);
+            
+            // ✅ CRITICAL FIX: Check spawn point before using it
+            if (spawnPoint == null)
+            {
+                Debug.LogError("❌ Spawn point is null! Cannot spawn player.");
+                return;
+            }
+            
             Debug.Log($"   Spawn Point: {spawnPoint.position}");
 
             // ✅ FIX: Ensure playerPrefab is valid

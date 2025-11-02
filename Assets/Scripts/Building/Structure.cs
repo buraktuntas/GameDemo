@@ -27,6 +27,10 @@ namespace TacticalCombat.Building
         [SerializeField] private Material teamAMaterial;
         [SerializeField] private Material teamBMaterial;
 
+        [Header("Destruction Effects")]
+        [SerializeField] private GameObject destructionEffect;
+        [SerializeField] private AudioClip destructionSound;
+
         private Health health;
         private bool isCore = false;
 
@@ -97,8 +101,12 @@ namespace TacticalCombat.Building
         {
             if (isCore)
             {
-                MatchManager.Instance?.NotifyCoreDestroyed(team);
+                Team winner = team == Team.TeamA ? Team.TeamB : Team.TeamA;
+                MatchManager.Instance?.OnCoreDestroyed(winner);
             }
+
+            // Play destruction effects
+            RpcPlayDestructionEffects();
 
             // ✅ MEMORY LEAK FIX: Unsubscribe from event before destruction
             if (health != null)
@@ -106,6 +114,13 @@ namespace TacticalCombat.Building
                 health.OnDeathEvent -= OnStructureDestroyed;
             }
 
+            // Delayed destruction to allow effects to play
+            Invoke(nameof(DestroyStructure), 0.5f);
+        }
+
+        [Server]
+        private void DestroyStructure()
+        {
             // Return to pool if available, otherwise destroy
             if (NetworkObjectPool.Instance != null)
             {
@@ -115,6 +130,37 @@ namespace TacticalCombat.Building
             {
                 NetworkServer.Destroy(gameObject);
             }
+        }
+
+        [ClientRpc]
+        private void RpcPlayDestructionEffects()
+        {
+            // Spawn destruction particle effect
+            if (destructionEffect != null)
+            {
+                GameObject effect = Instantiate(destructionEffect, transform.position, Quaternion.identity);
+                Destroy(effect, 3f);
+            }
+
+            // Play destruction sound
+            if (destructionSound != null)
+            {
+                AudioSource.PlayClipAtPoint(destructionSound, transform.position);
+            }
+
+            // Hide renderers
+            if (renderers != null)
+            {
+                foreach (var rend in renderers)
+                {
+                    if (rend != null)
+                    {
+                        rend.enabled = false;
+                    }
+                }
+            }
+
+            Debug.Log($"💥 Structure destroyed: {structureType} (Team: {team})");
         }
 
         private void OnDestroy()

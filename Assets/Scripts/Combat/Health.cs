@@ -79,11 +79,11 @@ namespace TacticalCombat.Combat
             // ✅ HIT FEEDBACK: Camera shake for victim
             RpcNotifyHit(finalDamage);
 
-            Debug.Log($"💥 [Server] {gameObject.name} took {finalDamage} damage ({info.Type}). Health: {currentHealth}/{maxHealth}");
+            Debug.Log($"💥 [Server] {gameObject.name} took {finalDamage} damage ({info.Type}){(info.IsHeadshot ? " - HEADSHOT" : "")}. Health: {currentHealth}/{maxHealth}");
 
             if (currentHealth <= 0)
             {
-                Die(info.AttackerID);
+                Die(info.AttackerID, info.IsHeadshot);
             }
         }
         
@@ -114,12 +114,12 @@ namespace TacticalCombat.Combat
         }
 
         [Server]
-        private void Die(ulong killerId)
+        private void Die(ulong killerId, bool isHeadshot = false)
         {
             if (isDead) return;
 
             isDead = true;
-            Debug.Log($"💀 [Server] {gameObject.name} died (killed by {killerId})");
+            Debug.Log($"💀 [Server] {gameObject.name} died (killed by {killerId}{(isHeadshot ? " - HEADSHOT" : "")})");
 
             // Notify MatchManager if this is a player
             if (TryGetComponent<TacticalCombat.Player.PlayerController>(out var player))
@@ -128,7 +128,7 @@ namespace TacticalCombat.Combat
             }
 
             // Show kill feed
-            RpcShowKillFeed(killerId, netId);
+            RpcShowKillFeed(killerId, netId, isHeadshot);
 
             RpcOnDeath();
 
@@ -283,14 +283,14 @@ namespace TacticalCombat.Combat
         }
 
         [ClientRpc]
-        private void RpcShowKillFeed(ulong killerId, ulong victimId)
+        private void RpcShowKillFeed(ulong killerId, ulong victimId, bool isHeadshot)
         {
             if (TacticalCombat.UI.GameHUD.Instance == null) return;
 
             string killerName = GetPlayerName(killerId);
             string victimName = GetPlayerName(victimId);
 
-            TacticalCombat.UI.GameHUD.Instance.ShowKillFeed(killerName, victimName);
+            TacticalCombat.UI.GameHUD.Instance.ShowKillFeed(killerName, victimName, isHeadshot);
         }
 
         private string GetPlayerName(ulong playerId)

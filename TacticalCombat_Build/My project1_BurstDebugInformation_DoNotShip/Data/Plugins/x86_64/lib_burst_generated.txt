@@ -13,7 +13,7 @@ Library: C:\Users\Burak\My project1\Temp\BurstOutput\Data\Plugins\x86_64\lib_bur
 --linker-options=PdbAltPath="My project1_Data/Plugins/x86_64/lib_burst_generated.pdb"
 --generate-link-xml=Temp\burst.link.xml
 --temp-folder=C:\Users\Burak\My project1\Temp\Burst
---key-folder=C:/Program Files/Unity/Hub/Editor/6000.2.8f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport
+--key-folder=C:/Program Files/Unity/Hub/Editor/6000.2.10f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport
 --decode-folder=C:\Users\Burak\My project1\Library\Burst
 --output=C:\Users\Burak\My project1\Temp\BurstOutput\Data\Plugins\x86_64\lib_burst_generated
 --pdb-search-paths=Temp/ManagedSymbols/
@@ -34,7 +34,7 @@ Library: C:\Users\Burak\My project1\Temp\BurstOutput\Data\Plugins\x86_64\lib_bur
 --linker-options=PdbAltPath="My project1_Data/Plugins/x86_64/lib_burst_generated.pdb"
 --generate-link-xml=Temp\burst.link.xml
 --temp-folder=C:\Users\Burak\My project1\Temp\Burst
---key-folder=C:/Program Files/Unity/Hub/Editor/6000.2.8f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport
+--key-folder=C:/Program Files/Unity/Hub/Editor/6000.2.10f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport
 --decode-folder=C:\Users\Burak\My project1\Library\Burst
 --output=C:\Users\Burak\My project1\Temp\BurstOutput\Data\Plugins\x86_64\lib_burst_generated
 --pdb-search-paths=Temp/ManagedSymbols/
@@ -53,7 +53,7 @@ Library: C:\Users\Burak\My project1\Temp\BurstOutput\Data\Plugins\x86_64\lib_bur
 --linker-options=PdbAltPath="My project1_Data/Plugins/x86_64/lib_burst_generated.pdb"
 --generate-link-xml=Temp\burst.link.xml
 --temp-folder=C:\Users\Burak\My project1\Temp\Burst
---key-folder=C:/Program Files/Unity/Hub/Editor/6000.2.8f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport
+--key-folder=C:/Program Files/Unity/Hub/Editor/6000.2.10f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport
 --decode-folder=C:\Users\Burak\My project1\Library\Burst
 --output=C:\Users\Burak\My project1\Temp\BurstOutput\Data\Plugins\x86_64\lib_burst_generated
 --pdb-search-paths=Temp/ManagedSymbols/
@@ -164,7 +164,7 @@ Library: C:\Users\Burak\My project1\Temp\BurstOutput\Data\Plugins\x86_64\lib_bur
 --linker-options=PdbAltPath="My project1_Data/Plugins/x86_64/lib_burst_generated.pdb"
 --generate-link-xml=Temp\burst.link.xml
 --temp-folder=C:\Users\Burak\My project1\Temp\Burst
---key-folder=C:/Program Files/Unity/Hub/Editor/6000.2.8f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport
+--key-folder=C:/Program Files/Unity/Hub/Editor/6000.2.10f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport
 --decode-folder=C:\Users\Burak\My project1\Library\Burst
 --output=C:\Users\Burak\My project1\Temp\BurstOutput\Data\Plugins\x86_64\lib_burst_generated
 --pdb-search-paths=Temp/ManagedSymbols/

@@ -531,7 +531,7 @@ namespace TacticalCombat.Editor
 
                 core.AddComponent<NetworkIdentity>();
                 core.AddComponent<Health>();
-                var coreScript = core.AddComponent<CoreStructure>();
+                var coreScript = core.AddComponent<TacticalCombat.Building.CoreStructure>();
                 coreScript.SetTeam(Team.TeamA);
             }
 
@@ -549,7 +549,7 @@ namespace TacticalCombat.Editor
 
                 core.AddComponent<NetworkIdentity>();
                 core.AddComponent<Health>();
-                var coreScript = core.AddComponent<CoreStructure>();
+                var coreScript = core.AddComponent<TacticalCombat.Building.CoreStructure>();
                 coreScript.SetTeam(Team.TeamB);
             }
         }

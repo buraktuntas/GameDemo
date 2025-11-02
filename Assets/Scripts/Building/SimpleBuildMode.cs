@@ -44,6 +44,14 @@ namespace TacticalCombat.Building
         [Header("Structural Integrity Preview")]
         [SerializeField] private bool showStabilityPreview = true;
         [SerializeField] private float maxSupportDistance = 10f;
+
+        [Header("Structure Costs")]
+        [SerializeField] private int wallCost = 10;
+        [SerializeField] private int floorCost = 5;
+        [SerializeField] private int roofCost = 8;
+        [SerializeField] private int doorCost = 15;
+        [SerializeField] private int windowCost = 12;
+        [SerializeField] private int stairsCost = 20;
         
         // ✅ FIX: Weapon system reference
         private WeaponSystem weaponSystem;
@@ -342,9 +350,14 @@ namespace TacticalCombat.Building
                 DestroyGhostPreview();
                 CreateGhostPreview();
             }
-            
+            else
+            {
+                // Update cost display if ghost already exists
+                UpdateCostDisplay();
+            }
+
             string structureName = availableStructures[currentStructureIndex].name;
-            Debug.Log($"🏗️ [SimpleBuildMode] Structure selected: {structureName}");
+            Debug.Log($"🏗️ [SimpleBuildMode] Structure selected: {structureName} - Cost: {GetCurrentStructureCost()}₺");
         }
         
         private void HandleRotation()
@@ -499,6 +512,10 @@ namespace TacticalCombat.Building
 
             lastCanPlaceState = true;
             lastStabilityColor = Color.clear;
+
+            // Add cost display
+            var costDisplay = ghostPreview.AddComponent<TacticalCombat.UI.BuildCostDisplay>();
+            UpdateCostDisplay();
         }
         
         private void DestroyGhostPreview()
@@ -879,6 +896,73 @@ namespace TacticalCombat.Building
         }
 
         public bool IsBuildModeActive() => isBuildModeActive;
+
+        /// <summary>
+        /// Get current structure cost
+        /// </summary>
+        private int GetCurrentStructureCost()
+        {
+            if (availableStructures == null || currentStructureIndex >= availableStructures.Length)
+                return 0;
+
+            GameObject structure = availableStructures[currentStructureIndex];
+            if (structure == null) return 0;
+
+            string structureName = structure.name.ToLower();
+
+            if (structureName.Contains("wall")) return wallCost;
+            if (structureName.Contains("floor")) return floorCost;
+            if (structureName.Contains("roof")) return roofCost;
+            if (structureName.Contains("door")) return doorCost;
+            if (structureName.Contains("window")) return windowCost;
+            if (structureName.Contains("stair")) return stairsCost;
+
+            return 10; // Default cost
+        }
+
+        /// <summary>
+        /// Get current structure name
+        /// </summary>
+        private string GetCurrentStructureName()
+        {
+            if (availableStructures == null || currentStructureIndex >= availableStructures.Length)
+                return "Structure";
+
+            GameObject structure = availableStructures[currentStructureIndex];
+            if (structure == null) return "Structure";
+
+            // Clean up name (remove prefixes like "Wall_Prefab" -> "Wall")
+            string name = structure.name.Replace("Prefab", "").Replace("_", " ").Trim();
+            return name;
+        }
+
+        /// <summary>
+        /// Check if player can afford current structure
+        /// </summary>
+        private bool CanAffordStructure()
+        {
+            // TODO: Get player budget from MatchManager
+            // For now, always return true
+            return true;
+        }
+
+        /// <summary>
+        /// Update cost display on ghost preview
+        /// </summary>
+        private void UpdateCostDisplay()
+        {
+            if (ghostPreview == null) return;
+
+            var costDisplay = ghostPreview.GetComponent<TacticalCombat.UI.BuildCostDisplay>();
+            if (costDisplay != null)
+            {
+                string structureName = GetCurrentStructureName();
+                int cost = GetCurrentStructureCost();
+                bool canAfford = CanAffordStructure();
+
+                costDisplay.UpdateCost(structureName, cost, canAfford);
+            }
+        }
         
         private void OnDrawGizmos()
         {

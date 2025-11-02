@@ -654,7 +654,9 @@ namespace TacticalCombat.Combat
                     netId,
                     DamageType.Bullet,
                     hitPoint,
-                    hitNormal
+                    hitNormal,
+                    0f,
+                    isCritical  // Pass headshot info
                 );
 
                 health.ApplyDamage(damageInfo);

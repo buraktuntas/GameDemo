@@ -142,6 +142,7 @@ namespace TacticalCombat.Editor
             CreateScoreUI(hudObj, gameHUD);
             CreateRoundWinUI(hudObj, gameHUD);
             CreateKillFeedUI(hudObj, gameHUD);
+            CreateHeadshotUI(hudObj, gameHUD);
             CreateRespawnUI(hudObj, gameHUD);
 
             // Select the created object
@@ -400,6 +401,30 @@ namespace TacticalCombat.Editor
             so.ApplyModifiedProperties();
 
             Debug.Log("  ✅ Kill Feed UI created");
+        }
+
+        static void CreateHeadshotUI(GameObject parent, GameHUD gameHUD)
+        {
+            // Center screen, slightly above center - headshot indicator
+            GameObject headshotPanel = CreatePanel(parent, "HeadshotPanel", new Vector2(400, 120),
+                new Vector2(0, 100), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+
+            Image headshotBg = headshotPanel.GetComponent<Image>();
+            headshotBg.color = new Color(1, 0, 0, 0.8f); // Red background
+            headshotPanel.SetActive(false);
+
+            GameObject headshotTextObj = CreateText(headshotPanel, "HeadshotText", "HEADSHOT!", 48,
+                Vector2.zero, TextAlignmentOptions.Center, new Vector2(380, 100));
+            TextMeshProUGUI headshotText = headshotTextObj.GetComponent<TextMeshProUGUI>();
+            headshotText.color = Color.white;
+            headshotText.fontStyle = FontStyles.Bold;
+
+            SerializedObject so = new SerializedObject(gameHUD);
+            so.FindProperty("headshotPanel").objectReferenceValue = headshotPanel;
+            so.FindProperty("headshotText").objectReferenceValue = headshotText;
+            so.ApplyModifiedProperties();
+
+            Debug.Log("  ✅ Headshot Indicator UI created");
         }
 
         static void CreateRespawnUI(GameObject parent, GameHUD gameHUD)

@@ -40,7 +40,8 @@ namespace TacticalCombat.Building
 
             if (isServer && MatchManager.Instance != null)
             {
-                MatchManager.Instance.NotifyCoreDestroyed(team);
+                Team winner = team == Team.TeamA ? Team.TeamB : Team.TeamA;
+                MatchManager.Instance.OnCoreDestroyed(winner);
             }
         }
 

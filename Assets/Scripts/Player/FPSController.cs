@@ -230,9 +230,21 @@ namespace TacticalCombat.Player
                 baseFOV = playerCamera.fieldOfView;
             }
 
-            // Lock cursor
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
+            // ✅ CRITICAL FIX: Don't lock cursor if UI is open (TeamSelectionUI might be showing)
+            // Check if any UI is open before locking cursor
+            bool uiIsOpen = IsAnyUIOpen();
+            if (!uiIsOpen)
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+            else
+            {
+                // UI is open - keep cursor unlocked for menu interaction
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                Debug.Log("🔓 [FPSController] UI detected - cursor kept unlocked");
+            }
 
             // Player registration handled by PlayerController
         }
@@ -294,24 +306,52 @@ namespace TacticalCombat.Player
                 baseFOV = playerCamera.fieldOfView;
 
                 // 🔧 AUDIO LISTENER FIX: Only local player has AudioListener
-                AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
-                if (audioListener != null)
+                if (isLocalPlayer)
                 {
-                    if (!isLocalPlayer)
+                    // ✅ CRITICAL FIX: Disable ALL other AudioListeners (bootstrap, other players, etc.)
+                    var allListeners = FindObjectsByType<AudioListener>(FindObjectsSortMode.None);
+                    foreach (var listener in allListeners)
                     {
-                        // Destroy AudioListener on non-local players
+                        if (listener != null && listener.gameObject != playerCamera.gameObject)
+                        {
+                            // Disable or destroy other listeners
+                            if (listener.gameObject.name.Contains("Bootstrap") || 
+                                listener.gameObject.name.Contains("URPCameraBootstrap"))
+                            {
+                                // Destroy bootstrap listeners (they'll be destroyed anyway)
+                                Destroy(listener);
+                            }
+                            else
+                            {
+                                // Just disable others (might be on other players)
+                                listener.enabled = false;
+                            }
+                        }
+                    }
+                    
+                    // Ensure local player's AudioListener is enabled
+                    AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
+                    if (audioListener == null)
+                    {
+                        audioListener = playerCamera.gameObject.AddComponent<AudioListener>();
+                    }
+                    audioListener.enabled = true;
+                    
+                    if (showDebugInfo)
+                    {
+                        Debug.Log($"🔊 AudioListener enabled (local player) - Other listeners cleaned");
+                    }
+                }
+                else
+                {
+                    // Non-local player - destroy AudioListener
+                    AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
+                    if (audioListener != null)
+                    {
                         Destroy(audioListener);
                         if (showDebugInfo)
                         {
                             Debug.Log($"🔇 AudioListener destroyed (not local player)");
-                        }
-                    }
-                    else
-                    {
-                        audioListener.enabled = true;
-                        if (showDebugInfo)
-                        {
-                            Debug.Log($"🔊 AudioListener enabled (local player)");
                         }
                     }
                 }
@@ -331,19 +371,26 @@ namespace TacticalCombat.Player
         {
             if (!isLocalPlayer || Time.timeScale == 0f) return;
 
-            // ESC to unlock, click to re-lock (standard FPS behavior)
-            if (Input.GetKeyDown(KeyCode.Escape))
+            // ✅ CRITICAL FIX: Don't interfere with UI clicks!
+            // Only handle cursor lock/unlock if no UI is open
+            bool uiIsOpen = IsAnyUIOpen();
+
+            if (!uiIsOpen)
             {
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-            }
-            else if (Cursor.lockState != CursorLockMode.Locked)
-            {
-                // ANY mouse button click re-locks cursor
-                if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2))
+                // ESC to unlock, click to re-lock (standard FPS behavior)
+                if (Input.GetKeyDown(KeyCode.Escape))
                 {
-                    Cursor.lockState = CursorLockMode.Locked;
-                    Cursor.visible = false;
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
+                }
+                else if (Cursor.lockState != CursorLockMode.Locked)
+                {
+                    // ANY mouse button click re-locks cursor (ONLY when UI is closed!)
+                    if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2))
+                    {
+                        Cursor.lockState = CursorLockMode.Locked;
+                        Cursor.visible = false;
+                    }
                 }
             }
 
@@ -752,7 +799,7 @@ namespace TacticalCombat.Player
         private void OnGUI()
         {
             if (!showDebugInfo || !isLocalPlayer) return;
-            
+
             GUILayout.BeginArea(new Rect(10, 10, 300, 200));
             GUILayout.Label($"<b>FPS Controller Debug</b>");
             GUILayout.Label($"Grounded: {IsGrounded()}");
@@ -763,6 +810,39 @@ namespace TacticalCombat.Player
                 GUILayout.Label($"Stamina: {currentStamina:F0}/{maxStamina}");
             }
             GUILayout.EndArea();
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL: Check if any UI panel is currently open
+        /// Prevents FPSController from interfering with UI clicks
+        /// </summary>
+        private bool IsAnyUIOpen()
+        {
+            // ✅ FIX: Use public IsPanelOpen() methods for accurate UI state checking
+            
+            // Check MainMenu using public method
+            var mainMenu = FindFirstObjectByType<TacticalCombat.UI.MainMenu>();
+            if (mainMenu != null && mainMenu.IsPanelOpen())
+            {
+                return true;
+            }
+
+            // Check RoleSelectionUI using public method
+            var roleSelection = FindFirstObjectByType<TacticalCombat.UI.RoleSelectionUI>();
+            if (roleSelection != null && roleSelection.IsPanelOpen())
+            {
+                return true;
+            }
+
+            // Check TeamSelectionUI using public method
+            var teamSelection = FindFirstObjectByType<TacticalCombat.UI.TeamSelectionUI>();
+            if (teamSelection != null && teamSelection.IsPanelOpen())
+            {
+                return true;
+            }
+
+            // No UI open - safe to handle cursor locking
+            return false;
         }
     }
 }
