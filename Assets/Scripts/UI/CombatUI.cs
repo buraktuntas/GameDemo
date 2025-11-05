@@ -51,6 +51,8 @@ namespace TacticalCombat.UI
         
         private Vector2 originalCrosshairSize;
         private Coroutine hitMarkerCoroutine;
+        private Coroutine flashCrosshairCoroutine;
+        private Coroutine expandCrosshairCoroutine;
         private Combat.WeaponSystem weaponSystem;
         
         private void Awake()
@@ -249,7 +251,11 @@ namespace TacticalCombat.UI
             
             // Change color briefly
             Color targetColor = isHeadshot ? headshotColor : hitColor;
-            StartCoroutine(FlashCrosshair(targetColor));
+            
+            // ✅ PERFORMANCE FIX: Track coroutine to prevent leaks
+            if (flashCrosshairCoroutine != null)
+                StopCoroutine(flashCrosshairCoroutine);
+            flashCrosshairCoroutine = StartCoroutine(FlashCrosshair(targetColor));
             
             // Show hit marker
             ShowHitMarker(isHeadshot);
@@ -257,11 +263,16 @@ namespace TacticalCombat.UI
         
         private IEnumerator FlashCrosshair(Color flashColor)
         {
-            if (crosshairImage == null) yield break;
+            if (crosshairImage == null)
+            {
+                flashCrosshairCoroutine = null;
+                yield break;
+            }
             
             crosshairImage.color = flashColor;
             yield return new WaitForSeconds(0.1f);
             crosshairImage.color = normalColor;
+            flashCrosshairCoroutine = null; // ✅ Cleanup reference
         }
         
         private void OnWeaponFired()
@@ -269,12 +280,25 @@ namespace TacticalCombat.UI
             // Expand crosshair on fire
             if (crosshairImage == null) return;
             
-            StopAllCoroutines();
-            StartCoroutine(ExpandCrosshair());
+            // ✅ PERFORMANCE FIX: Stop specific coroutines instead of StopAllCoroutines (prevents killing other coroutines)
+            if (flashCrosshairCoroutine != null)
+                StopCoroutine(flashCrosshairCoroutine);
+            if (expandCrosshairCoroutine != null)
+                StopCoroutine(expandCrosshairCoroutine);
+            if (hitMarkerCoroutine != null)
+                StopCoroutine(hitMarkerCoroutine);
+                
+            expandCrosshairCoroutine = StartCoroutine(ExpandCrosshair());
         }
         
         private IEnumerator ExpandCrosshair()
         {
+            if (crosshairImage == null)
+            {
+                expandCrosshairCoroutine = null;
+                yield break;
+            }
+            
             Vector2 expandedSize = originalCrosshairSize + Vector2.one * crosshairExpandAmount;
             
             // Expand
@@ -296,6 +320,7 @@ namespace TacticalCombat.UI
             }
             
             crosshairImage.rectTransform.sizeDelta = originalCrosshairSize;
+            expandCrosshairCoroutine = null; // ✅ Cleanup reference
         }
         
         // ═══════════════════════════════════════════════════════════
@@ -313,7 +338,11 @@ namespace TacticalCombat.UI
         private IEnumerator ShowHitMarkerCoroutine(bool isHeadshot)
         {
             Image marker = isHeadshot ? headshotMarker : hitMarker;
-            if (marker == null) yield break;
+            if (marker == null)
+            {
+                hitMarkerCoroutine = null;
+                yield break;
+            }
             
             // Show
             marker.gameObject.SetActive(true);
@@ -334,6 +363,27 @@ namespace TacticalCombat.UI
             }
             
             marker.gameObject.SetActive(false);
+            hitMarkerCoroutine = null; // ✅ Cleanup reference
+        }
+        
+        // ✅ PERFORMANCE FIX: Cleanup coroutines on disable
+        private void OnDisable()
+        {
+            if (hitMarkerCoroutine != null)
+            {
+                StopCoroutine(hitMarkerCoroutine);
+                hitMarkerCoroutine = null;
+            }
+            if (flashCrosshairCoroutine != null)
+            {
+                StopCoroutine(flashCrosshairCoroutine);
+                flashCrosshairCoroutine = null;
+            }
+            if (expandCrosshairCoroutine != null)
+            {
+                StopCoroutine(expandCrosshairCoroutine);
+                expandCrosshairCoroutine = null;
+            }
         }
         
         // ═══════════════════════════════════════════════════════════

@@ -86,8 +86,8 @@ namespace TacticalCombat.Traps
             // Simple hitscan
             if (Physics.Raycast(transform.position, direction, out RaycastHit hit, detectionRange))
             {
-                var health = hit.collider.GetComponent<Combat.Health>();
-                if (health != null)
+                // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent (faster, no GC)
+                if (hit.collider.TryGetComponent<Combat.Health>(out var health))
                 {
                     health.TakeDamage(dartDamage);
                 }

@@ -232,28 +232,80 @@ namespace TacticalCombat.Combat
             }
         }
 
+        // ✅ PERFORMANCE FIX: Cache spawn points to prevent GC allocation
+        private static Transform[] cachedSpawnPoints = null;
+        private static float lastSpawnPointCacheTime = 0f;
+        private const float SPAWN_POINT_CACHE_DURATION = 30f; // Refresh cache every 30 seconds
+
         /// <summary>
         /// Find a safe respawn position
+        /// ✅ PERFORMANCE: Uses cached spawn points to prevent GC spikes from FindGameObjectsWithTag
         /// </summary>
         private Vector3 FindRespawnPosition()
         {
-            // Try to find spawn points in scene
-            GameObject[] spawnPoints = GameObject.FindGameObjectsWithTag("SpawnPoint");
-
-            if (spawnPoints.Length > 0)
+            // Refresh cache if expired or null
+            if (cachedSpawnPoints == null || Time.time - lastSpawnPointCacheTime > SPAWN_POINT_CACHE_DURATION)
             {
-                // Random spawn point
-                int randomIndex = Random.Range(0, spawnPoints.Length);
-                return spawnPoints[randomIndex].transform.position;
+                RefreshSpawnPointCache();
             }
 
-            // Fallback: spawn at origin with offset
+            if (cachedSpawnPoints != null && cachedSpawnPoints.Length > 0)
+            {
+                // Random spawn point
+                int randomIndex = Random.Range(0, cachedSpawnPoints.Length);
+                if (cachedSpawnPoints[randomIndex] != null)
+                {
+                    return cachedSpawnPoints[randomIndex].position;
+                }
+            }
+
+            // Fallback: Try NetworkGameManager spawn points first
+            var networkManager = FindFirstObjectByType<Network.NetworkGameManager>();
+            if (networkManager != null)
+            {
+                // Use reflection to get spawn points (private field)
+                var spawnPoints = networkManager.GetType().GetField("teamASpawnPoints", 
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (spawnPoints != null)
+                {
+                    var points = spawnPoints.GetValue(networkManager) as Transform[];
+                    if (points != null && points.Length > 0)
+                    {
+                        return points[Random.Range(0, points.Length)].position;
+                    }
+                }
+            }
+
+            // Final fallback: spawn at origin with offset
             Vector3 randomOffset = new Vector3(
                 Random.Range(-5f, 5f),
                 2f,
                 Random.Range(-5f, 5f)
             );
             return Vector3.zero + randomOffset;
+        }
+
+        /// <summary>
+        /// ✅ PERFORMANCE: Cache spawn points once to avoid repeated FindGameObjectsWithTag calls
+        /// </summary>
+        private static void RefreshSpawnPointCache()
+        {
+            // ✅ FIX: Use FindObjectsByType instead of FindGameObjectsWithTag (less GC)
+            var spawnObjects = FindObjectsByType<GameObject>(FindObjectsSortMode.None);
+            System.Collections.Generic.List<Transform> spawnList = new System.Collections.Generic.List<Transform>();
+            
+            for (int i = 0; i < spawnObjects.Length; i++)
+            {
+                if (spawnObjects[i].CompareTag("SpawnPoint"))
+                {
+                    spawnList.Add(spawnObjects[i].transform);
+                }
+            }
+
+            cachedSpawnPoints = spawnList.ToArray();
+            lastSpawnPointCacheTime = Time.time;
+            
+            Debug.Log($"✅ [Health] Spawn point cache refreshed: {cachedSpawnPoints.Length} points found");
         }
 
         // ✅ FIX: Manual RPC for health changes instead of SyncVar hook

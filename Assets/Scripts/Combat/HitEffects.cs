@@ -32,6 +32,11 @@ namespace TacticalCombat.Combat
         private AudioSource audioSource;
         private static HitEffects instance;
         
+        // ✅ PERFORMANCE FIX: Track coroutines to prevent leaks
+        private Coroutine currentScreenShakeCoroutine;
+        private Coroutine currentHitScreenEffectCoroutine;
+        private Coroutine currentLocalFeedbackCoroutine;
+        
         public static HitEffects Instance
         {
             get
@@ -72,11 +77,22 @@ namespace TacticalCombat.Combat
                 audioSource = gameObject.AddComponent<AudioSource>();
             }
             
-            // Player camera'yı bul
-            playerCamera = Camera.main;
+            // ✅ PERFORMANCE FIX: Avoid Camera.main (GC allocation in Unity 6)
+            // Player camera'yı bul - prefer FPSController camera
+            var fpsController = FindFirstObjectByType<Player.FPSController>();
+            if (fpsController != null)
+            {
+                playerCamera = fpsController.GetCamera();
+            }
+            
             if (playerCamera == null)
             {
                 playerCamera = FindFirstObjectByType<Camera>();
+            }
+            
+            if (playerCamera == null)
+            {
+                Debug.LogWarning("⚠️ [HitEffects] No camera found - screen shake will be disabled");
             }
             
             // Default particle effects oluştur
@@ -169,13 +185,19 @@ namespace TacticalCombat.Combat
                 };
                 ImpactVFXPool.Instance.PlayImpact(hitPosition, Vector3.up, surface, body);
 
-                // Additional local feedback (audio/screen shake/screen FX)
-                StartCoroutine(PlayLocalFeedback(hitPosition, hitType));
+                // ✅ PERFORMANCE FIX: Track coroutine to prevent leaks
+            // Additional local feedback (audio/screen shake/screen FX)
+                if (currentLocalFeedbackCoroutine != null)
+                    StopCoroutine(currentLocalFeedbackCoroutine);
+                currentLocalFeedbackCoroutine = StartCoroutine(PlayLocalFeedback(hitPosition, hitType));
                 return;
             }
 
+            // ✅ PERFORMANCE FIX: Track coroutine to prevent leaks
             // Fallback: legacy particle workflow
-            StartCoroutine(PlayHitEffectCoroutine(hitPosition, hitType));
+            if (currentHitScreenEffectCoroutine != null)
+                StopCoroutine(currentHitScreenEffectCoroutine);
+            currentHitScreenEffectCoroutine = StartCoroutine(PlayHitEffectCoroutine(hitPosition, hitType));
         }
 
         private IEnumerator PlayLocalFeedback(Vector3 hitPosition, HitType hitType)
@@ -195,15 +217,24 @@ namespace TacticalCombat.Combat
             // Screen shake
             if (useScreenShake && playerCamera != null)
             {
-                yield return StartCoroutine(ScreenShakeCoroutine());
+                if (currentScreenShakeCoroutine != null)
+                    StopCoroutine(currentScreenShakeCoroutine);
+                currentScreenShakeCoroutine = StartCoroutine(ScreenShakeCoroutine());
+                yield return currentScreenShakeCoroutine;
+                currentScreenShakeCoroutine = null;
             }
 
             // Hit screen effect
             if (hitScreenEffect != null)
             {
-                yield return StartCoroutine(ShowHitScreenEffect());
+                if (currentHitScreenEffectCoroutine != null)
+                    StopCoroutine(currentHitScreenEffectCoroutine);
+                currentHitScreenEffectCoroutine = StartCoroutine(ShowHitScreenEffect());
+                yield return currentHitScreenEffectCoroutine;
+                currentHitScreenEffectCoroutine = null;
             }
 
+            currentLocalFeedbackCoroutine = null;
             yield return null;
         }
         
@@ -246,24 +277,37 @@ namespace TacticalCombat.Combat
                 audioSource.PlayOneShot(selectedSound);
             }
             
+            // ✅ PERFORMANCE FIX: Track coroutines to prevent leaks
             // Screen shake
             if (useScreenShake && playerCamera != null)
             {
-                StartCoroutine(ScreenShakeCoroutine());
+                if (currentScreenShakeCoroutine != null)
+                    StopCoroutine(currentScreenShakeCoroutine);
+                currentScreenShakeCoroutine = StartCoroutine(ScreenShakeCoroutine());
             }
             
             // Hit screen effect
             if (hitScreenEffect != null)
             {
-                StartCoroutine(ShowHitScreenEffect());
+                if (currentHitScreenEffectCoroutine != null)
+                    StopCoroutine(currentHitScreenEffectCoroutine);
+                currentHitScreenEffectCoroutine = StartCoroutine(ShowHitScreenEffect());
             }
             
             yield return new WaitForSeconds(effectDuration);
+            
+            // Cleanup coroutine references
+            currentHitScreenEffectCoroutine = null;
+            currentScreenShakeCoroutine = null;
         }
         
         private IEnumerator ScreenShakeCoroutine()
         {
-            if (playerCamera == null) yield break;
+            if (playerCamera == null)
+            {
+                currentScreenShakeCoroutine = null;
+                yield break;
+            }
             
             Vector3 originalPosition = playerCamera.transform.localPosition;
             float elapsed = 0f;
@@ -280,17 +324,43 @@ namespace TacticalCombat.Combat
             }
             
             playerCamera.transform.localPosition = originalPosition;
+            currentScreenShakeCoroutine = null; // ✅ Cleanup reference
         }
         
         private IEnumerator ShowHitScreenEffect()
         {
-            if (hitScreenEffect == null) yield break;
+            if (hitScreenEffect == null)
+            {
+                currentHitScreenEffectCoroutine = null;
+                yield break;
+            }
             
             hitScreenEffect.SetActive(true);
             yield return new WaitForSeconds(0.1f);
             hitScreenEffect.SetActive(false);
+            currentHitScreenEffectCoroutine = null; // ✅ Cleanup reference
         }
         
+        // ✅ PERFORMANCE FIX: Cleanup coroutines on disable/destroy
+        private void OnDisable()
+        {
+            if (currentScreenShakeCoroutine != null)
+            {
+                StopCoroutine(currentScreenShakeCoroutine);
+                currentScreenShakeCoroutine = null;
+            }
+            if (currentHitScreenEffectCoroutine != null)
+            {
+                StopCoroutine(currentHitScreenEffectCoroutine);
+                currentHitScreenEffectCoroutine = null;
+            }
+            if (currentLocalFeedbackCoroutine != null)
+            {
+                StopCoroutine(currentLocalFeedbackCoroutine);
+                currentLocalFeedbackCoroutine = null;
+            }
+        }
+
         // Utility methods
         public void PlayHitEffectAtTransform(Transform target, HitType hitType = HitType.Normal)
         {

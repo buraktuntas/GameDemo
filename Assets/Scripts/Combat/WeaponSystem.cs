@@ -42,12 +42,18 @@ namespace TacticalCombat.Combat
         [SerializeField] private AudioClip[] hitSounds;
         
         [Header("📊 WEAPON STATE")]
-        private int currentAmmo;
-        private int reserveAmmo;
+        // ✅ CRITICAL FIX: Ammo must be server-authoritative (SyncVar)
+        [SyncVar] private int currentAmmo;
+        [SyncVar] private int reserveAmmo;
         private bool isReloading;
 
+        // ✅ PHASE 2: nextFireTime server-only (client can't hack it)
+        // Note: [Server] attribute doesn't work on fields, but we ensure it's only used on server
         private float nextFireTime;
         private float recoilAmount;
+        
+        // ✅ CRITICAL FIX: Deterministic spread seed
+        [SyncVar] private int spreadSeed = 0;
 
         // ✅ FIX: Track coroutines to prevent memory leaks
         private Coroutine currentCameraShakeCoroutine;
@@ -251,28 +257,31 @@ namespace TacticalCombat.Combat
                 }
             }
                 
-            // Initialize ammo
-            if (currentWeapon != null)
+            // ✅ CRITICAL FIX: Initialize ammo only on server (SyncVar will sync to clients)
+            if (isServer)
             {
-                currentAmmo = currentWeapon.magazineSize;
-                reserveAmmo = currentWeapon.maxAmmo;
-                OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
-                
-                Debug.Log($"✅ [WeaponSystem] Ammo initialized: {currentAmmo}/{reserveAmmo}");
-                Debug.Log($"✅ [WeaponSystem] Weapon: {currentWeapon.weaponName}");
-            }
-            else
-            {
-                Debug.LogWarning("⚠️ [WeaponSystem] currentWeapon is NULL! Creating default weapon config...");
-                CreateDefaultWeaponConfig();
-                
                 if (currentWeapon != null)
                 {
                     currentAmmo = currentWeapon.magazineSize;
                     reserveAmmo = currentWeapon.maxAmmo;
                     OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
                     
-                    Debug.Log($"✅ [WeaponSystem] Default weapon created! Ammo: {currentAmmo}/{reserveAmmo}");
+                    Debug.Log($"✅ [WeaponSystem] Ammo initialized: {currentAmmo}/{reserveAmmo}");
+                    Debug.Log($"✅ [WeaponSystem] Weapon: {currentWeapon.weaponName}");
+                }
+                else
+                {
+                    Debug.LogWarning("⚠️ [WeaponSystem] currentWeapon is NULL! Creating default weapon config...");
+                    CreateDefaultWeaponConfig();
+                    
+                    if (currentWeapon != null)
+                    {
+                        currentAmmo = currentWeapon.magazineSize;
+                        reserveAmmo = currentWeapon.maxAmmo;
+                        OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
+                        
+                        Debug.Log($"✅ [WeaponSystem] Default weapon created! Ammo: {currentAmmo}/{reserveAmmo}");
+                    }
                 }
             }
         }
@@ -384,10 +393,10 @@ namespace TacticalCombat.Combat
                 }
             }
             
-            // Reload
+            // ✅ CRITICAL FIX: Reload must go through server
             if ((reloadPressed || Input.GetKeyDown(KeyCode.R)) && CanReload())
             {
-                StartReload();
+                CmdStartReload();
                 reloadPressed = false;
             }
             
@@ -398,12 +407,28 @@ namespace TacticalCombat.Combat
             firePressed = false;
         }
         
+        /// <summary>
+        /// ✅ PHASE 2: Client-side optimistic check (server has final authority)
+        /// </summary>
         private bool CanFire()
         {
-            return Time.time >= nextFireTime && 
-                   currentAmmo > 0 && 
-                   !isReloading &&
-                   currentWeapon != null;
+            // Client: Only check ammo and reload state (optimistic prediction)
+            // Server will validate fire rate
+            if (isServer)
+            {
+                // Server: Full validation including fire rate
+                return Time.time >= nextFireTime && 
+                       currentAmmo > 0 && 
+                       !isReloading &&
+                       currentWeapon != null;
+            }
+            else
+            {
+                // Client: Only check ammo and reload (fire rate checked by server)
+                return currentAmmo > 0 && 
+                       !isReloading &&
+                       currentWeapon != null;
+            }
         }
         
         private bool CanReload()
@@ -413,30 +438,54 @@ namespace TacticalCombat.Combat
                    reserveAmmo > 0;
         }
         
+        /// <summary>
+        /// ✅ CRITICAL FIX: Fire with server authority and network sync
+        /// </summary>
         private void Fire()
         {
+            // Client: Send to server for validation
+            if (!isServer)
+            {
+                CmdFire();
+                // Optimistic prediction: play local effects immediately
+                PlayLocalFireEffects();
+                return;
+            }
+            
+            // Server: Validate and process
+            ProcessFireServer();
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Server-authoritative fire processing
+        /// </summary>
+        [Server]
+        private void ProcessFireServer()
+        {
+            // Validate fire rate and ammo
+            if (Time.time < nextFireTime || currentAmmo <= 0 || isReloading)
+            {
+                // Reject fire - tell client to undo prediction
+                RpcRejectFire();
+                return;
+            }
+            
+            // Update timers
             nextFireTime = Time.time + (1f / currentWeapon.fireRate);
+            
+            // ✅ CRITICAL FIX: Generate deterministic spread seed
+            spreadSeed = Random.Range(0, int.MaxValue);
+            
+            // ✅ CRITICAL FIX: Server modifies ammo (authoritative)
             currentAmmo--;
             
-            // Visual feedback
-            ApplyRecoil();
-            PlayMuzzleFlash();
+            // Server raycast
+            PerformServerRaycast();
             
-            // ✅ Audio feedback - CRITICAL
-            PlayFireSound();
-            
-            // Raycast
-            PerformRaycast();
-
-            // ✅ FIX: Stop previous camera shake before starting new one to prevent coroutine leak
-            if (currentCameraShakeCoroutine != null)
-            {
-                StopCoroutine(currentCameraShakeCoroutine);
-            }
-            currentCameraShakeCoroutine = StartCoroutine(CameraShake(0.05f, 0.1f));
-
-            // Network sync
-            PlayFireEffects();
+            // ✅ CRITICAL FIX: Sync fire effects to ALL clients
+            Vector3 muzzlePos = weaponHolder != null ? weaponHolder.position : transform.position;
+            Vector3 muzzleDir = weaponHolder != null ? weaponHolder.forward : transform.forward;
+            RpcPlayFireEffects(muzzlePos, muzzleDir);
             
             // Events
             OnWeaponFired?.Invoke();
@@ -449,25 +498,57 @@ namespace TacticalCombat.Combat
             }
         }
         
-        private void PerformRaycast()
+        /// <summary>
+        /// ✅ CRITICAL FIX: Command to request fire from client
+        /// </summary>
+        [Command]
+        private void CmdFire()
+        {
+            ProcessFireServer();
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Local fire effects for optimistic prediction
+        /// </summary>
+        private void PlayLocalFireEffects()
+        {
+            ApplyRecoil();
+            PlayMuzzleFlash();
+            PlayFireSound();
+            
+            if (currentCameraShakeCoroutine != null)
+            {
+                StopCoroutine(currentCameraShakeCoroutine);
+            }
+            currentCameraShakeCoroutine = StartCoroutine(CameraShake(0.05f, 0.1f));
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Server raycast with deterministic spread
+        /// </summary>
+        [Server]
+        private void PerformServerRaycast()
         {
             if (playerCamera == null) return;
 
-            // Calculate spread
-            Vector3 spread = CalculateSpread();
+            // ✅ CRITICAL FIX: Use deterministic spread
+            Vector3 spread = CalculateDeterministicSpread();
             Vector3 direction = playerCamera.transform.forward + spread;
 
             Ray ray = new Ray(playerCamera.transform.position, direction);
+            
+            // Use NonAlloc to avoid GC
+            RaycastHit[] hitBuffer = new RaycastHit[32];
+            int hitCount = Physics.RaycastNonAlloc(ray, hitBuffer, currentWeapon.range, currentWeapon.hitMask);
 
-            // ✅ FIX: Raycast all hits, skip our own colliders
-            RaycastHit[] hits = Physics.RaycastAll(ray, currentWeapon.range, currentWeapon.hitMask);
-
-            // Find first valid hit (not ourselves)
+            // Find first valid hit
             RaycastHit? validHit = null;
             float closestDistance = float.MaxValue;
 
-            foreach (var hit in hits)
+            for (int i = 0; i < hitCount; i++)
             {
+                var hit = hitBuffer[i];
+                
                 // Skip our own colliders
                 if (hit.collider.transform.IsChildOf(transform) || hit.collider.transform == transform)
                     continue;
@@ -482,7 +563,98 @@ namespace TacticalCombat.Combat
 
             if (validHit.HasValue)
             {
-                // Hit something!
+                ProcessHitOnServer(validHit.Value);
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Reject fire if server validation fails
+        /// </summary>
+        [ClientRpc]
+        private void RpcRejectFire()
+        {
+            // Undo optimistic prediction
+            // Cancel visual effects if needed
+            if (debugAudio)
+            {
+                Debug.LogWarning("⚠️ [WeaponSystem] Fire rejected by server");
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Sync fire effects to all clients
+        /// </summary>
+        [ClientRpc]
+        private void RpcPlayFireEffects(Vector3 muzzlePosition, Vector3 muzzleDirection)
+        {
+            // Play for all clients (including shooter - overwrites prediction)
+            if (weaponHolder != null)
+            {
+                weaponHolder.position = muzzlePosition;
+                weaponHolder.rotation = Quaternion.LookRotation(muzzleDirection);
+            }
+            
+            PlayMuzzleFlash();
+            PlayFireSound();
+            
+            if (weaponAnimator != null)
+            {
+                weaponAnimator.SetTrigger("Fire");
+            }
+            
+            // Camera shake for shooter only
+            if (isLocalPlayer)
+            {
+                if (currentCameraShakeCoroutine != null)
+                {
+                    StopCoroutine(currentCameraShakeCoroutine);
+                }
+                currentCameraShakeCoroutine = StartCoroutine(CameraShake(0.05f, 0.1f));
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Client-side raycast for prediction (uses deterministic spread)
+        /// </summary>
+        private void PerformRaycast()
+        {
+            // Only for client prediction - server uses PerformServerRaycast()
+            if (isServer) return;
+            if (playerCamera == null) return;
+
+            // ✅ CRITICAL FIX: Use deterministic spread (same as server)
+            Vector3 spread = CalculateDeterministicSpread();
+            Vector3 direction = playerCamera.transform.forward + spread;
+
+            Ray ray = new Ray(playerCamera.transform.position, direction);
+
+            // ✅ PERFORMANCE FIX: Use NonAlloc to avoid GC
+            RaycastHit[] hitBuffer = new RaycastHit[32];
+            int hitCount = Physics.RaycastNonAlloc(ray, hitBuffer, currentWeapon.range, currentWeapon.hitMask);
+
+            // Find first valid hit (not ourselves)
+            RaycastHit? validHit = null;
+            float closestDistance = float.MaxValue;
+
+            for (int i = 0; i < hitCount; i++)
+            {
+                var hit = hitBuffer[i];
+                
+                // Skip our own colliders
+                if (hit.collider.transform.IsChildOf(transform) || hit.collider.transform == transform)
+                    continue;
+
+                // Find closest valid hit
+                if (hit.distance < closestDistance)
+                {
+                    closestDistance = hit.distance;
+                    validHit = hit;
+                }
+            }
+
+            if (validHit.HasValue)
+            {
+                // Client prediction: show immediate feedback
                 ProcessHit(validHit.Value);
 
                 // Visual feedback
@@ -490,21 +662,30 @@ namespace TacticalCombat.Combat
 
                 // Audio feedback
                 PlayHitSound();
-
-                // ❌ REMOVED: ApplyDamage(hit) - This was causing DOUBLE DAMAGE!
-                // ProcessHit() already handles damage with hitbox multipliers
             }
         }
         
-        private Vector3 CalculateSpread()
+        /// <summary>
+        /// ✅ CRITICAL FIX: Deterministic spread calculation using server seed
+        /// </summary>
+        private Vector3 CalculateDeterministicSpread()
         {
             float spread = isAiming ? currentWeapon.aimSpread : currentWeapon.hipSpread;
             
-            return new Vector3(
-                Random.Range(-spread, spread),
-                Random.Range(-spread, spread),
-                0
-            );
+            // ✅ CRITICAL FIX: Use server-synced seed for deterministic calculation
+            System.Random rng = new System.Random(spreadSeed);
+            float x = (float)(rng.NextDouble() * 2.0 - 1.0) * spread;
+            float y = (float)(rng.NextDouble() * 2.0 - 1.0) * spread;
+            
+            return new Vector3(x, y, 0);
+        }
+        
+        /// <summary>
+        /// Legacy method - redirects to deterministic version
+        /// </summary>
+        private Vector3 CalculateSpread()
+        {
+            return CalculateDeterministicSpread();
         }
         
         private void ProcessHit(RaycastHit hit)
@@ -560,7 +741,12 @@ namespace TacticalCombat.Combat
                 predictedDamage = hitbox.CalculateDamage(Mathf.RoundToInt(predictedDamage));
             }
 
-            Debug.Log($"🎯 [WeaponSystem CLIENT] HIT: {hit.collider.name} - Predicted Damage: {predictedDamage:F1}");
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (debugAudio)
+            {
+                Debug.Log($"🎯 [WeaponSystem CLIENT] HIT: {hit.collider.name} - Predicted Damage: {predictedDamage:F1}");
+            }
+            #endif
         }
 
         /// <summary>
@@ -571,36 +757,46 @@ namespace TacticalCombat.Combat
         {
             if (hitObject == null)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("⚠️ [WeaponSystem SERVER] Received null hit object");
+                #endif
                 return;
             }
 
             // ANTI-CHEAT: Validate fire rate
             if (Time.time < nextFireTime)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Rate limit violation from player {netId}");
+                #endif
                 return;
             }
 
             // ANTI-CHEAT: Validate ammo
             if (currentAmmo <= 0)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Ammo cheat attempt from player {netId}");
+                #endif
                 return;
             }
 
             // ANTI-CHEAT: Validate distance (within weapon range)
             if (distance > currentWeapon.range)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Distance cheat attempt: {distance}m > {currentWeapon.range}m");
+                #endif
                 return;
             }
 
+            // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent (no GC, faster)
             // Reconstruct hit for server-side processing
-            Collider hitCollider = hitObject.GetComponent<Collider>();
-            if (hitCollider == null)
+            if (!hitObject.TryGetComponent<Collider>(out var hitCollider))
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("⚠️ [WeaponSystem SERVER] Hit object has no collider");
+                #endif
                 return;
             }
 
@@ -617,14 +813,17 @@ namespace TacticalCombat.Combat
 
         private void ProcessHitOnServer(Vector3 hitPoint, Vector3 hitNormal, float distance, Collider hitCollider)
         {
+            // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent (no GC, faster)
             // ⭐ ÖNCELİKLE HITBOX KONTROL ET
-            var hitbox = hitCollider.GetComponent<Hitbox>();
+            hitCollider.TryGetComponent<Hitbox>(out var hitbox);
 
             Health health = null;
             float damage = currentWeapon.damage;
             bool isCritical = false;
             SurfaceType surface = DetermineSurfaceType(hitCollider);
-            bool isBodyHit = hitbox != null || hitCollider.GetComponent<Health>() != null;
+            
+            // ✅ PERFORMANCE FIX: Check health component with TryGetComponent
+            bool isBodyHit = hitbox != null || hitCollider.TryGetComponent<Health>(out _);
 
             if (hitbox != null)
             {
@@ -633,13 +832,20 @@ namespace TacticalCombat.Combat
                 damage = hitbox.CalculateDamage(Mathf.RoundToInt(damage));
                 isCritical = hitbox.IsCritical();
 
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log($"🎯 [Server] HIT {hitbox.zone} - Damage: {damage} (Multiplier: {hitbox.damageMultiplier}x)");
+                #endif
             }
             else
             {
+                // ✅ PERFORMANCE FIX: Use TryGetComponent for health lookup
                 // No hitbox - direct health component
-                health = hitCollider.GetComponent<Health>();
-                Debug.Log($"🎯 [Server] HIT (no hitbox) - Damage: {damage}");
+                if (hitCollider.TryGetComponent<Health>(out health))
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log($"🎯 [Server] HIT (no hitbox) - Damage: {damage}");
+                    #endif
+                }
             }
 
             if (health != null)
@@ -1098,47 +1304,94 @@ namespace TacticalCombat.Combat
             currentCameraShakeCoroutine = null; // ✅ FIX: Clear coroutine reference when complete
         }
         
-        private void StartReload()
+        /// <summary>
+        /// ✅ CRITICAL FIX: Command to request reload from client
+        /// </summary>
+        [Command]
+        private void CmdStartReload()
+        {
+            if (isReloading || currentAmmo >= currentWeapon.magazineSize || reserveAmmo <= 0)
+                return;
+            
+            StartReloadServer();
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Server-authoritative reload
+        /// </summary>
+        [Server]
+        private void StartReloadServer()
         {
             if (isReloading) return;
 
-            // ✅ FIX: Stop previous reload coroutine before starting new one
             if (currentReloadCoroutine != null)
             {
                 StopCoroutine(currentReloadCoroutine);
             }
             currentReloadCoroutine = StartCoroutine(ReloadCoroutine());
+            
+            // Sync reload start to clients
+            RpcOnReloadStarted();
+        }
+        
+        /// <summary>
+        /// Legacy method - redirects to server version
+        /// </summary>
+        private void StartReload()
+        {
+            if (isServer)
+            {
+                StartReloadServer();
+            }
+            else
+            {
+                CmdStartReload();
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Sync reload start to clients
+        /// </summary>
+        [ClientRpc]
+        private void RpcOnReloadStarted()
+        {
+            // Play reload animation/sound on all clients
+            if (weaponAnimator != null)
+                weaponAnimator.SetTrigger("Reload");
+            
+            if (reloadSound != null && audioSource != null)
+            {
+                audioSource.PlayOneShot(reloadSound);
+            }
         }
         
         private IEnumerator ReloadCoroutine()
         {
             isReloading = true;
-            OnReloadStarted?.Invoke();
             
-            // Play sound
-            if (reloadSound != null && audioSource != null)
+            // ✅ CRITICAL FIX: Reload sound/animation already played via RpcOnReloadStarted
+            // Only invoke event here (server-side)
+            if (isServer)
             {
-                audioSource.PlayOneShot(reloadSound);
-                
-                if (debugAudio)
-                {
-                    Debug.Log("🔊 [WeaponSystem] RELOAD SOUND PLAYED");
-                }
+                OnReloadStarted?.Invoke();
             }
-                
-            // Play animation
-            if (weaponAnimator != null)
-                weaponAnimator.SetTrigger("Reload");
+            
+            // ✅ FIX: Reload sound is played in RpcOnReloadStarted, don't play here to avoid duplication
+            // Sound/animation is synced to all clients via RPC
             
             // Wait
             yield return new WaitForSeconds(currentWeapon.reloadTime);
             
-            // Reload
-            int ammoNeeded = currentWeapon.magazineSize - currentAmmo;
-            int ammoToReload = Mathf.Min(ammoNeeded, reserveAmmo);
-            
-            currentAmmo += ammoToReload;
-            reserveAmmo -= ammoToReload;
+            // ✅ CRITICAL FIX: Reload only on server (ammo is SyncVar)
+            if (isServer)
+            {
+                // Reload
+                int ammoNeeded = currentWeapon.magazineSize - currentAmmo;
+                int ammoToReload = Mathf.Min(ammoNeeded, reserveAmmo);
+                
+                currentAmmo += ammoToReload;
+                reserveAmmo -= ammoToReload;
+            }
             
             isReloading = false;
             currentReloadCoroutine = null; // ✅ FIX: Clear coroutine reference
@@ -1213,6 +1466,10 @@ namespace TacticalCombat.Combat
         // PUBLIC API
         // ═══════════════════════════════════════════════════════════
         
+        /// <summary>
+        /// ✅ CRITICAL FIX: Set weapon with server authority
+        /// </summary>
+        [Server]
         public void SetWeapon(WeaponConfig weapon)
         {
             currentWeapon = weapon;

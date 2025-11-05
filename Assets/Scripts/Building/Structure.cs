@@ -74,11 +74,13 @@ namespace TacticalCombat.Building
             Material mat = team == Team.TeamA ? teamAMaterial : teamBMaterial;
             if (mat != null)
             {
+                // ✅ CRITICAL FIX: Use sharedMaterial to prevent memory leak
+                // rend.material creates new instance every time!
                 foreach (var rend in renderers)
                 {
                     if (rend != null)
                     {
-                        rend.material = mat;
+                        rend.sharedMaterial = mat;  // No instance created - prevents leak
                     }
                 }
             }

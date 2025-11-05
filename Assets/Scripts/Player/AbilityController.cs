@@ -22,6 +22,10 @@ namespace TacticalCombat.Player
 
         private PlayerController playerController;
         private InputAction abilityAction;
+        
+        // ✅ PERFORMANCE FIX: Cache frequently accessed components
+        private Combat.Health cachedHealth;
+        private Combat.WeaponController cachedWeaponController;
 
         public System.Action<float> OnCooldownChanged;
         public System.Action<bool> OnAbilityActiveChanged;
@@ -29,6 +33,10 @@ namespace TacticalCombat.Player
         private void Awake()
         {
             playerController = GetComponent<PlayerController>();
+            
+            // ✅ PERFORMANCE FIX: Cache components in Awake (called once)
+            cachedHealth = GetComponent<Combat.Health>();
+            cachedWeaponController = GetComponent<Combat.WeaponController>();
         }
 
         public override void OnStartLocalPlayer()
@@ -107,9 +115,13 @@ namespace TacticalCombat.Player
             if (currentPhase != Phase.Combat && currentPhase != Phase.Build)
                 return;
 
+            // ✅ PERFORMANCE FIX: Use cached health component
             // Check if player is alive
-            var health = GetComponent<Combat.Health>();
-            if (health != null && health.IsDead())
+            if (cachedHealth == null)
+            {
+                cachedHealth = GetComponent<Combat.Health>();
+            }
+            if (cachedHealth != null && cachedHealth.IsDead())
                 return;
 
             // Activate ability based on role
@@ -181,11 +193,15 @@ namespace TacticalCombat.Player
             // Set a flag that the next arrow will reveal
             Debug.Log("Ranger: Scout Arrow ready");
             
-            var weapons = GetComponent<Combat.WeaponController>();
-            if (weapons != null)
+            // ✅ PERFORMANCE FIX: Use cached weapon controller
+            if (cachedWeaponController == null)
+            {
+                cachedWeaponController = GetComponent<Combat.WeaponController>();
+            }
+            if (cachedWeaponController != null)
             {
                 // Mark next shot as scout arrow
-                weapons.EnableScoutArrow();
+                cachedWeaponController.EnableScoutArrow();
             }
         }
 

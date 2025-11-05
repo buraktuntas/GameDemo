@@ -964,9 +964,12 @@ namespace TacticalCombat.Building
             }
         }
         
+        #if UNITY_EDITOR
+        // ✅ FIX: Gizmos sadece Editor'da görünsün, oyun içinde görünmesin
         private void OnDrawGizmos()
         {
-            if (!isBuildModeActive || ghostPreview == null) return;
+            // Sadece Scene View'da görünsün, Game View'da değil
+            if (!UnityEditor.EditorApplication.isPlaying || !isBuildModeActive || ghostPreview == null) return;
             
             Gizmos.color = canPlace ? Color.green : Color.red;
             Gizmos.matrix = Matrix4x4.TRS(placementPosition, placementRotation, Vector3.one);
@@ -978,5 +981,6 @@ namespace TacticalCombat.Building
                 Gizmos.DrawWireSphere(placementPosition, maxSupportDistance);
             }
         }
+        #endif
     }
 }

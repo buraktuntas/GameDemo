@@ -329,9 +329,9 @@ namespace TacticalCombat.Player
                         }
                     }
                     
+                    // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
                     // Ensure local player's AudioListener is enabled
-                    AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
-                    if (audioListener == null)
+                    if (!playerCamera.TryGetComponent<AudioListener>(out var audioListener))
                     {
                         audioListener = playerCamera.gameObject.AddComponent<AudioListener>();
                     }
@@ -344,9 +344,9 @@ namespace TacticalCombat.Player
                 }
                 else
                 {
+                    // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
                     // Non-local player - destroy AudioListener
-                    AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
-                    if (audioListener != null)
+                    if (playerCamera.TryGetComponent<AudioListener>(out var audioListener))
                     {
                         Destroy(audioListener);
                         if (showDebugInfo)
@@ -430,6 +430,14 @@ namespace TacticalCombat.Player
             lookDelta = Vector2.zero;
         }
         
+        // ✅ PHASE 2: Movement RPC rate limiting
+        private float lastMovementRpcTime = 0f;
+        private const float MOVEMENT_RPC_INTERVAL = 0.05f; // 20 RPC/saniye (50ms throttle)
+        private Vector3 lastSentPosition;
+        private Quaternion lastSentRotation;
+        private const float POSITION_THRESHOLD = 0.1f; // 10cm değişiklik olursa gönder
+        private const float ROTATION_THRESHOLD = 5f; // 5 derece değişiklik olursa gönder
+        
         private void FixedUpdate()
         {
             if (!isLocalPlayer) return;
@@ -446,8 +454,121 @@ namespace TacticalCombat.Player
                 horizontalMove.z
             );
             
-            // Uygula
+            // Apply locally (prediction)
             characterController.Move(moveDirection * Time.fixedDeltaTime);
+            
+            // ✅ PHASE 2: Rate-limited RPC to server
+            Vector3 predictedPosition = transform.position;
+            float timeSinceLastRpc = Time.fixedTime - lastMovementRpcTime;
+            bool positionChanged = Vector3.Distance(predictedPosition, lastSentPosition) > POSITION_THRESHOLD;
+            bool rotationChanged = Quaternion.Angle(transform.rotation, lastSentRotation) > ROTATION_THRESHOLD;
+            
+            // Send RPC if: enough time passed OR significant position/rotation change
+            if (timeSinceLastRpc >= MOVEMENT_RPC_INTERVAL || positionChanged || rotationChanged)
+            {
+                CmdMove(predictedPosition, transform.rotation, input);
+                lastMovementRpcTime = Time.fixedTime;
+                lastSentPosition = predictedPosition;
+                lastSentRotation = transform.rotation;
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Server-validated movement (anti-speed hack, anti-teleport)
+        /// </summary>
+        [Command]
+        private void CmdMove(Vector3 predictedPosition, Quaternion predictedRotation, Vector3 input)
+        {
+            // Validate position (anti-teleport)
+            float distance = Vector3.Distance(transform.position, predictedPosition);
+            float maxAllowedMove = runSpeed * Time.fixedDeltaTime * 2.5f; // Allow 2.5x for lag compensation
+            
+            if (distance > maxAllowedMove)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"🚨 [FPSController SERVER] Teleport detected: {distance}m > {maxAllowedMove}m from player {netId}");
+                #endif
+                // Reject - don't move, client will be corrected by RpcSetPosition
+                return;
+            }
+            
+            // Validate movement speed
+            Vector3 serverMove = CalculateServerMovement(input);
+            float serverSpeed = serverMove.magnitude;
+            
+            // Calculate predicted speed from distance moved
+            float predictedSpeed = distance / Time.fixedDeltaTime;
+            
+            // Allow 15% tolerance for lag/network differences
+            if (predictedSpeed > runSpeed * 1.15f)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"🚨 [FPSController SERVER] Speed hack detected: {predictedSpeed}m/s > {runSpeed * 1.15f}m/s from player {netId}");
+                #endif
+                // Clamp to server-calculated movement
+                serverMove = serverMove.normalized * Mathf.Min(predictedSpeed, runSpeed * 1.15f);
+            }
+            
+            // Apply server movement
+            characterController.Move(serverMove * Time.fixedDeltaTime);
+            
+            // Sync corrected position to clients
+            RpcSetPosition(transform.position, transform.rotation);
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Server-side movement calculation (authoritative)
+        /// </summary>
+        [Server]
+        private Vector3 CalculateServerMovement(Vector3 input)
+        {
+            if (input.magnitude < 0.1f) return Vector3.zero;
+            
+            Vector3 forward = transform.forward;
+            Vector3 right = transform.right;
+            forward.y = 0;
+            right.y = 0;
+            forward.Normalize();
+            right.Normalize();
+            
+            // Server calculates speed (can't be hacked)
+            bool wantsToSprint = input.magnitude > 0.8f; // Assume sprint if input is strong
+            float currentSpeed = wantsToSprint ? runSpeed : walkSpeed;
+            
+            Vector3 horizontalMove = (forward * input.z) + (right * input.x);
+            return horizontalMove * currentSpeed;
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Sync corrected position to clients
+        /// </summary>
+        [ClientRpc]
+        private void RpcSetPosition(Vector3 serverPosition, Quaternion serverRotation)
+        {
+            // Only apply correction to non-local players
+            // Local player uses prediction, server corrections are rare
+            if (!isLocalPlayer)
+            {
+                // Smooth interpolation for other players
+                transform.position = Vector3.Lerp(transform.position, serverPosition, Time.fixedDeltaTime * 10f);
+                transform.rotation = Quaternion.Lerp(transform.rotation, serverRotation, Time.fixedDeltaTime * 10f);
+            }
+            else
+            {
+                // Local player: Only correct if position differs significantly (anti-teleport)
+                float correctionDistance = Vector3.Distance(transform.position, serverPosition);
+                if (correctionDistance > 0.5f)
+                {
+                    // Server corrected us - apply correction
+                    transform.position = Vector3.Lerp(transform.position, serverPosition, 0.5f);
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    if (showDebugInfo)
+                    {
+                        Debug.Log($"🔧 [FPSController] Position corrected by server: {correctionDistance}m");
+                    }
+                    #endif
+                }
+            }
         }
         
         // ⭐ YENİ MOVEMENT SİSTEMİ - FixedUpdate için optimize edilmiş

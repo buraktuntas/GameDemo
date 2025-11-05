@@ -48,9 +48,9 @@ namespace TacticalCombat.Traps
         {
             if (!isServer || !isArmed || isTriggered) return;
 
+            // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent (faster, no GC)
             // Check if enemy player
-            var player = other.GetComponent<Player.PlayerController>();
-            if (player != null && player.team != ownerTeam)
+            if (other.TryGetComponent<Player.PlayerController>(out var player) && player.team != ownerTeam)
             {
                 Trigger(player.gameObject);
             }

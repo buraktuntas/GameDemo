@@ -14,8 +14,8 @@ namespace TacticalCombat.Core
         [SerializeField] private Team team = Team.TeamA;
         [SerializeField] private int maxHealth = 1000;
 
-        [SyncVar(hook = nameof(OnHealthChanged))]
-        private int currentHealth;
+        // ✅ PHASE 2: Removed SyncVar hook to prevent double-fire (use manual RPC like Health.cs)
+        [SyncVar] private int currentHealth;
 
         [SyncVar]
         private bool isDestroyed = false;
@@ -49,6 +49,8 @@ namespace TacticalCombat.Core
         public override void OnStartClient()
         {
             base.OnStartClient();
+            // ✅ PHASE 2: Sync initial health from server
+            RpcOnHealthChanged(currentHealth, maxHealth);
             UpdateVisuals();
         }
 
@@ -56,14 +58,15 @@ namespace TacticalCombat.Core
         {
             if (meshRenderer == null) return;
 
+            // ✅ PHASE 2: Use sharedMaterial to prevent memory leak
             // Set team color
             if (team == Team.TeamA && teamAMaterial != null)
             {
-                meshRenderer.material = teamAMaterial;
+                meshRenderer.sharedMaterial = teamAMaterial;
             }
             else if (team == Team.TeamB && teamBMaterial != null)
             {
-                meshRenderer.material = teamBMaterial;
+                meshRenderer.sharedMaterial = teamBMaterial;
             }
 
             // Show damage state
@@ -92,6 +95,9 @@ namespace TacticalCombat.Core
 
             Debug.Log($"💥 [Server] CoreStructure ({team}) took {damageInfo.Amount} damage. Health: {currentHealth}/{maxHealth}");
 
+            // ✅ PHASE 2: Manual RPC instead of SyncVar hook (prevents double-fire)
+            RpcOnHealthChanged(currentHealth, maxHealth);
+            
             // Notify clients
             RpcOnDamaged();
 
@@ -157,10 +163,23 @@ namespace TacticalCombat.Core
             }
         }
 
-        private void OnHealthChanged(int oldHealth, int newHealth)
+        /// <summary>
+        /// ✅ PHASE 2: Manual RPC instead of SyncVar hook (prevents double-fire)
+        /// </summary>
+        [ClientRpc]
+        private void RpcOnHealthChanged(int newHealth, int maxHealth)
         {
             OnHealthChangedEvent?.Invoke(newHealth, maxHealth);
             UpdateVisuals();
+        }
+        
+        /// <summary>
+        /// Legacy method - kept for compatibility but not used by SyncVar hook anymore
+        /// </summary>
+        private void OnHealthChanged(int oldHealth, int newHealth)
+        {
+            // This is no longer called by SyncVar hook
+            // Health updates come via RpcOnHealthChanged
         }
 
         // IDamageable interface
