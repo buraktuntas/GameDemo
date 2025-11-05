@@ -83,13 +83,24 @@ namespace TacticalCombat.Traps
 
             Vector3 direction = (target.transform.position - transform.position).normalized;
             
-            // Simple hitscan
+            // ✅ MEDIUM PRIORITY FIX: Validate raycast hit is the intended target
             if (Physics.Raycast(transform.position, direction, out RaycastHit hit, detectionRange))
             {
-                // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent (faster, no GC)
-                if (hit.collider.TryGetComponent<Combat.Health>(out var health))
+                // ✅ Validate hit is the target
+                if (hit.collider.gameObject == target)
                 {
-                    health.TakeDamage(dartDamage);
+                    // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent (faster, no GC)
+                    if (hit.collider.TryGetComponent<Combat.Health>(out var health))
+                    {
+                        health.TakeDamage(dartDamage);
+                    }
+                }
+                else
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogWarning($"DartTurret: Hit {hit.collider.name} instead of target {target.name}");
+                    #endif
+                    // Hit obstacle, don't damage
                 }
             }
 
@@ -99,7 +110,9 @@ namespace TacticalCombat.Traps
         [ClientRpc]
         private void RpcPlayFireEffect(Vector3 direction)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"Dart turret fired in direction {direction}");
+            #endif
         }
 
         [Server]
@@ -108,11 +121,16 @@ namespace TacticalCombat.Traps
             // Dart turret doesn't use trigger - it scans automatically
         }
 
+        #if UNITY_EDITOR
+        // ✅ HIGH PRIORITY FIX: Gizmos only in editor, conditional compilation
         private void OnDrawGizmosSelected()
         {
+            if (!UnityEditor.EditorApplication.isPlaying) return;
+            
             Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(transform.position, detectionRange);
         }
+        #endif
     }
 }
 

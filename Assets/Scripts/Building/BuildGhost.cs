@@ -11,6 +11,7 @@ namespace TacticalCombat.Building
         [SerializeField] private Material invalidMaterial;
 
         private bool isValid = false;
+        private bool lastValidState = false; // Track state to avoid unnecessary updates
 
         public void SetValid(bool valid)
         {
@@ -22,6 +23,10 @@ namespace TacticalCombat.Building
         {
             if (renderers == null || renderers.Length == 0) return;
 
+            // ✅ CRITICAL FIX: Only update if state changed (prevent unnecessary material assignments)
+            if (lastValidState == isValid) return;
+            lastValidState = isValid;
+
             Material mat = isValid ? validMaterial : invalidMaterial;
             if (mat != null)
             {
@@ -29,7 +34,9 @@ namespace TacticalCombat.Building
                 {
                     if (rend != null)
                     {
-                        rend.material = mat;
+                        // ✅ CRITICAL FIX: Use sharedMaterial to prevent memory leak
+                        // rend.material creates new instance every time!
+                        rend.sharedMaterial = mat;
                     }
                 }
             }

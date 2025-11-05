@@ -119,9 +119,13 @@ namespace TacticalCombat.Building
             inputManager = GetComponent<TacticalCombat.Player.InputManager>();
             if (inputManager == null)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("⚠️ [SimpleBuildMode] InputManager not found! Creating one...");
+                #endif
                 inputManager = gameObject.AddComponent<TacticalCombat.Player.InputManager>();
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log("✅ [SimpleBuildMode] InputManager created and assigned");
+                #endif
             }
             
             // ✅ PERFORMANCE FIX: Get camera from FPSController (NEVER use Camera.main)
@@ -155,10 +159,17 @@ namespace TacticalCombat.Building
 
             CreateDefaultMaterials();
             InitializeAvailableStructures();
+            
+            // ✅ FIX: Send prefabs to BuildValidator on server
+            if (isServer && BuildValidator.Instance != null)
+            {
+                BuildValidator.Instance.SetPrefabs(wallPrefab, floorPrefab, stairsPrefab);
+            }
         }
         
         private void InitializeAvailableStructures()
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"🏗️ [SimpleBuildMode] Initializing structures...");
             Debug.Log($"  Wall: {(wallPrefab != null ? wallPrefab.name : "NULL")}");
             Debug.Log($"  Floor: {(floorPrefab != null ? floorPrefab.name : "NULL")}");
@@ -166,6 +177,7 @@ namespace TacticalCombat.Building
             Debug.Log($"  Door: {(doorPrefab != null ? doorPrefab.name : "NULL")}");
             Debug.Log($"  Window: {(windowPrefab != null ? windowPrefab.name : "NULL")}");
             Debug.Log($"  Stairs: {(stairsPrefab != null ? stairsPrefab.name : "NULL")}");
+            #endif
             
             availableStructures = new GameObject[]
             {
@@ -192,11 +204,15 @@ namespace TacticalCombat.Building
             
             if (availableStructures.Length == 0)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("⚠️ [SimpleBuildMode] No structure prefabs assigned!");
+                #endif
             }
             else
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log($"✅ [SimpleBuildMode] {availableStructures.Length} structure types loaded");
+                #endif
             }
         }
         
@@ -252,7 +268,9 @@ namespace TacticalCombat.Building
                 invalidPlacementMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
             }
 
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("✅ [SimpleBuildMode] URP materials created successfully");
+            #endif
         }
         
         private void Update()
@@ -291,7 +309,9 @@ namespace TacticalCombat.Building
             {
                 isTogglingBuildMode = true;
                 lastToggleTime = Time.time;
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log($"🏗️ [SimpleBuildMode] B key pressed - Current state: {isBuildModeActive}");
+                #endif
 
                 try
                 {
@@ -339,7 +359,9 @@ namespace TacticalCombat.Building
         {
             if (availableStructures == null || availableStructures.Length == 0)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("⚠️ [SimpleBuildMode] Cannot cycle - no structures available");
+                #endif
                 return;
             }
             
@@ -356,8 +378,10 @@ namespace TacticalCombat.Building
                 UpdateCostDisplay();
             }
 
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             string structureName = availableStructures[currentStructureIndex].name;
             Debug.Log($"🏗️ [SimpleBuildMode] Structure selected: {structureName} - Cost: {GetCurrentStructureCost()}₺");
+            #endif
         }
         
         private void HandleRotation()
@@ -388,7 +412,9 @@ namespace TacticalCombat.Building
                 }
                 else
                 {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     Debug.Log($"⏱️ [SimpleBuildMode] Placement on cooldown ({PLACEMENT_COOLDOWN - timeSinceLastPlacement:F2}s remaining)");
+                    #endif
                 }
             }
         }
@@ -398,11 +424,15 @@ namespace TacticalCombat.Building
         /// </summary>
         private void EnterBuildMode()
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"🏗️ [SimpleBuildMode] Entering build mode...");
+            #endif
             
             if (availableStructures == null || availableStructures.Length == 0)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("⚠️ [SimpleBuildMode] No structures available!");
+                #endif
                 return;
             }
             
@@ -420,19 +450,25 @@ namespace TacticalCombat.Building
                 Cursor.visible = false; // ← Cursor gizli
                 inputManager.BlockCameraInput = false;  // ← Kamera çalışsın
                 inputManager.BlockMovementInput = false; // ← Hareket çalışsın
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log("🏗️ [SimpleBuildMode] Build mode: Valheim style (Movement + Camera + Hidden Cursor)");
+                #endif
             }
             
             // ✅ FIX: Silahı devre dışı bırak
             if (weaponSystem != null)
             {
                 weaponSystem.DisableWeapon();
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log("🔫 [SimpleBuildMode] Weapon disabled");
+                #endif
             }
             
             CreateGhostPreview();
             
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("🏗️ [SimpleBuildMode] BUILD MODE ACTIVE | Controls: LMB=Place | ESC=Exit | R=Rotate | Tab=Switch");
+            #endif
         }
         
         /// <summary>
@@ -440,7 +476,9 @@ namespace TacticalCombat.Building
         /// </summary>
         private void ExitBuildMode()
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("❌ [SimpleBuildMode] Exiting build mode...");
+            #endif
             
             isBuildModeActive = false;
             
@@ -456,12 +494,16 @@ namespace TacticalCombat.Building
             if (weaponSystem != null)
             {
                 weaponSystem.EnableWeapon();
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log("✅ [SimpleBuildMode] Weapon enabled");
+                #endif
             }
             
             DestroyGhostPreview();
             
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("✅ [SimpleBuildMode] BUILD MODE DEACTIVATED");
+            #endif
         }
         
         private void CreateGhostPreview()
@@ -660,12 +702,14 @@ namespace TacticalCombat.Building
                 if (overlap.transform == transform) continue;
                 if (overlap.gameObject.layer == LayerMask.NameToLayer("Default")) continue;
                 
-                if (overlap.GetComponent<Structure>() != null)
+                // ✅ HIGH PRIORITY: Use TryGetComponent instead of GetComponent (no GC allocation)
+                if (overlap.TryGetComponent<Structure>(out _))
                     return false;
                 
-                if (overlap.GetComponent<NetworkIdentity>() != null)
+                if (overlap.TryGetComponent<NetworkIdentity>(out _))
                 {
-                    if (overlap.GetComponent<PlayerController>() == null)
+                    // ✅ HIGH PRIORITY: Use TryGetComponent instead of GetComponent
+                    if (!overlap.TryGetComponent<PlayerController>(out _))
                         return false;
                 }
             }
@@ -684,9 +728,10 @@ namespace TacticalCombat.Building
             if (availableStructures == null || currentStructureIndex >= availableStructures.Length) return;
             
             GameObject selectedStructure = availableStructures[currentStructureIndex];
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             string structureName = selectedStructure.name;
-            
             Debug.Log($"🏗️ [SimpleBuildMode] Placing {structureName} at {placementPosition}");
+            #endif
             CmdPlaceStructure(placementPosition, placementRotation, currentStructureIndex);
         }
         
@@ -708,7 +753,10 @@ namespace TacticalCombat.Building
 
             if (placementCountThisSecond >= MAX_PLACEMENTS_PER_SECOND)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Rate limit: Max {MAX_PLACEMENTS_PER_SECOND} placements/second");
+                #endif
+                RpcPlacementRejected("Rate limit exceeded");
                 return;
             }
 
@@ -717,71 +765,162 @@ namespace TacticalCombat.Building
             // ✅ ANTI-CHEAT: Server-side cooldown to prevent spam
             if (Time.time - lastServerPlacementTime < SERVER_PLACEMENT_COOLDOWN)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Cooldown active ({SERVER_PLACEMENT_COOLDOWN}s)");
+                #endif
+                RpcPlacementRejected("Cooldown active");
                 return;
             }
             lastServerPlacementTime = Time.time;
 
-            // Distance check
+            // ✅ MEDIUM PRIORITY: Snap point validation (ensure client sent snapped position)
+            Vector3 snappedPosition = SnapToGrid(position);
+            if (Vector3.Distance(position, snappedPosition) > 0.1f)
+            {
+                // Client sent non-snapped position, use server's snap
+                position = snappedPosition;
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Client sent non-snapped position, using server snap");
+                #endif
+            }
+
+            // Distance check (quick validation before BuildValidator)
             float distance = Vector3.Distance(transform.position, position);
             if (distance > placementDistance + 0.5f)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Invalid placement distance: {distance}m");
+                #endif
+                RpcPlacementRejected("Placement distance too far");
                 return;
             }
 
             // Structure index validation (cheap check first)
             if (availableStructures == null || structureIndex >= availableStructures.Length)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Invalid structure index: {structureIndex}");
+                #endif
+                RpcPlacementRejected("Invalid structure index");
                 return;
             }
 
             GameObject selectedStructure = availableStructures[structureIndex];
             if (selectedStructure == null)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Selected structure is null");
+                #endif
+                RpcPlacementRejected("Selected structure is null");
                 return;
             }
 
-            // Ground check
-            if (!Physics.Raycast(position, Vector3.down, 2f, groundLayer))
+            // ✅ HIGH PRIORITY: Combat lockout check (prevent building during combat)
+            var health = GetComponent<Combat.Health>();
+            if (health != null && health.IsInCombat())
             {
-                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Not on ground");
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"🚨 [SimpleBuildMode] Cannot build during combat (took damage {health.GetTimeSinceLastDamage():F1}s ago)");
+                #endif
+                RpcPlacementRejected("Cannot build during combat");
                 return;
             }
 
-            // Overlap check (NonAlloc) - most expensive, do last
-            int overlapCount = Physics.OverlapBoxNonAlloc(
-                position,
-                new Vector3(0.9f, 0.45f, 0.09f),
-                overlapBoxBuffer,
-                rotation,
-                obstacleLayer,
-                QueryTriggerInteraction.Ignore
-            );
-            if (overlapCount > 0)
+            // ✅ CRITICAL FIX: Convert structure index to StructureType
+            StructureType structureType = GetStructureTypeFromIndex(structureIndex);
+            
+            // ✅ CRITICAL FIX: Use BuildValidator for all placements (prevents budget bypass exploit)
+            BuildValidator validator = BuildValidator.Instance;
+            
+            // Fallback: If singleton not initialized, try to find it
+            if (validator == null)
             {
-                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Overlapping with {overlapBoxBuffer[0].name}");
-                return;
-            }
-
-            // Line of sight check (expensive, skip if other checks fail first)
-            Vector3 playerEye = transform.position + Vector3.up * 1.6f;
-            if (Physics.Linecast(playerEye, position, out RaycastHit hit, obstacleLayer, QueryTriggerInteraction.Ignore))
-            {
-                if (Vector3.Distance(hit.point, position) > 0.5f)
+                validator = FindFirstObjectByType<BuildValidator>();
+                if (validator != null)
                 {
-                    Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] No line of sight");
-                    return;
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogWarning("⚠️ [SimpleBuildMode] BuildValidator.Instance was null, but found via FindFirstObjectByType. Make sure BuildValidator GameObject exists in scene!");
+                    #endif
                 }
             }
+            
+            if (validator == null)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogError("❌ [SimpleBuildMode] BuildValidator not found! Please add BuildValidator GameObject to scene.");
+                #endif
+                RpcPlacementRejected("BuildValidator not found");
+                return;
+            }
 
-            // Spawn structure
-            GameObject structure = Instantiate(selectedStructure, position, rotation);
-            NetworkServer.Spawn(structure);
+            // ✅ FIX: Ensure prefabs are set in BuildValidator (lazy initialization)
+            if (isServer && (validator.GetStructurePrefab(StructureType.Wall) == null || 
+                           validator.GetStructurePrefab(StructureType.Platform) == null ||
+                           validator.GetStructurePrefab(StructureType.Ramp) == null))
+            {
+                validator.SetPrefabs(wallPrefab, floorPrefab, stairsPrefab);
+            }
 
-            Debug.Log($"✅ [SimpleBuildMode SERVER] {selectedStructure.name} placed at {position}");
+            // Get player controller for team
+            var playerController = GetComponent<PlayerController>();
+            if (playerController == null)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogError("❌ [SimpleBuildMode] PlayerController not found!");
+                #endif
+                RpcPlacementRejected("PlayerController not found");
+                return;
+            }
+
+            // Create BuildRequest
+            BuildRequest request = new BuildRequest(position, rotation, structureType, netId);
+
+            // Use BuildValidator (centralized validation + budget check)
+            if (!validator.ValidateAndPlace(request, playerController.team))
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"🚨 [SimpleBuildMode] Placement rejected by BuildValidator");
+                #endif
+                RpcPlacementRejected("Validation failed");
+                return;
+            }
+
+            // Success - structure spawned by BuildValidator
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"✅ [SimpleBuildMode SERVER] Structure placed at {position} via BuildValidator");
+            #endif
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Map structure index to StructureType
+        /// </summary>
+        private StructureType GetStructureTypeFromIndex(int index)
+        {
+            if (availableStructures == null || index >= availableStructures.Length || index < 0)
+                return StructureType.Wall; // Default fallback
+
+            GameObject structure = availableStructures[index];
+            if (structure == null) return StructureType.Wall;
+
+            // Map prefab name to StructureType
+            string name = structure.name.ToLower();
+            if (name.Contains("wall")) return StructureType.Wall;
+            if (name.Contains("floor") || name.Contains("platform")) return StructureType.Platform;
+            if (name.Contains("roof")) return StructureType.Platform; // Roof is elevation
+            if (name.Contains("door")) return StructureType.Wall; // Door is wall type
+            if (name.Contains("window")) return StructureType.Wall; // Window is wall type
+            if (name.Contains("stair") || name.Contains("ramp")) return StructureType.Ramp;
+
+            return StructureType.Wall; // Default fallback
+        }
+
+        [ClientRpc]
+        private void RpcPlacementRejected(string reason)
+        {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogWarning($"🚨 [SimpleBuildMode CLIENT] Placement rejected: {reason}");
+            #endif
+            // TODO: Could show UI message to player
         }
         
         // Stability preview system
@@ -892,7 +1031,9 @@ namespace TacticalCombat.Building
             // Destroy ghost preview
             DestroyGhostPreview();
 
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("🗑️ [SimpleBuildMode] Cleanup completed");
+            #endif
         }
 
         public bool IsBuildModeActive() => isBuildModeActive;
@@ -971,8 +1112,15 @@ namespace TacticalCombat.Building
             // Sadece Scene View'da görünsün, Game View'da değil
             if (!UnityEditor.EditorApplication.isPlaying || !isBuildModeActive || ghostPreview == null) return;
             
+            // ✅ FIX: Validate Quaternion before using it (prevents "Quaternion To Matrix conversion failed" error)
+            Quaternion validRotation = placementRotation;
+            if (validRotation.x == 0 && validRotation.y == 0 && validRotation.z == 0 && validRotation.w == 0)
+            {
+                validRotation = Quaternion.identity; // Use identity if invalid
+            }
+            
             Gizmos.color = canPlace ? Color.green : Color.red;
-            Gizmos.matrix = Matrix4x4.TRS(placementPosition, placementRotation, Vector3.one);
+            Gizmos.matrix = Matrix4x4.TRS(placementPosition, validRotation, Vector3.one);
             Gizmos.DrawWireCube(Vector3.zero, new Vector3(1.8f, 0.9f, 0.18f));
             
             if (showStabilityPreview)

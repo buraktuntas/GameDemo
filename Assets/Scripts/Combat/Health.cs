@@ -20,6 +20,10 @@ namespace TacticalCombat.Combat
         public System.Action<int, int> OnHealthChangedEvent; // current, max
         public System.Action OnDeathEvent;
 
+        // ✅ HIGH PRIORITY: Track last damage time for combat lockout
+        private float lastDamageTime = 0f;
+        private const float COMBAT_LOCKOUT_DURATION = 3f; // 3 seconds after taking damage
+
         private void Start()
         {
             if (isServer)
@@ -69,6 +73,9 @@ namespace TacticalCombat.Combat
 
             // Damage reduction based on armor, etc.
             int finalDamage = CalculateFinalDamage(info);
+
+            // ✅ HIGH PRIORITY: Update last damage time for combat lockout
+            lastDamageTime = Time.time;
 
             currentHealth -= finalDamage;
             currentHealth = Mathf.Max(0, currentHealth);
@@ -395,6 +402,22 @@ namespace TacticalCombat.Combat
         public int GetCurrentHealth() => currentHealth;
         public int GetMaxHealth() => maxHealth;
         public bool IsDead() => isDead;
+
+        /// <summary>
+        /// ✅ HIGH PRIORITY: Check if player is in combat (took damage recently)
+        /// </summary>
+        public bool IsInCombat()
+        {
+            return Time.time - lastDamageTime < COMBAT_LOCKOUT_DURATION;
+        }
+
+        /// <summary>
+        /// Get time since last damage (for combat lockout)
+        /// </summary>
+        public float GetTimeSinceLastDamage()
+        {
+            return Time.time - lastDamageTime;
+        }
         
         // Public properties for UI access
         public int CurrentHealth => currentHealth;

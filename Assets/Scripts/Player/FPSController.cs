@@ -68,6 +68,9 @@ namespace TacticalCombat.Player
         private float stepTimer = 0f;
         private Vector3 originalCameraPos;
         
+        // ✅ CRITICAL FIX: Speed multiplier for trap effects (GlueTrap slow)
+        public float speedMultiplier = 1f; // Default 1.0 (100% speed)
+        
         // Cached references
         private InputManager inputManager;
         
@@ -533,7 +536,7 @@ namespace TacticalCombat.Player
             
             // Server calculates speed (can't be hacked)
             bool wantsToSprint = input.magnitude > 0.8f; // Assume sprint if input is strong
-            float currentSpeed = wantsToSprint ? runSpeed : walkSpeed;
+            float currentSpeed = (wantsToSprint ? runSpeed : walkSpeed) * speedMultiplier; // ✅ CRITICAL FIX: Apply speed multiplier on server too
             
             Vector3 horizontalMove = (forward * input.z) + (right * input.x);
             return horizontalMove * currentSpeed;
@@ -619,7 +622,7 @@ namespace TacticalCombat.Player
             }
             
             bool isRunning = wantsToSprint && canSprint;
-            float currentSpeed = isRunning ? runSpeed : walkSpeed;
+            float currentSpeed = (isRunning ? runSpeed : walkSpeed) * speedMultiplier; // ✅ CRITICAL FIX: Apply speed multiplier
             
             Vector3 horizontalMove = (forward * input.z) + (right * input.x);
             return horizontalMove * currentSpeed;
@@ -654,6 +657,23 @@ namespace TacticalCombat.Player
         }
         
         // ⭐ HandleJumping artık CalculateVerticalVelocity içinde
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Apply impulse for Springboard trap (launch player)
+        /// </summary>
+        public void ApplyImpulse(Vector3 force)
+        {
+            // Add to vertical velocity
+            moveDirection.y += force.y;
+            
+            // Add horizontal force
+            Vector3 horizontalForce = new Vector3(force.x, 0, force.z);
+            moveDirection += horizontalForce;
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"🚀 [FPSController] Applied impulse: {force}");
+            #endif
+        }
         
         private void HandleRotation()
         {

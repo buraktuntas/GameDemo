@@ -155,8 +155,23 @@ namespace TacticalCombat.Network
         {
             Debug.Log($"🎮 CheckAutoStart: TeamA={teamACount}, TeamB={teamBCount}");
 
-            // Auto-start when we have at least 2 players (1 per team) for testing
-            if (teamACount >= 1 && teamBCount >= 1)
+            // ✅ FIX: In editor/development, allow single-player testing
+            // Production: Require at least 1 player per team
+            bool canStart = false;
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            // Development: Allow single player (for testing)
+            canStart = (teamACount >= 1 || teamBCount >= 1);
+            if (canStart)
+            {
+                Debug.Log($"✅ [DEV] Single-player mode enabled - starting match with {teamACount + teamBCount} player(s)");
+            }
+            #else
+            // Production: Require at least 1 player per team
+            canStart = (teamACount >= 1 && teamBCount >= 1);
+            #endif
+
+            if (canStart)
             {
                 if (MatchManager.Instance == null)
                 {
@@ -179,7 +194,7 @@ namespace TacticalCombat.Network
             }
             else
             {
-                Debug.Log($"⚠️ Not enough players yet");
+                Debug.Log($"⚠️ Not enough players yet (need at least 1 per team in production)");
             }
         }
 

@@ -19,6 +19,10 @@ namespace TacticalCombat.Combat
     [RequireComponent(typeof(AudioSource))]
     public class WeaponSystem : NetworkBehaviour
     {
+        // ✅ HIGH PRIORITY: Cache animator trigger hashes (prevent string allocation)
+        private static readonly int FireHash = Animator.StringToHash("Fire");
+        private static readonly int ReloadHash = Animator.StringToHash("Reload");
+        
         [Header("📦 WEAPON CONFIG")]
         [SerializeField] private WeaponConfig currentWeapon;
         
@@ -449,6 +453,8 @@ namespace TacticalCombat.Combat
                 CmdFire();
                 // Optimistic prediction: play local effects immediately
                 PlayLocalFireEffects();
+                // ✅ CRITICAL FIX: Perform client-side prediction raycast
+                PerformRaycast();
                 return;
             }
             
@@ -470,11 +476,12 @@ namespace TacticalCombat.Combat
                 return;
             }
             
+            // ✅ CRITICAL FIX: Generate deterministic spread seed FIRST
+            // This ensures client and server use same seed for same shot
+            spreadSeed = Random.Range(0, int.MaxValue);
+            
             // Update timers
             nextFireTime = Time.time + (1f / currentWeapon.fireRate);
-            
-            // ✅ CRITICAL FIX: Generate deterministic spread seed
-            spreadSeed = Random.Range(0, int.MaxValue);
             
             // ✅ CRITICAL FIX: Server modifies ammo (authoritative)
             currentAmmo--;
@@ -491,8 +498,8 @@ namespace TacticalCombat.Combat
             OnWeaponFired?.Invoke();
             OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
             
-            // Auto reload
-            if (currentAmmo <= 0 && reserveAmmo > 0)
+            // ✅ FIX: Auto reload only if not already firing (prevents interruption)
+            if (currentAmmo <= 0 && reserveAmmo > 0 && !isReloading)
             {
                 StartReload();
             }
@@ -597,9 +604,10 @@ namespace TacticalCombat.Combat
             PlayMuzzleFlash();
             PlayFireSound();
             
+            // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
             if (weaponAnimator != null)
             {
-                weaponAnimator.SetTrigger("Fire");
+                weaponAnimator.SetTrigger(FireHash);
             }
             
             // Camera shake for shooter only
@@ -699,9 +707,10 @@ namespace TacticalCombat.Combat
             else
             {
                 // Client sends hit data to server for validation
+                // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
                 // Only send if hit object has NetworkIdentity (can be synced)
                 GameObject hitObj = hit.collider?.gameObject;
-                if (hitObj != null && hitObj.GetComponent<NetworkIdentity>() != null)
+                if (hitObj != null && hitObj.TryGetComponent<NetworkIdentity>(out _))
                 {
                     CmdProcessHit(hit.point, hit.normal, hit.distance, hitObj);
                 }
@@ -718,23 +727,29 @@ namespace TacticalCombat.Combat
 
         /// <summary>
         /// CLIENT-SIDE: Immediate visual feedback (prediction - no damage yet)
+        /// ✅ CRITICAL FIX: Only show for local player (will be overwritten by RPC)
         /// </summary>
         private void ShowClientSideHitFeedback(RaycastHit hit)
         {
+            // ✅ CRITICAL FIX: Only show prediction VFX for shooter
+            // Other players will see RPC, shooter sees prediction then RPC (smooth feedback)
+            if (!isLocalPlayer) return;
+            
             SurfaceType surface = DetermineSurfaceType(hit.collider);
-            bool isBodyHit = hit.collider.GetComponent<Hitbox>() != null || hit.collider.GetComponent<Health>() != null;
+            bool isBodyHit = hit.collider.TryGetComponent<Hitbox>(out _) || hit.collider.TryGetComponent<Health>(out _);
 
             // ✅ PROFESSIONAL VFX: Use pooled impact effects (Battlefield quality)
+            // Note: This will be overwritten by RpcShowImpactEffect, but provides immediate feedback
             if (ImpactVFXPool.Instance != null)
             {
                 ImpactVFXPool.Instance.PlayImpact(hit.point, hit.normal, surface, isBodyHit);
             }
 
-            // Play hit sound
-            PlayHitSound(surface);
+            // ✅ FIX: Don't play sound here (will be played in RPC to avoid duplication)
+            // PlayHitSound(surface);  // Removed to prevent double audio
 
             // Optimistic damage numbers (will be corrected by server)
-            var hitbox = hit.collider.GetComponent<Hitbox>();
+            hit.collider.TryGetComponent<Hitbox>(out var hitbox);
             float predictedDamage = currentWeapon.damage;
             if (hitbox != null)
             {
@@ -790,12 +805,84 @@ namespace TacticalCombat.Combat
                 return;
             }
 
+            // ✅ CRITICAL FIX: Validate hit angle (prevent impossible shots like 180° behind)
+            if (playerCamera == null) return;
+            
+            Vector3 serverPlayerPos = playerCamera.transform.position;
+            Vector3 serverPlayerForward = playerCamera.transform.forward;
+            Vector3 hitDirection = (hitPoint - serverPlayerPos).normalized;
+            
+            float angle = Vector3.Angle(serverPlayerForward, hitDirection);
+            const float MAX_HIT_ANGLE = 90f; // 90° cone (FPS standard)
+            
+            if (angle > MAX_HIT_ANGLE)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Impossible hit angle: {angle:F1}° from player {netId} (max: {MAX_HIT_ANGLE}°)");
+                #endif
+                return;
+            }
+
             // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent (no GC, faster)
             // Reconstruct hit for server-side processing
             if (!hitObject.TryGetComponent<Collider>(out var hitCollider))
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("⚠️ [WeaponSystem SERVER] Hit object has no collider");
+                #endif
+                return;
+            }
+
+            // ✅ HIGH PRIORITY: Verify line-of-sight (prevent wall-hack exploit)
+            // Note: hitDirection already calculated above for angle validation
+            Vector3 serverOrigin = serverPlayerPos;  // Reuse same position
+            float distanceToHit = Vector3.Distance(serverOrigin, hitPoint);
+            // Reuse hitDirection from angle validation (line 813)
+            
+            // Server raycast to verify LOS (non-alloc to avoid GC)
+            RaycastHit[] losHits = new RaycastHit[8];
+            int losCount = Physics.RaycastNonAlloc(
+                new Ray(serverOrigin, hitDirection),
+                losHits,
+                distanceToHit,
+                currentWeapon.hitMask
+            );
+            
+            // Check if hit object is first in LOS (no walls blocking)
+            bool losValid = false;
+            float closestBlockingDistance = float.MaxValue;
+            
+            for (int i = 0; i < losCount; i++)
+            {
+                // If we hit our target, LOS is valid
+                if (losHits[i].collider == hitCollider)
+                {
+                    losValid = true;
+                    break;
+                }
+                
+                // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
+                // Check if something blocks LOS (wall, structure, or other player)
+                bool hasBlockingHealth = losHits[i].collider.TryGetComponent<Health>(out _);
+                bool isBlocking = hasBlockingHealth || 
+                                 losHits[i].collider.CompareTag("Structure") ||
+                                 losHits[i].collider.CompareTag("Wall");
+                
+                if (isBlocking && losHits[i].distance < closestBlockingDistance)
+                {
+                    closestBlockingDistance = losHits[i].distance;
+                    // If blocking object is closer than target, LOS is blocked
+                    if (closestBlockingDistance < distanceToHit)
+                    {
+                        break;  // Wall blocking LOS
+                    }
+                }
+            }
+            
+            if (!losValid)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"⚠️ [WeaponSystem SERVER] LOS violation from player {netId} - wall blocking or target not in LOS");
                 #endif
                 return;
             }
@@ -850,6 +937,37 @@ namespace TacticalCombat.Combat
 
             if (health != null)
             {
+                // ✅ CRITICAL FIX: Prevent self-harm
+                if (!health.TryGetComponent<NetworkIdentity>(out var targetIdentity))
+                {
+                    targetIdentity = null;
+                }
+                if (targetIdentity != null && targetIdentity.netId == netId)
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Self-harm attempt from player {netId}");
+                    #endif
+                    return;
+                }
+                
+                // ✅ CRITICAL FIX: Check team damage (prevent friendly fire)
+                health.TryGetComponent<TacticalCombat.Player.PlayerController>(out var targetPlayer);
+                TryGetComponent<TacticalCombat.Player.PlayerController>(out var shooterPlayer);
+                
+                if (targetPlayer != null && shooterPlayer != null)
+                {
+                    // Same team = friendly fire (disable or reduce damage)
+                    if (targetPlayer.team == shooterPlayer.team && targetPlayer.team != Team.None)
+                    {
+                        #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                        Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Friendly fire attempt: Team {shooterPlayer.team} player {netId} tried to damage teammate");
+                        #endif
+                        // Friendly fire disabled - return without damage
+                        // TODO: If friendly fire is enabled, reduce damage here (e.g., damage *= 0.5f)
+                        return;
+                    }
+                }
+                
                 // Distance falloff
                 float distanceFactor = Mathf.Clamp01(1f - (distance / currentWeapon.range));
                 damage *= distanceFactor;
@@ -885,25 +1003,25 @@ namespace TacticalCombat.Combat
 
         /// <summary>
         /// ✅ Network sync impact effects to all clients
+        /// ✅ CRITICAL FIX: Authoritative VFX (overwrites client prediction)
         /// </summary>
         [ClientRpc]
         private void RpcShowImpactEffect(Vector3 hitPoint, Vector3 hitNormal, SurfaceType surface, bool isBodyHit, bool isCritical)
         {
-            // Show impact effect on all clients
+            // Show impact effect on all clients (authoritative - overwrites prediction)
             if (ImpactVFXPool.Instance != null)
             {
                 ImpactVFXPool.Instance.PlayImpact(hitPoint, hitNormal, surface, isBodyHit);
             }
 
-            // Play hit sound
+            // ✅ FIX: Play hit sound only in RPC (authoritative, prevents duplication)
             PlayHitSound(surface);
-
         }
         
         private SurfaceType DetermineSurfaceType(Collider collider)
         {
-            // Check for health component (flesh)
-            if (collider.GetComponent<Health>() != null)
+            // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
+            if (collider.TryGetComponent<Health>(out _))
                 return SurfaceType.Flesh;
                 
             // Check tag (with null safety)
@@ -1057,41 +1175,8 @@ namespace TacticalCombat.Combat
             }
         }
         
-        private void ApplyDamage(RaycastHit hit)
-        {
-            var health = hit.collider.GetComponent<Health>();
-            if (health == null) return;
-            
-            // Calculate damage (headshot multiplier, distance falloff)
-            float damage = currentWeapon.damage;
-            
-            // Headshot check (safe tag check)
-            try
-            {
-                if (hit.collider.CompareTag("Head"))
-                {
-                    damage *= currentWeapon.headshotMultiplier;
-                }
-            }
-            catch { }
-            
-            // Distance falloff
-            float distanceFactor = Mathf.Clamp01(1f - (hit.distance / currentWeapon.range));
-            damage *= distanceFactor;
-            
-            // Apply damage
-            DamageInfo damageInfo = new DamageInfo(
-                Mathf.RoundToInt(damage),
-                0, // ✅ FIX: Local player ID (no network sync needed)
-                DamageType.Bullet,
-                hit.point,
-                hit.normal
-            );
-            
-            health.ApplyDamage(damageInfo);
-            
-            Debug.Log($"💥 [WeaponSystem] DAMAGE: {damage:F0} to {hit.collider.name}");
-        }
+        // ✅ CRITICAL FIX: Removed dead code ApplyDamage() method
+        // All damage now goes through ProcessHitOnServer() with proper server validation
         
         private void ApplyRecoil()
         {
@@ -1306,12 +1391,40 @@ namespace TacticalCombat.Combat
         
         /// <summary>
         /// ✅ CRITICAL FIX: Command to request reload from client
+        /// ✅ HIGH PRIORITY: Improved reload exploit prevention
         /// </summary>
         [Command]
         private void CmdStartReload()
         {
-            if (isReloading || currentAmmo >= currentWeapon.magazineSize || reserveAmmo <= 0)
+            // ✅ HIGH PRIORITY: Enhanced validation to prevent reload spam/exploit
+            if (isReloading)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Reload spam attempt from player {netId}");
+                #endif
                 return;
+            }
+            
+            if (currentAmmo >= currentWeapon.magazineSize)
+            {
+                // Already full, no need to reload
+                return;
+            }
+            
+            if (reserveAmmo <= 0)
+            {
+                // No ammo to reload
+                return;
+            }
+            
+            // ✅ FIX: Prevent reload during fire sequence (100ms buffer after fire)
+            if (Time.time < nextFireTime + 0.1f)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Reload during fire attempt from player {netId}");
+                #endif
+                return;
+            }
             
             StartReloadServer();
         }
@@ -1355,9 +1468,10 @@ namespace TacticalCombat.Combat
         [ClientRpc]
         private void RpcOnReloadStarted()
         {
+            // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
             // Play reload animation/sound on all clients
             if (weaponAnimator != null)
-                weaponAnimator.SetTrigger("Reload");
+                weaponAnimator.SetTrigger(ReloadHash);
             
             if (reloadSound != null && audioSource != null)
             {
@@ -1407,10 +1521,11 @@ namespace TacticalCombat.Combat
             PlayMuzzleFlash();
             PlayFireSound();
             
+            // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
             // ✅ FIX: Play weapon animation
             if (weaponAnimator != null)
             {
-                weaponAnimator.SetTrigger("Fire");
+                weaponAnimator.SetTrigger(FireHash);
             }
         }
         
@@ -1468,10 +1583,19 @@ namespace TacticalCombat.Combat
         
         /// <summary>
         /// ✅ CRITICAL FIX: Set weapon with server authority
+        /// ✅ FIX: Cancel reload if switching weapons
         /// </summary>
         [Server]
         public void SetWeapon(WeaponConfig weapon)
         {
+            // ✅ FIX: Cancel reload if switching weapons
+            if (currentReloadCoroutine != null)
+            {
+                StopCoroutine(currentReloadCoroutine);
+                currentReloadCoroutine = null;
+                isReloading = false;
+            }
+            
             currentWeapon = weapon;
             currentAmmo = weapon.magazineSize;
             reserveAmmo = weapon.maxAmmo;

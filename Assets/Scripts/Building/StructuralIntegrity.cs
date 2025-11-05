@@ -26,6 +26,14 @@ namespace TacticalCombat.Building
         [SyncVar]
         private bool isGrounded = false; // Zemine bağlı mı?
         
+        // ✅ CRITICAL FIX: Cache material instance to prevent memory leak
+        private Material stabilityMaterialInstance;
+        
+        // ✅ MEDIUM PRIORITY: Cooldown for neighbor stability updates (prevent cascade performance spike)
+        private float lastNeighborUpdateTime = 0f;
+        private const float NEIGHBOR_UPDATE_COOLDOWN = 0.5f; // 500ms cooldown between neighbor updates
+        private const int MAX_NEIGHBOR_UPDATES = 10; // Limit cascade depth
+        
         private static List<StructuralIntegrity> allStructures = new List<StructuralIntegrity>();
         
         // Stability renk kodu (Valheim tarzı)
@@ -161,9 +169,19 @@ namespace TacticalCombat.Building
         [Server]
         private void UpdateNeighborStabilities()
         {
-            // Yakındaki yapıları güncelle
+            // ✅ MEDIUM PRIORITY: Cooldown to prevent cascade performance spike
+            if (Time.time - lastNeighborUpdateTime < NEIGHBOR_UPDATE_COOLDOWN)
+            {
+                return; // Skip update if cooldown active
+            }
+            lastNeighborUpdateTime = Time.time;
+
+            // Yakındaki yapıları güncelle (limit cascade depth)
+            int updateCount = 0;
             foreach (var other in allStructures)
             {
+                if (updateCount >= MAX_NEIGHBOR_UPDATES) break; // Limit cascade
+                
                 if (other == this || other == null) continue;
                 
                 float distance = Vector3.Distance(transform.position, other.transform.position);
@@ -172,6 +190,7 @@ namespace TacticalCombat.Building
                 {
                     // Komşu yapının stabilitesini yeniden hesapla
                     other.Invoke(nameof(CalculateStability), 0.1f);
+                    updateCount++;
                 }
             }
         }
@@ -179,15 +198,26 @@ namespace TacticalCombat.Building
         [Server]
         private void CollapseStructure()
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"💥 Structure collapsed due to low stability: {gameObject.name}");
+            #endif
             
-            // Yıkılma efekti (opsiyonel: partikül, ses)
-            // TODO: Partikül efekti ekle
+            // ✅ HIGH PRIORITY: Play destruction effects before destroying (sync VFX to clients)
+            if (TryGetComponent<Structure>(out var structure))
+            {
+                structure.TriggerDestructionEffects();
+            }
             
             // Komşu yapıları güncelle (zincirleme yıkılma)
             UpdateNeighborStabilities();
             
-            // Yapıyı yok et
+            // Delayed destruction to allow effects to play
+            Invoke(nameof(DestroyCollapsedStructure), 0.5f);
+        }
+
+        [Server]
+        private void DestroyCollapsedStructure()
+        {
             NetworkServer.Destroy(gameObject);
         }
 
@@ -204,11 +234,18 @@ namespace TacticalCombat.Building
         {
             Color stabilityColor = GetStabilityColor(stability);
             
-            // Materyal rengini güncelle
-            if (structureRenderer.material != null)
+            if (structureRenderer == null) return;
+            
+            // ✅ CRITICAL FIX: Create material instance ONCE to prevent memory leak
+            // structureRenderer.material creates new instance every time!
+            if (stabilityMaterialInstance == null)
             {
-                structureRenderer.material.color = stabilityColor;
+                stabilityMaterialInstance = new Material(structureRenderer.sharedMaterial);
+                structureRenderer.material = stabilityMaterialInstance; // Set once
             }
+            
+            // Update color only (no new instance created)
+            stabilityMaterialInstance.color = stabilityColor;
         }
 
         private Color GetStabilityColor(float stability)

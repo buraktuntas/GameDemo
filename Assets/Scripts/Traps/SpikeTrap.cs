@@ -18,18 +18,26 @@ namespace TacticalCombat.Traps
         [Server]
         protected override void Trigger(GameObject target)
         {
-            var health = target.GetComponent<Combat.Health>();
-            if (health != null && !health.IsDead())
+            // ✅ CRITICAL FIX: Use TryGetComponent instead of GetComponent (no GC allocation)
+            if (target.TryGetComponent<Combat.Health>(out var health) && !health.IsDead())
             {
                 health.TakeDamage(damage);
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log($"Spike trap dealt {damage} damage to {target.name}");
+                #endif
             }
 
             RpcPlayTriggerEffect();
             MarkAsTriggered();
 
-            // Destroy trap after use (one-time)
-            Invoke(nameof(DestroyTrap), 2f);
+            // ✅ HIGH PRIORITY FIX: Use coroutine instead of Invoke (prevents leaks)
+            StartCoroutine(DestroyTrapAfterDelay(2f));
+        }
+        
+        private System.Collections.IEnumerator DestroyTrapAfterDelay(float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            NetworkServer.Destroy(gameObject);
         }
 
         [Server]
@@ -46,7 +54,9 @@ namespace TacticalCombat.Traps
             {
                 spikesVisual.SetActive(true);
             }
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("Spike trap triggered!");
+            #endif
         }
     }
 }

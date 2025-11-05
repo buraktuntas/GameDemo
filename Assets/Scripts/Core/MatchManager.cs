@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using Mirror;
 using TacticalCombat.UI;
+using TacticalCombat.Building;
 
 namespace TacticalCombat.Core
 {
@@ -81,7 +82,97 @@ namespace TacticalCombat.Core
                 }
             }
             catch { }
+            
+            // ✅ CRITICAL FIX: Auto-create BuildValidator if not found in scene
+            EnsureBuildValidator();
+            
             InitializeMatch();
+        }
+
+        [Server]
+        private void EnsureBuildValidator()
+        {
+            // Check if BuildValidator already exists
+            if (TacticalCombat.Building.BuildValidator.Instance != null)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.Log("✅ [MatchManager] BuildValidator already exists in scene");
+                #endif
+                return;
+            }
+
+            // Try to find existing BuildValidator in scene
+            var existing = FindFirstObjectByType<TacticalCombat.Building.BuildValidator>();
+            if (existing != null)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.Log("✅ [MatchManager] Found existing BuildValidator in scene");
+                #endif
+                return;
+            }
+
+            // Create BuildValidator GameObject
+            GameObject validatorObj = new GameObject("[BuildValidator]");
+            validatorObj.transform.SetParent(transform); // Parent to MatchManager for organization
+            
+            // Add NetworkIdentity (required for NetworkBehaviour)
+            NetworkIdentity identity = validatorObj.AddComponent<NetworkIdentity>();
+            identity.serverOnly = true; // BuildValidator only needs to exist on server
+            
+            // Add BuildValidator component
+            var validator = validatorObj.AddComponent<TacticalCombat.Building.BuildValidator>();
+            
+            // ✅ FIX: Copy prefab references from SimpleBuildMode if available
+            var buildMode = FindFirstObjectByType<TacticalCombat.Building.SimpleBuildMode>();
+            if (buildMode != null)
+            {
+                // Use reflection to copy prefab references (since they're private SerializeField)
+                var validatorType = typeof(TacticalCombat.Building.BuildValidator);
+                var buildModeType = typeof(TacticalCombat.Building.SimpleBuildMode);
+                
+                // Map SimpleBuildMode prefabs to BuildValidator prefabs
+                var wallPrefabField = validatorType.GetField("wallPrefab", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var platformPrefabField = validatorType.GetField("platformPrefab", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var rampPrefabField = validatorType.GetField("rampPrefab", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                
+                var simpleWallPrefab = buildModeType.GetField("wallPrefab", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                var simpleFloorPrefab = buildModeType.GetField("floorPrefab", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                var simpleStairsPrefab = buildModeType.GetField("stairsPrefab", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                
+                if (wallPrefabField != null && simpleWallPrefab != null)
+                {
+                    wallPrefabField.SetValue(validator, simpleWallPrefab.GetValue(buildMode));
+                }
+                
+                // Platform = Floor in SimpleBuildMode
+                if (platformPrefabField != null && simpleFloorPrefab != null)
+                {
+                    platformPrefabField.SetValue(validator, simpleFloorPrefab.GetValue(buildMode));
+                }
+                
+                // Ramp = Stairs in SimpleBuildMode
+                if (rampPrefabField != null && simpleStairsPrefab != null)
+                {
+                    rampPrefabField.SetValue(validator, simpleStairsPrefab.GetValue(buildMode));
+                }
+                
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.Log("✅ [MatchManager] BuildValidator prefabs copied from SimpleBuildMode");
+                #endif
+            }
+            else
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("⚠️ [MatchManager] SimpleBuildMode not found - BuildValidator prefabs will be empty");
+                #endif
+            }
+            
+            // Spawn on network (required for NetworkBehaviour)
+            NetworkServer.Spawn(validatorObj);
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log("✅ [MatchManager] BuildValidator auto-created and spawned on server");
+            #endif
         }
 
         public override void OnStartClient()

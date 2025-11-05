@@ -10,7 +10,7 @@ namespace TacticalCombat.Building
     public class Structure : NetworkBehaviour
     {
         [Header("Structure Info")]
-        [SyncVar]
+        [SyncVar(hook = nameof(OnTeamChanged))]
         public Team team;
 
         [SyncVar]
@@ -64,6 +64,14 @@ namespace TacticalCombat.Building
             structureType = type;
             category = cat;
             ownerId = owner;
+            UpdateVisuals();
+        }
+
+        /// <summary>
+        /// ✅ HIGH PRIORITY: SyncVar hook for team changes (update visuals when team changes)
+        /// </summary>
+        private void OnTeamChanged(Team oldTeam, Team newTeam)
+        {
             UpdateVisuals();
         }
 
@@ -134,6 +142,15 @@ namespace TacticalCombat.Building
             }
         }
 
+        /// <summary>
+        /// ✅ HIGH PRIORITY: Public method to trigger destruction effects (called from StructuralIntegrity)
+        /// </summary>
+        [Server]
+        public void TriggerDestructionEffects()
+        {
+            RpcPlayDestructionEffects();
+        }
+
         [ClientRpc]
         private void RpcPlayDestructionEffects()
         {
@@ -162,7 +179,9 @@ namespace TacticalCombat.Building
                 }
             }
 
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"💥 Structure destroyed: {structureType} (Team: {team})");
+            #endif
         }
 
         private void OnDestroy()

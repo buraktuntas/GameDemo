@@ -14,6 +14,9 @@ namespace TacticalCombat.Building
         [SerializeField] private Team team;
         [SerializeField] private int maxHealth = GameConstants.CORE_HP;
 
+        // ✅ FIX: Public property for team access (used by BuildValidator for enemy base placement check)
+        public Team Team => team;
+
         private Health health;
 
         private void Awake()

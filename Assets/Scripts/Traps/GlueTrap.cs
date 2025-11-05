@@ -18,17 +18,25 @@ namespace TacticalCombat.Traps
         [Server]
         protected override void Trigger(GameObject target)
         {
-            // Apply slow effect
+            // ✅ CRITICAL FIX: Apply slow effect
             var slowEffect = target.AddComponent<SlowEffect>();
             slowEffect.Initialize(slowDuration, slowMultiplier);
 
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"Glue trap slowed {target.name}");
+            #endif
 
             RpcPlayTriggerEffect();
             MarkAsTriggered();
 
-            // Destroy after duration
-            Invoke(nameof(DestroyTrap), slowDuration + 1f);
+            // ✅ HIGH PRIORITY FIX: Use coroutine instead of Invoke (prevents leaks)
+            StartCoroutine(DestroyTrapAfterDelay(slowDuration + 1f));
+        }
+        
+        private System.Collections.IEnumerator DestroyTrapAfterDelay(float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            NetworkServer.Destroy(gameObject);
         }
 
         [Server]
@@ -40,25 +48,54 @@ namespace TacticalCombat.Traps
         [ClientRpc]
         private void RpcPlayTriggerEffect()
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("Glue trap activated!");
+            #endif
         }
     }
 
+    /// <summary>
+    /// ✅ CRITICAL FIX: SlowEffect now properly modifies movement speed
+    /// </summary>
     public class SlowEffect : MonoBehaviour
     {
         private float multiplier;
-        private Player.PlayerController player;
+        private Player.FPSController fpsController;
 
         public void Initialize(float dur, float mult)
         {
             multiplier = mult;
-            player = GetComponent<Player.PlayerController>();
+            
+            // ✅ CRITICAL FIX: Use TryGetComponent instead of GetComponent (no GC allocation)
+            if (!TryGetComponent<Player.FPSController>(out fpsController))
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("SlowEffect: FPSController not found!");
+                #endif
+                Destroy(this);
+                return;
+            }
+            
+            // ✅ CRITICAL FIX: Apply slow multiplier
+            fpsController.speedMultiplier *= multiplier;
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"SlowEffect applied: {multiplier}x speed for {dur}s");
+            #endif
+            
             Destroy(this, dur);
         }
 
         private void OnDestroy()
         {
-            // Movement speed restored on destroy
+            // ✅ CRITICAL FIX: Restore movement speed
+            if (fpsController != null)
+            {
+                fpsController.speedMultiplier /= multiplier;
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.Log($"SlowEffect removed: speed restored");
+                #endif
+            }
         }
     }
 }
