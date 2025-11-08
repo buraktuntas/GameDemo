@@ -768,27 +768,19 @@ namespace TacticalCombat.Combat
         
         private void ProcessHit(RaycastHit hit)
         {
-            // ✅ SECURITY: Send hit to server for validation (SERVER-AUTHORITATIVE)
-            if (isServer)
+            // ✅ CRITICAL FIX: Her zaman CmdProcessHit kullan (validation için)
+            // Host mode'da bile validation'dan geçmeli (tutarlılık ve anti-cheat için)
+            // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
+            // Only send if hit object has NetworkIdentity (can be synced)
+            GameObject hitObj = hit.collider?.gameObject;
+            if (hitObj != null && hitObj.TryGetComponent<NetworkIdentity>(out _))
             {
-                // Server processes directly
-                ProcessHitOnServer(hit);
+                CmdProcessHit(hit.point, hit.normal, hit.distance, hitObj);
             }
             else
             {
-                // Client sends hit data to server for validation
-                // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
-                // Only send if hit object has NetworkIdentity (can be synced)
-                GameObject hitObj = hit.collider?.gameObject;
-                if (hitObj != null && hitObj.TryGetComponent<NetworkIdentity>(out _))
-                {
-                    CmdProcessHit(hit.point, hit.normal, hit.distance, hitObj);
-                }
-                else
-                {
-                    // Hit non-networked object (wall, floor, etc) - still send for validation
-                    CmdProcessHit(hit.point, hit.normal, hit.distance, null);
-                }
+                // Hit non-networked object (wall, floor, etc) - still send for validation
+                CmdProcessHit(hit.point, hit.normal, hit.distance, null);
             }
 
             // CLIENT-SIDE: Immediate visual/audio feedback (optimistic prediction)
@@ -840,11 +832,16 @@ namespace TacticalCombat.Combat
         [Command]
         private void CmdProcessHit(Vector3 hitPoint, Vector3 hitNormal, float distance, GameObject hitObject)
         {
+            // ✅ CRITICAL FIX: Null hitObject = environment hit (wall, floor, etc)
+            // Environment hit'leri için sadece VFX göster, damage yok
             if (hitObject == null)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning("⚠️ [WeaponSystem SERVER] Received null hit object");
+                Debug.Log($"🎯 [WeaponSystem SERVER] Environment hit at {hitPoint}");
                 #endif
+                // Show impact effect for environment hits
+                SurfaceType surface = DetermineSurfaceType(null);
+                RpcShowImpactEffect(hitPoint, hitNormal, surface, false, false);
                 return;
             }
 
@@ -885,12 +882,15 @@ namespace TacticalCombat.Combat
             }
 
             // ✅ CRITICAL FIX: Validate hit angle (prevent impossible shots like 180° behind)
-            if (playerCamera == null) return;
+            // ✅ FIX: Server'da camera olmayabilir - transform kullan (server-authoritative)
+            Vector3 serverPlayerPos = playerCamera != null 
+                ? playerCamera.transform.position 
+                : transform.position;
+            Vector3 serverPlayerForward = playerCamera != null 
+                ? playerCamera.transform.forward 
+                : transform.forward;
             
-            Vector3 serverPlayerPos = playerCamera.transform.position;
-            Vector3 serverPlayerForward = playerCamera.transform.forward;
             Vector3 hitDirection = (hitPoint - serverPlayerPos).normalized;
-            
             float angle = Vector3.Angle(serverPlayerForward, hitDirection);
             const float MAX_HIT_ANGLE = 90f; // 90° cone (FPS standard)
             
@@ -1099,6 +1099,10 @@ namespace TacticalCombat.Combat
         
         private SurfaceType DetermineSurfaceType(Collider collider)
         {
+            // ✅ CRITICAL FIX: Null safety for environment hits
+            if (collider == null)
+                return SurfaceType.Generic;
+            
             // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
             if (collider.TryGetComponent<Health>(out _))
                 return SurfaceType.Flesh;
