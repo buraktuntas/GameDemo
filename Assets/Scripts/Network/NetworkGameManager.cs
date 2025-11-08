@@ -126,8 +126,23 @@ namespace TacticalCombat.Network
             // This log helps verify the sync is happening
         }
 
+        /// <summary>
+        /// ✅ CRITICAL FIX: Called when a client tries to connect to server
+        /// </summary>
+        public override void OnServerConnect(NetworkConnectionToClient conn)
+        {
+            base.OnServerConnect(conn);
+            Debug.Log("═══════════════════════════════════════");
+            Debug.Log($"✅ [NetworkGameManager SERVER] Client connecting! ConnectionID: {conn.connectionId}");
+            Debug.Log($"   Remote Address: {conn.address}");
+            Debug.Log($"   Total Connections: {NetworkServer.connections.Count}");
+            Debug.Log("═══════════════════════════════════════");
+        }
+
         public override void OnServerDisconnect(NetworkConnectionToClient conn)
         {
+            Debug.Log($"⚠️ [NetworkGameManager SERVER] Client disconnecting! ConnectionID: {conn.connectionId}");
+            
             // Update team counts when player leaves
             if (conn.identity != null)
             {
