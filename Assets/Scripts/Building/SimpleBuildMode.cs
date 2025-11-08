@@ -864,13 +864,13 @@ namespace TacticalCombat.Building
             // Get player controller for team
             var playerController = GetComponent<PlayerController>();
             if (playerController == null)
-            {
+                {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogError("❌ [SimpleBuildMode] PlayerController not found!");
                 #endif
                 RpcPlacementRejected("PlayerController not found");
-                return;
-            }
+                    return;
+                }
 
             // Create BuildRequest
             BuildRequest request = new BuildRequest(position, rotation, structureType, netId);

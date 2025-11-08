@@ -20,7 +20,7 @@ namespace TacticalCombat.Traps
 
         [SerializeField] protected float armingDelay = 2f;
         protected float armingTime;
-        
+
         // ✅ MEDIUM PRIORITY FIX: Prevent double-initialization
         private bool isInitialized = false;
 
@@ -94,7 +94,7 @@ namespace TacticalCombat.Traps
         protected virtual void OnTriggerEnter(Collider other)
         {
             if (!isServer || !isArmed || isTriggered) return;
-            
+
             // ✅ MEDIUM PRIORITY FIX: Rate limit triggering (prevent spam)
             if (Time.time - lastTriggerTime < TRIGGER_COOLDOWN) return;
 

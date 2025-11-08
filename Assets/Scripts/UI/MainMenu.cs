@@ -475,6 +475,34 @@ namespace TacticalCombat.UI
 
             if (networkManager != null)
             {
+                // ✅ CRITICAL FIX: Host başlatılırken networkAddress'i boş bırak veya local IP kullan
+                // Server tüm interface'lerde dinlemeli, sadece localhost'ta değil
+                string currentAddress = networkManager.networkAddress;
+                
+                // Eğer localhost veya 127.0.0.1 ise, boş bırak (server tüm interface'lerde dinler)
+                if (currentAddress == "localhost" || currentAddress == "127.0.0.1")
+                {
+                    // Boş bırak - Mirror server tüm interface'lerde dinleyecek
+                    networkManager.networkAddress = "";
+                    Debug.Log("✅ [MainMenu] Host: networkAddress cleared (server will listen on all interfaces)");
+                }
+                else
+                {
+                    Debug.Log($"✅ [MainMenu] Host: Using networkAddress: {currentAddress}");
+                }
+
+                // ✅ CRITICAL FIX: Transport port kontrolü
+                var transport = networkManager.transport as kcp2k.KcpTransport;
+                if (transport != null)
+                {
+                    Debug.Log($"✅ [MainMenu] Host: Transport type: KcpTransport, Port: {transport.port}");
+                    Debug.Log($"   DualMode: {transport.DualMode} (should be true for IPv4/IPv6 support)");
+                }
+                else
+                {
+                    Debug.LogWarning("⚠️ [MainMenu] Host: Transport is not KcpTransport!");
+                }
+
                 networkManager.StartHost();
 
                 // Hide Main Menu
@@ -542,7 +570,12 @@ namespace TacticalCombat.UI
                 ipAddress = "localhost";
             }
 
-            Debug.Log($"🎮 Connecting to {ipAddress}...");
+            // ✅ CRITICAL FIX: IP adresini temizle (boşlukları kaldır)
+            ipAddress = ipAddress.Trim();
+
+            Debug.Log("═══════════════════════════════════════");
+            Debug.Log($"🎮 [MainMenu] Connecting to {ipAddress}...");
+            Debug.Log("═══════════════════════════════════════");
 
             if (networkManager != null)
             {
@@ -566,12 +599,24 @@ namespace TacticalCombat.UI
                     return;
                 }
 
-                Debug.Log($"✅ [MainMenu] NetworkManager ready - Transport: {networkManager.transport.GetType().Name}");
+                var transport = networkManager.transport as kcp2k.KcpTransport;
+                if (transport != null)
+                {
+                    Debug.Log($"✅ [MainMenu] Transport: KcpTransport");
+                    Debug.Log($"✅ [MainMenu] Port: {transport.port}");
+                    Debug.Log($"✅ [MainMenu] DualMode: {transport.DualMode}");
+                }
+                else
+                {
+                    Debug.LogWarning($"⚠️ [MainMenu] Transport type: {networkManager.transport.GetType().Name}");
+                }
+
                 Debug.Log($"✅ [MainMenu] Setting network address to: {ipAddress}");
-                
                 networkManager.networkAddress = ipAddress;
                 
-                Debug.Log($"✅ [MainMenu] Starting client...");
+                Debug.Log($"✅ [MainMenu] Starting client connection...");
+                Debug.Log($"   Target: {ipAddress}:{(transport != null ? transport.port.ToString() : "7777")}");
+                
                 networkManager.StartClient();
 
                 // Hide Main Menu

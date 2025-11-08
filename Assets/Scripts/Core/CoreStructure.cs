@@ -97,7 +97,7 @@ namespace TacticalCombat.Core
 
             // ✅ PHASE 2: Manual RPC instead of SyncVar hook (prevents double-fire)
             RpcOnHealthChanged(currentHealth, maxHealth);
-            
+
             // Notify clients
             RpcOnDamaged();
 

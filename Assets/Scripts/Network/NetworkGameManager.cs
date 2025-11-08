@@ -25,10 +25,30 @@ namespace TacticalCombat.Network
             
             Debug.Log("═══════════════════════════════════════");
             Debug.Log("✅ [NetworkGameManager SERVER] Server started!");
-            Debug.Log($"   Network Address: {networkAddress}");
-            Debug.Log($"   Port: {(transport != null ? (transport as kcp2k.KcpTransport)?.port.ToString() : "Unknown")}");
+            Debug.Log($"   Network Address: {(string.IsNullOrEmpty(networkAddress) ? "ALL INTERFACES (0.0.0.0)" : networkAddress)}");
+            
+            var kcpTransport = transport as kcp2k.KcpTransport;
+            if (kcpTransport != null)
+            {
+                Debug.Log($"   Port: {kcpTransport.port}");
+                Debug.Log($"   DualMode: {kcpTransport.DualMode} (IPv4/IPv6 support)");
+                Debug.Log($"   ✅ Server is listening on ALL network interfaces (0.0.0.0:{kcpTransport.port})");
+            }
+            else
+            {
+                Debug.Log($"   Port: {(transport != null ? "Unknown" : "No Transport")}");
+            }
+            
             Debug.Log($"   Max Connections: {maxConnections}");
             Debug.Log("═══════════════════════════════════════");
+            
+            // ✅ CRITICAL FIX: Eğer networkAddress localhost ise uyarı ver
+            if (networkAddress == "localhost" || networkAddress == "127.0.0.1")
+            {
+                Debug.LogWarning("⚠️ [NetworkGameManager] WARNING: networkAddress is set to localhost!");
+                Debug.LogWarning("   Server may only accept connections from localhost.");
+                Debug.LogWarning("   For LAN connections, set networkAddress to empty string or your LAN IP.");
+            }
         }
 
         public override void OnStopServer()
@@ -210,6 +230,33 @@ namespace TacticalCombat.Network
             Debug.LogError($"   Error Type: {error}");
             Debug.LogError($"   Reason: {reason}");
             Debug.LogError($"   Network Address: {networkAddress}");
+            
+            var kcpTransport = transport as kcp2k.KcpTransport;
+            if (kcpTransport != null)
+            {
+                Debug.LogError($"   Port: {kcpTransport.port}");
+            }
+            
+            // ✅ CRITICAL FIX: Yaygın hatalar için çözüm önerileri
+            if (reason.Contains("Connection refused") || reason.Contains("No connection"))
+            {
+                Debug.LogError("");
+                Debug.LogError("🔧 ÇÖZÜM ÖNERİLERİ:");
+                Debug.LogError("   1. Host PC'de firewall'ın port 7777'yi açtığından emin ol");
+                Debug.LogError("   2. Host PC'de server'ın çalıştığından emin ol");
+                Debug.LogError("   3. IP adresinin doğru olduğundan emin ol (192.168.1.110)");
+                Debug.LogError("   4. Her iki PC'nin aynı ağda olduğundan emin ol");
+                Debug.LogError("   5. Host PC'de NetworkManager'ın networkAddress'inin boş veya 0.0.0.0 olduğundan emin ol");
+            }
+            else if (reason.Contains("timeout") || reason.Contains("Timeout"))
+            {
+                Debug.LogError("");
+                Debug.LogError("🔧 ÇÖZÜM ÖNERİLERİ:");
+                Debug.LogError("   1. Firewall kontrolü yap");
+                Debug.LogError("   2. Router'da port forwarding gerekebilir");
+                Debug.LogError("   3. Antivirus yazılımı bağlantıyı engelliyor olabilir");
+            }
+            
             Debug.LogError("═══════════════════════════════════════");
         }
 

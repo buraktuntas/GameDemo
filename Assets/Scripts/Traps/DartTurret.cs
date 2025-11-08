@@ -91,8 +91,8 @@ namespace TacticalCombat.Traps
                 {
                     // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent (faster, no GC)
                     if (hit.collider.TryGetComponent<Combat.Health>(out var health))
-                    {
-                        health.TakeDamage(dartDamage);
+                {
+                    health.TakeDamage(dartDamage);
                     }
                 }
                 else

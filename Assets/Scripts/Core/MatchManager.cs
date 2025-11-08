@@ -264,7 +264,7 @@ namespace TacticalCombat.Core
                     team = Team.TeamA;
                 }
                 else if (clanBId == clanId)
-                {
+            {
                     // Player's clan is ClanB - assign to TeamB
                     team = Team.TeamB;
                 }
@@ -287,10 +287,10 @@ namespace TacticalCombat.Core
                 {
                     // Player selected a specific team - use it
                     Debug.Log($"✅ Player {playerId} registered with SELECTED team: {team}, Role {role}");
-                }
-                else
-                {
-                    // Team was not selected (Auto-balance) - assign automatically
+            }
+            else
+            {
+                // Team was not selected (Auto-balance) - assign automatically
                     team = AssignTeamAutoBalance();
                     Debug.Log($"✅ Player {playerId} registered with AUTO-BALANCED team: {team}, Role {role}");
                 }

@@ -24,12 +24,27 @@ namespace TacticalCombat.Network
             {
                 transport.port = port;
                 Debug.Log($"🎮 [SimpleNetworkHUD] Port: {port}");
+                
+                // ✅ CRITICAL FIX: DualMode'u aktif et (IPv4 ve IPv6 desteği)
+                if (!transport.DualMode)
+                {
+                    transport.DualMode = true;
+                    Debug.Log($"✅ [SimpleNetworkHUD] DualMode enabled for IPv4/IPv6 support");
+                }
+            }
             
-            // Default to localhost in local testing unless overridden
-            if (string.IsNullOrWhiteSpace(networkManager.networkAddress))
+            // ✅ CRITICAL FIX: Host için networkAddress'i boş bırak (tüm interface'lerde dinler)
+            // Client için kullanıcı IP girecek, bu yüzden burada ayarlamıyoruz
+            // Eğer localhost ayarlıysa, sadece uyarı ver ama değiştirme (client için gerekebilir)
+            if (!string.IsNullOrWhiteSpace(networkManager.networkAddress))
             {
-                networkManager.networkAddress = "127.0.0.1";
-            }            }
+                if (networkManager.networkAddress == "localhost" || networkManager.networkAddress == "127.0.0.1")
+                {
+                    Debug.LogWarning($"⚠️ [SimpleNetworkHUD] networkAddress is '{networkManager.networkAddress}'");
+                    Debug.LogWarning("   For LAN hosting, consider leaving networkAddress empty in NetworkManager.");
+                    Debug.LogWarning("   Client will set the correct IP when connecting.");
+                }
+            }
             
             // ✅ FIX: Spawnable prefabs kontrolü
             EnsurePlayerPrefabInSpawnableList();
@@ -75,6 +90,12 @@ namespace TacticalCombat.Network
                 // H tuşu = Host
                 if (Input.GetKeyDown(KeyCode.H))
                 {
+                    // ✅ CRITICAL FIX: Host başlatılırken networkAddress'i temizle
+                    if (networkManager.networkAddress == "localhost" || networkManager.networkAddress == "127.0.0.1")
+                    {
+                        networkManager.networkAddress = "";
+                        Debug.Log("✅ [H] Cleared networkAddress for host (will listen on all interfaces)");
+                    }
                     networkManager.StartHost();
                     Debug.Log("🚀 [H] Starting HOST...");
                 }
@@ -82,8 +103,16 @@ namespace TacticalCombat.Network
                 // C tuşu = Client
                 if (Input.GetKeyDown(KeyCode.C))
                 {
+                    // Client için networkAddress ayarlanmalı (kullanıcıdan alınmalı)
+                    // Bu basit HUD'da default olarak localhost kullanıyoruz
+                    if (string.IsNullOrWhiteSpace(networkManager.networkAddress))
+                    {
+                        networkManager.networkAddress = "127.0.0.1";
+                        Debug.LogWarning("⚠️ [C] networkAddress was empty, set to 127.0.0.1");
+                        Debug.LogWarning("   For LAN connection, set networkAddress to server IP first!");
+                    }
                     networkManager.StartClient();
-                    Debug.Log("🚀 [C] Starting CLIENT...");
+                    Debug.Log($"🚀 [C] Starting CLIENT to {networkManager.networkAddress}...");
                 }
             }
         }
@@ -142,6 +171,12 @@ namespace TacticalCombat.Network
                 GUI.backgroundColor = new Color(0.3f, 0.8f, 0.3f);
                 if (GUI.Button(new Rect(x, y, buttonWidth * 1.8f, buttonHeight), "LAN HOST (H)", buttonStyle))
                 {
+                    // ✅ CRITICAL FIX: Host başlatılırken networkAddress'i temizle
+                    if (networkManager.networkAddress == "localhost" || networkManager.networkAddress == "127.0.0.1")
+                    {
+                        networkManager.networkAddress = "";
+                        Debug.Log("✅ Cleared networkAddress for host (will listen on all interfaces)");
+                    }
                     networkManager.StartHost();
                     Debug.Log("🚀 Starting HOST...");
                 }
@@ -152,8 +187,15 @@ namespace TacticalCombat.Network
                 GUI.backgroundColor = new Color(0.3f, 0.6f, 1f);
                 if (GUI.Button(new Rect(x, y, buttonWidth * 1.8f, buttonHeight), "LAN CLIENT (C)", buttonStyle))
                 {
+                    // Client için networkAddress ayarlanmalı
+                    if (string.IsNullOrWhiteSpace(networkManager.networkAddress))
+                    {
+                        networkManager.networkAddress = "127.0.0.1";
+                        Debug.LogWarning("⚠️ networkAddress was empty, set to 127.0.0.1");
+                        Debug.LogWarning("   For LAN connection, set networkAddress to server IP first!");
+                    }
                     networkManager.StartClient();
-                    Debug.Log("🚀 Starting CLIENT...");
+                    Debug.Log($"🚀 Starting CLIENT to {networkManager.networkAddress}...");
                 }
                 GUI.backgroundColor = Color.white;
                 y += buttonHeight + spacing;

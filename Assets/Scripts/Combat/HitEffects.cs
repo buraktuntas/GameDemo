@@ -186,7 +186,7 @@ namespace TacticalCombat.Combat
                 ImpactVFXPool.Instance.PlayImpact(hitPosition, Vector3.up, surface, body);
 
                 // ✅ PERFORMANCE FIX: Track coroutine to prevent leaks
-            // Additional local feedback (audio/screen shake/screen FX)
+                // Additional local feedback (audio/screen shake/screen FX)
                 if (currentLocalFeedbackCoroutine != null)
                     StopCoroutine(currentLocalFeedbackCoroutine);
                 currentLocalFeedbackCoroutine = StartCoroutine(PlayLocalFeedback(hitPosition, hitType));
@@ -360,7 +360,7 @@ namespace TacticalCombat.Combat
                 currentLocalFeedbackCoroutine = null;
             }
         }
-
+        
         // Utility methods
         public void PlayHitEffectAtTransform(Transform target, HitType hitType = HitType.Normal)
         {

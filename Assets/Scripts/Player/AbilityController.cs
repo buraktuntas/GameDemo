@@ -22,7 +22,7 @@ namespace TacticalCombat.Player
 
         private PlayerController playerController;
         private InputAction abilityAction;
-        
+
         // ✅ PERFORMANCE FIX: Cache frequently accessed components
         private Combat.Health cachedHealth;
         private Combat.WeaponController cachedWeaponController;
