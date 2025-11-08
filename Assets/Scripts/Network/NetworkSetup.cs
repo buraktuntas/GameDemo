@@ -9,7 +9,8 @@ namespace TacticalCombat.Network
     public class NetworkSetup : MonoBehaviour
     {
         [Header("Network Configuration")]
-        [SerializeField] private string networkAddress = "localhost";
+        [Tooltip("LEAVE EMPTY for Host/Server (listens on all interfaces). Set to server IP for Client (e.g. '192.168.1.110')")]
+        [SerializeField] private string networkAddress = ""; // ✅ FIX: Empty = Host listens on all interfaces
         [SerializeField] private bool autoStartHost = false;
 
         private NetworkManager networkManager;
@@ -49,8 +50,10 @@ namespace TacticalCombat.Network
         {
             if (networkManager != null && !NetworkServer.active)
             {
+                // ✅ FIX: Server should NEVER use networkAddress - always bind to all interfaces
+                networkManager.networkAddress = ""; // Empty = 0.0.0.0 (all interfaces)
                 networkManager.StartServer();
-                Debug.Log("Started as Server");
+                Debug.Log("✅ [NetworkSetup] Started as Server (listening on all interfaces)");
             }
         }
 
@@ -58,9 +61,16 @@ namespace TacticalCombat.Network
         {
             if (networkManager != null && !NetworkClient.isConnected)
             {
+                // ✅ FIX: Validate client address
+                if (string.IsNullOrEmpty(networkAddress))
+                {
+                    Debug.LogError("❌ [NetworkSetup] Client mode requires a server IP address! Please set networkAddress in Inspector (e.g. '192.168.1.110')");
+                    return;
+                }
+
                 networkManager.networkAddress = networkAddress;
                 networkManager.StartClient();
-                Debug.Log($"Started as Client, connecting to {networkAddress}");
+                Debug.Log($"✅ [NetworkSetup] Started as Client, connecting to {networkAddress}");
             }
         }
 

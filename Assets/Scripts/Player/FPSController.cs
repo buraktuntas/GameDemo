@@ -498,26 +498,29 @@ namespace TacticalCombat.Player
         [Command]
         private void CmdMove(Vector3 predictedPosition, Quaternion predictedRotation, Vector3 input)
         {
-            // Validate position (anti-teleport)
+            // ✅ CRITICAL FIX: Platform-agnostic validation (Mac/Windows compatible)
             float distance = Vector3.Distance(transform.position, predictedPosition);
-            float maxAllowedMove = runSpeed * Time.fixedDeltaTime * 2.5f; // Allow 2.5x for lag compensation
-            
+
+            // ✅ FIX: Use constant time instead of Time.fixedDeltaTime (platform-agnostic)
+            // Mac and Windows may have different fixedDeltaTime values
+            const float MOVE_TIME_WINDOW = 0.1f; // 100ms movement window
+            float maxAllowedMove = runSpeed * MOVE_TIME_WINDOW * 2.5f; // Allow 2.5x for lag compensation
+
             if (distance > maxAllowedMove)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"🚨 [FPSController SERVER] Teleport detected: {distance}m > {maxAllowedMove}m from player {netId}");
+                Debug.LogWarning($"🚨 [FPSController SERVER] Teleport detected: {distance:F3}m > {maxAllowedMove:F3}m from player {netId}");
                 #endif
                 // Reject - don't move, client will be corrected by RpcSetPosition
                 return;
             }
-            
-            // Validate movement speed
+
+            // Validate movement speed (platform-agnostic)
             Vector3 serverMove = CalculateServerMovement(input);
-            float serverSpeed = serverMove.magnitude;
-            
-            // Calculate predicted speed from distance moved
-            float predictedSpeed = distance / Time.fixedDeltaTime;
-            
+
+            // ✅ FIX: Calculate speed using constant time window (not fixedDeltaTime)
+            float predictedSpeed = distance / MOVE_TIME_WINDOW;
+
             // ✅ PROFESSIONAL FIX: Increased tolerance for normal gameplay (zıplama, koşma, lag)
             // Allow 50% tolerance for normal gameplay variations (was 15% - too strict)
             float maxAllowedSpeed = runSpeed * 1.5f; // 50% tolerance
@@ -589,16 +592,20 @@ namespace TacticalCombat.Player
             }
             else
             {
-                // Local player: Only correct if position differs significantly (anti-teleport)
+                // ✅ CRITICAL FIX: Local player correction threshold reduced (0.5m → 0.1m)
+                // Also use smooth lerp instead of instant snap
                 float correctionDistance = Vector3.Distance(transform.position, serverPosition);
-                if (correctionDistance > 0.5f)
+
+                if (correctionDistance > 0.1f) // 10cm threshold (was 50cm - too high!)
                 {
-                    // Server corrected us - apply correction
-                    transform.position = Vector3.Lerp(transform.position, serverPosition, 0.5f);
+                    // ✅ FIX: Smooth correction instead of instant snap
+                    float lerpFactor = Mathf.Clamp01(correctionDistance / 0.5f); // Smooth 0→1 based on distance
+                    transform.position = Vector3.Lerp(transform.position, serverPosition, lerpFactor * 0.8f);
+
                     #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     if (showDebugInfo)
                     {
-                        Debug.Log($"🔧 [FPSController] Position corrected by server: {correctionDistance}m");
+                        Debug.Log($"🔧 [FPSController] Position corrected by server: {correctionDistance:F3}m (smooth lerp)");
                     }
                     #endif
                 }

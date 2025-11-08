@@ -15,7 +15,7 @@ namespace TacticalCombat.Combat
         [SerializeField] private float range = 100f;
         [SerializeField] private float fireRate = 0.5f; // Saniyede 2 atış
         [SerializeField] private LayerMask hitLayers;
-        [SerializeField] [Range(15f, 179f)] private float maxClientAimAngle = 85f; // anti-spoof guard
+        [SerializeField] [Range(15f, 179f)] private float maxClientAimAngle = 45f; // ✅ FIX: 85° → 45° (anti-aimbot)
 
         [Header("Effects")]
         [SerializeField] private GameObject hitEffectPrefab;

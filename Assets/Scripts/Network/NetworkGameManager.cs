@@ -25,6 +25,14 @@ namespace TacticalCombat.Network
             
             Debug.Log("═══════════════════════════════════════");
             Debug.Log("✅ [NetworkGameManager SERVER] Server started!");
+
+            // ✅ FIX: Force networkAddress to empty for server (never bind to specific IP)
+            if (!string.IsNullOrEmpty(networkAddress) && networkAddress != "0.0.0.0")
+            {
+                Debug.LogWarning($"⚠️ [NetworkGameManager] Server networkAddress was '{networkAddress}' - forcing to empty (all interfaces)");
+                networkAddress = ""; // Force bind to all interfaces
+            }
+
             Debug.Log($"   Network Address: {(string.IsNullOrEmpty(networkAddress) ? "ALL INTERFACES (0.0.0.0)" : networkAddress)}");
             
             var kcpTransport = transport as kcp2k.KcpTransport;
@@ -40,15 +48,33 @@ namespace TacticalCombat.Network
             }
             
             Debug.Log($"   Max Connections: {maxConnections}");
-            Debug.Log("═══════════════════════════════════════");
-            
-            // ✅ CRITICAL FIX: Eğer networkAddress localhost ise uyarı ver
-            if (networkAddress == "localhost" || networkAddress == "127.0.0.1")
+
+            // ✅ CRITICAL FIX: Help message for LAN play
+            Debug.Log("");
+            Debug.Log("🌐 [NetworkGameManager] LAN MULTIPLAYER SETUP:");
+            Debug.Log($"   HOST PC (this machine): Keep networkAddress EMPTY");
+            Debug.Log($"   CLIENT PC: Set networkAddress to this PC's IP");
+
+            // Show local IP addresses
+            try
             {
-                Debug.LogWarning("⚠️ [NetworkGameManager] WARNING: networkAddress is set to localhost!");
-                Debug.LogWarning("   Server may only accept connections from localhost.");
-                Debug.LogWarning("   For LAN connections, set networkAddress to empty string or your LAN IP.");
+                string localIPs = "";
+                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+                foreach (var ip in host.AddressList)
+                {
+                    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    {
+                        localIPs += $"      - {ip}\n";
+                    }
+                }
+                if (!string.IsNullOrEmpty(localIPs))
+                {
+                    Debug.Log($"   📍 This PC's LAN IP addresses:\n{localIPs}");
+                }
             }
+            catch { }
+
+            Debug.Log("═══════════════════════════════════════");
         }
 
         public override void OnStopServer()
@@ -162,21 +188,37 @@ namespace TacticalCombat.Network
         public override void OnServerDisconnect(NetworkConnectionToClient conn)
         {
             Debug.Log($"⚠️ [NetworkGameManager SERVER] Client disconnecting! ConnectionID: {conn.connectionId}");
-            
-            // Update team counts when player leaves
+
+            // ✅ FIX: Cleanup player state before disconnect
             if (conn.identity != null)
             {
                 var player = conn.identity.GetComponent<Player.PlayerController>();
                 if (player != null)
                 {
+                    // Update team counts
                     if (player.team == Team.TeamA)
                         teamACount--;
                     else if (player.team == Team.TeamB)
                         teamBCount--;
+
+                    // ✅ CRITICAL FIX: Unregister from MatchManager (prevents crash)
+                    if (MatchManager.Instance != null)
+                    {
+                        MatchManager.Instance.UnregisterPlayer(player.netId);
+                        Debug.Log($"✅ [NetworkGameManager] Player {player.netId} unregistered from MatchManager");
+                    }
+
+                    // ✅ FIX: Remove from LobbyManager if in lobby
+                    if (Network.LobbyManager.Instance != null)
+                    {
+                        // LobbyManager will handle room cleanup
+                        Debug.Log($"✅ [NetworkGameManager] Player {player.netId} will be cleaned from lobby");
+                    }
                 }
             }
 
             base.OnServerDisconnect(conn);
+            Debug.Log($"✅ [NetworkGameManager] Client {conn.connectionId} fully disconnected");
         }
 
         // ═══════════════════════════════════════════════════════════

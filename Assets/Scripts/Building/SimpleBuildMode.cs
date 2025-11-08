@@ -735,43 +735,41 @@ namespace TacticalCombat.Building
             CmdPlaceStructure(placementPosition, placementRotation, currentStructureIndex);
         }
         
-        private float lastServerPlacementTime = 0f;
-        private const float SERVER_PLACEMENT_COOLDOWN = 0.25f;  // Server-side cooldown (increased to prevent freeze)
-        private int placementCountThisSecond = 0;
-        private float placementCountResetTime = 0f;
-        private const int MAX_PLACEMENTS_PER_SECOND = 4; // Max 4 structures per second
+        // ✅ CRITICAL FIX: Per-player rate limiting (prevents budget bypass exploit)
+        private static Dictionary<ulong, Queue<float>> playerPlacementTimes = new Dictionary<ulong, Queue<float>>();
+        private const float RATE_LIMIT_WINDOW = 5f; // 5 second window
+        private const int MAX_PLACEMENTS_PER_WINDOW = 10; // Max 10 structures per 5 seconds
+        private const float SERVER_PLACEMENT_COOLDOWN = 0.25f; // 250ms minimum between placements
 
         [Command]
         private void CmdPlaceStructure(Vector3 position, Quaternion rotation, int structureIndex)
         {
-            // ✅ ANTI-SPAM: Rate limiting per second
-            if (Time.time - placementCountResetTime >= 1f)
+            // ✅ CRITICAL FIX: Per-player rate limiting (prevents spam exploit)
+            if (!playerPlacementTimes.ContainsKey(netId))
             {
-                placementCountThisSecond = 0;
-                placementCountResetTime = Time.time;
+                playerPlacementTimes[netId] = new Queue<float>();
             }
 
-            if (placementCountThisSecond >= MAX_PLACEMENTS_PER_SECOND)
+            Queue<float> placementTimes = playerPlacementTimes[netId];
+
+            // Remove old placements outside the time window
+            while (placementTimes.Count > 0 && Time.time - placementTimes.Peek() > RATE_LIMIT_WINDOW)
+            {
+                placementTimes.Dequeue();
+            }
+
+            // Check rate limit
+            if (placementTimes.Count >= MAX_PLACEMENTS_PER_WINDOW)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Rate limit: Max {MAX_PLACEMENTS_PER_SECOND} placements/second");
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Player {netId} exceeded rate limit: {placementTimes.Count}/{MAX_PLACEMENTS_PER_WINDOW} in {RATE_LIMIT_WINDOW}s");
                 #endif
-                RpcPlacementRejected("Rate limit exceeded");
+                RpcPlacementRejected($"Rate limit: Max {MAX_PLACEMENTS_PER_WINDOW} placements per {RATE_LIMIT_WINDOW}s");
                 return;
             }
 
-            placementCountThisSecond++;
-
-            // ✅ ANTI-CHEAT: Server-side cooldown to prevent spam
-            if (Time.time - lastServerPlacementTime < SERVER_PLACEMENT_COOLDOWN)
-            {
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Cooldown active ({SERVER_PLACEMENT_COOLDOWN}s)");
-                #endif
-                RpcPlacementRejected("Cooldown active");
-                return;
-            }
-            lastServerPlacementTime = Time.time;
+            // Add this placement to history
+            placementTimes.Enqueue(Time.time);
 
             // ✅ MEDIUM PRIORITY: Snap point validation (ensure client sent snapped position)
             Vector3 snappedPosition = SnapToGrid(position);

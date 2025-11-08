@@ -24,6 +24,9 @@ namespace TacticalCombat.Combat
         private float lastDamageTime = 0f;
         private const float COMBAT_LOCKOUT_DURATION = 3f; // 3 seconds after taking damage
 
+        // ✅ FIX: Cache NetworkManager reference (performance optimization)
+        private static Network.NetworkGameManager cachedNetworkManager;
+
         private void Start()
         {
             if (isServer)
@@ -266,16 +269,20 @@ namespace TacticalCombat.Combat
                 }
             }
 
-            // Fallback: Try NetworkGameManager spawn points first
-            var networkManager = FindFirstObjectByType<Network.NetworkGameManager>();
-            if (networkManager != null)
+            // ✅ FIX: Cache NetworkManager reference (don't call FindFirstObjectByType every respawn!)
+            if (cachedNetworkManager == null)
+            {
+                cachedNetworkManager = FindFirstObjectByType<Network.NetworkGameManager>();
+            }
+
+            if (cachedNetworkManager != null)
             {
                 // Use reflection to get spawn points (private field)
-                var spawnPoints = networkManager.GetType().GetField("teamASpawnPoints", 
+                var spawnPoints = cachedNetworkManager.GetType().GetField("teamASpawnPoints",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 if (spawnPoints != null)
                 {
-                    var points = spawnPoints.GetValue(networkManager) as Transform[];
+                    var points = spawnPoints.GetValue(cachedNetworkManager) as Transform[];
                     if (points != null && points.Length > 0)
                     {
                         return points[Random.Range(0, points.Length)].position;

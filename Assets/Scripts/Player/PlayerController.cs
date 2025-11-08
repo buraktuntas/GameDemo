@@ -133,18 +133,29 @@ namespace TacticalCombat.Player
                 Debug.Log($"[Server] Team was None, will be auto-balanced by MatchManager");
             }
 
-            // Apply selections
-            team = selectedTeam;
-            role = selectedRole;
-
-            // Re-register with MatchManager with new team/role
+            // ✅ FIX: Register FIRST (MatchManager may change team via auto-balance)
             if (MatchManager.Instance != null)
             {
-                MatchManager.Instance.RegisterPlayer(netId, team, role);
-                Debug.Log($"[Server] ✅ Player re-registered with Team={team}, Role={role}");
+                MatchManager.Instance.RegisterPlayer(netId, selectedTeam, selectedRole);
             }
 
-            // Update visuals
+            // ✅ FIX: Then apply the RESULT (team might have been auto-balanced by MatchManager)
+            // Read back the actual team assigned by MatchManager
+            var playerState = MatchManager.Instance?.GetPlayerState(netId);
+            if (playerState != null)
+            {
+                team = playerState.team; // Use MatchManager's assigned team
+                role = playerState.role;
+                Debug.Log($"[Server] ✅ Player registered: Requested={selectedTeam}, Assigned={team}, Role={role}");
+            }
+            else
+            {
+                // Fallback: use requested values
+                team = selectedTeam;
+                role = selectedRole;
+            }
+
+            // Update visuals AFTER team is finalized
             RpcUpdateTeamColor(team);
         }
 

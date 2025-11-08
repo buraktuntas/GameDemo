@@ -27,7 +27,13 @@ namespace TacticalCombat.Core
         [SerializeField] private float roundEndDuration = GameConstants.ROUND_END_DURATION;
 
         [Header("Team Tracking")]
+        // ⚠️ NOTE: Dictionary doesn't sync to clients automatically
+        // Client-side UI should query via [ClientRpc] methods or use GetPlayerState via Commands
         private Dictionary<ulong, PlayerState> playerStates = new Dictionary<ulong, PlayerState>();
+
+        // ✅ FIX: Track player count for client-side UI (synced)
+        [SyncVar] private int teamAPlayerCount = 0;
+        [SyncVar] private int teamBPlayerCount = 0;
         
         [Header("Clan System")]
         [SyncVar] private string clanAId;  // Clan A ID (if using clan system)
@@ -303,14 +309,45 @@ namespace TacticalCombat.Core
             }
             else
             {
+                // ✅ FIX: Update player count when team changes
+                Team oldTeam = playerStates[playerId].team;
+                if (oldTeam != team)
+                {
+                    // Remove from old team count
+                    if (oldTeam == Team.TeamA) teamAPlayerCount--;
+                    else if (oldTeam == Team.TeamB) teamBPlayerCount--;
+                }
+
                 // Update existing player (re-registration with new team/role)
                 playerStates[playerId].team = team;
                 playerStates[playerId].role = role;
                 Debug.Log($"♻️ Player {playerId} RE-registered: Team {team}, Role {role}");
             }
 
+            // ✅ FIX: Update synced player counts
+            UpdatePlayerCounts();
+
             // Update player's team visually
             UpdatePlayerTeam(playerId, team);
+        }
+
+        /// <summary>
+        /// ✅ FIX: Update synced player counts for client-side UI
+        /// </summary>
+        [Server]
+        private void UpdatePlayerCounts()
+        {
+            int countA = 0;
+            int countB = 0;
+
+            foreach (var state in playerStates.Values)
+            {
+                if (state.team == Team.TeamA) countA++;
+                else if (state.team == Team.TeamB) countB++;
+            }
+
+            teamAPlayerCount = countA;
+            teamBPlayerCount = countB;
         }
 
         [Server]
@@ -733,10 +770,32 @@ namespace TacticalCombat.Core
         public int GetTeamBWins() => teamBWins;
         public int GetCurrentRound() => currentRound;
 
+        // ✅ FIX: Public getters for synced player counts (client-side UI can use this)
+        public int GetTeamAPlayerCount() => teamAPlayerCount;
+        public int GetTeamBPlayerCount() => teamBPlayerCount;
+
         [Server]
         public PlayerState GetPlayerState(ulong playerId)
         {
             return playerStates.ContainsKey(playerId) ? playerStates[playerId] : null;
+        }
+
+        /// <summary>
+        /// ✅ FIX: Unregister player on disconnect (prevents crash)
+        /// </summary>
+        [Server]
+        public void UnregisterPlayer(ulong playerId)
+        {
+            if (playerStates.ContainsKey(playerId))
+            {
+                Team team = playerStates[playerId].team;
+                playerStates.Remove(playerId);
+
+                // Update synced player counts
+                UpdatePlayerCounts();
+
+                Debug.Log($"🚪 [MatchManager] Player {playerId} unregistered (Team: {team})");
+            }
         }
 
         [Server]

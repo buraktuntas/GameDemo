@@ -356,12 +356,13 @@ namespace TacticalCombat.Network
             
             // ✅ FIX: Update last activity timestamp
             room.lastActivity = Time.time;
-            
-            // Update sync list
+
+            // ✅ CRITICAL FIX: SyncList update requires Remove + Insert (not direct assignment)
             int index = roomList.IndexOf(room);
             if (index >= 0)
             {
-                roomList[index] = room; // Update existing entry
+                roomList.RemoveAt(index); // Remove old
+                roomList.Insert(index, room); // Insert new = triggers sync to clients
             }
             
             // Sync to all clients
@@ -429,12 +430,13 @@ namespace TacticalCombat.Network
             
             // ✅ FIX: Update last activity timestamp
             room.lastActivity = Time.time;
-            
-            // Update sync list
+
+            // ✅ CRITICAL FIX: SyncList update requires Remove + Insert
             int index = roomList.IndexOf(room);
             if (index >= 0)
             {
-                roomList[index] = room;
+                roomList.RemoveAt(index);
+                roomList.Insert(index, room); // Triggers sync
             }
             
             // Sync to all clients
@@ -481,12 +483,13 @@ namespace TacticalCombat.Network
             
             // Mark room as started
             room.isMatchStarted = true;
-            
-            // Update sync list
+
+            // ✅ CRITICAL FIX: SyncList update requires Remove + Insert
             int index = roomList.IndexOf(room);
             if (index >= 0)
             {
-                roomList[index] = room;
+                roomList.RemoveAt(index);
+                roomList.Insert(index, room); // Triggers sync
             }
             
             // Sync to all clients
