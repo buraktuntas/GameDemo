@@ -546,7 +546,32 @@ namespace TacticalCombat.UI
 
             if (networkManager != null)
             {
+                // ✅ CRITICAL FIX: Check NetworkManager state before connecting
+                if (NetworkClient.isConnected)
+                {
+                    Debug.LogWarning("⚠️ [MainMenu] Already connected to server!");
+                    return;
+                }
+
+                if (NetworkServer.active)
+                {
+                    Debug.LogWarning("⚠️ [MainMenu] Server is active, cannot start client!");
+                    return;
+                }
+
+                // ✅ CRITICAL FIX: Check transport before connecting
+                if (networkManager.transport == null)
+                {
+                    Debug.LogError("❌ [MainMenu] NetworkManager has no transport! Cannot connect.");
+                    return;
+                }
+
+                Debug.Log($"✅ [MainMenu] NetworkManager ready - Transport: {networkManager.transport.GetType().Name}");
+                Debug.Log($"✅ [MainMenu] Setting network address to: {ipAddress}");
+                
                 networkManager.networkAddress = ipAddress;
+                
+                Debug.Log($"✅ [MainMenu] Starting client...");
                 networkManager.StartClient();
 
                 // Hide Main Menu
@@ -561,6 +586,10 @@ namespace TacticalCombat.UI
 
                 // Show Team Selection first (Correct flow: Team → Role)
                 ShowTeamSelection();
+            }
+            else
+            {
+                Debug.LogError("❌ [MainMenu] NetworkManager is NULL! Cannot connect.");
             }
         }
 

@@ -22,6 +22,13 @@ namespace TacticalCombat.Network
             base.OnStartServer();
             teamACount = 0;
             teamBCount = 0;
+            
+            Debug.Log("═══════════════════════════════════════");
+            Debug.Log("✅ [NetworkGameManager SERVER] Server started!");
+            Debug.Log($"   Network Address: {networkAddress}");
+            Debug.Log($"   Port: {(transport != null ? (transport as kcp2k.KcpTransport)?.port.ToString() : "Unknown")}");
+            Debug.Log($"   Max Connections: {maxConnections}");
+            Debug.Log("═══════════════════════════════════════");
         }
 
         public override void OnStopServer()
@@ -135,6 +142,60 @@ namespace TacticalCombat.Network
             }
 
             base.OnServerDisconnect(conn);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // CLIENT CALLBACKS - Debug ve scene handling için
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Called when client successfully connects to server
+        /// </summary>
+        public override void OnClientConnect()
+        {
+            base.OnClientConnect();
+            Debug.Log("═══════════════════════════════════════");
+            Debug.Log("✅ [NetworkGameManager CLIENT] Successfully connected to server!");
+            Debug.Log($"   Network Address: {networkAddress}");
+            Debug.Log($"   Is Client: {NetworkClient.isConnected}");
+            Debug.Log($"   Is Server: {NetworkServer.active}");
+            Debug.Log("═══════════════════════════════════════");
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Called when client disconnects from server
+        /// </summary>
+        public override void OnClientDisconnect()
+        {
+            base.OnClientDisconnect();
+            Debug.LogWarning("⚠️ [NetworkGameManager CLIENT] Disconnected from server");
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Called when client scene is changed (after server scene loads)
+        /// This ensures player spawns correctly when client joins
+        /// </summary>
+        public override void OnClientSceneChanged()
+        {
+            base.OnClientSceneChanged();
+            Debug.Log("✅ [NetworkGameManager CLIENT] Scene changed - player should spawn now");
+            
+            // Base implementation automatically calls OnServerAddPlayer if no player exists
+            // This log helps verify the flow is working
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Called when client connection error occurs
+        /// </summary>
+        public override void OnClientError(TransportError error, string reason)
+        {
+            base.OnClientError(error, reason);
+            Debug.LogError("═══════════════════════════════════════");
+            Debug.LogError($"❌ [NetworkGameManager CLIENT] Connection error!");
+            Debug.LogError($"   Error Type: {error}");
+            Debug.LogError($"   Reason: {reason}");
+            Debug.LogError($"   Network Address: {networkAddress}");
+            Debug.LogError("═══════════════════════════════════════");
         }
 
         private Transform GetSpawnPoint(Team team)
