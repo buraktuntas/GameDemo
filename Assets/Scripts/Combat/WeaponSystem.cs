@@ -62,6 +62,7 @@ namespace TacticalCombat.Combat
         // ✅ FIX: Track coroutines to prevent memory leaks
         private Coroutine currentCameraShakeCoroutine;
         private Coroutine currentReloadCoroutine;
+        private Coroutine retryCameraCoroutine; // ✅ FIX: Store retry coroutine to stop it when camera is found
         private Vector3 originalWeaponPos;
         private Quaternion originalWeaponRot;
         private bool isAiming;
@@ -248,24 +249,27 @@ namespace TacticalCombat.Combat
             if (playerCamera == null)
             {
                 // ✅ HIGH PRIORITY FIX: Get camera from FPSController (never use Camera.main)
-                var fpsController = GetComponent<TacticalCombat.Player.FPSController>();
+                // ✅ CRITICAL FIX: Use GetComponentInParent to find FPSController even if WeaponSystem is on a child GameObject
+                var fpsController = GetComponentInParent<TacticalCombat.Player.FPSController>();
                 if (fpsController != null)
                 {
                     playerCamera = fpsController.GetCamera();
                 }
 
-                // ✅ FIX: If camera still null, disable weapon system (Camera.main is banned)
+                // ✅ PROFESSIONAL FIX: If camera still null, retry in coroutine (FPSController might not be ready yet)
                 if (playerCamera == null)
                 {
                     #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    Debug.LogError("❌ [WeaponSystem] No camera found! FPSController not available. Camera.main usage is banned in Unity 6.");
+                    Debug.LogWarning("⚠️ [WeaponSystem] Camera not found yet, will retry... (FPSController might not be initialized)");
                     #endif
-                    enabled = false; // Disable weapon system if no camera
-                    return;
+                    // Retry camera assignment in coroutine (FPSController.OnStartLocalPlayer runs after Start)
+                    retryCameraCoroutine = StartCoroutine(RetryCameraAssignment());
+                    // Continue with initialization - coroutine will handle camera assignment
                 }
             }
                 
             // ✅ CRITICAL FIX: Initialize ammo only on server (SyncVar will sync to clients)
+            // Note: If camera is null, this will still run but weapon won't fire until camera is found
             if (isServer)
             {
                 if (currentWeapon != null)
@@ -350,6 +354,18 @@ namespace TacticalCombat.Combat
         
         private void Update()
         {
+            // ✅ PROFESSIONAL FIX: Try to assign camera if still null (for local player)
+            if (isLocalPlayer && playerCamera == null)
+            {
+                TryAssignCamera();
+            }
+            
+            // ✅ FIX: Don't process input if weapon system is disabled or camera is missing
+            if (!enabled || playerCamera == null) return;
+            
+            // ✅ FIX: Only process input for local player
+            if (!isLocalPlayer) return;
+            
             // Retry finding InputManager if missing
             if (inputManager == null)
             {
@@ -593,7 +609,7 @@ namespace TacticalCombat.Combat
         }
         
         /// <summary>
-        /// ✅ CRITICAL FIX: Sync fire effects to all clients
+        /// ✅ CRITICAL FIX: Sync fire effects to all clients with spatial audio
         /// </summary>
         [ClientRpc]
         private void RpcPlayFireEffects(Vector3 muzzlePosition, Vector3 muzzleDirection)
@@ -605,8 +621,11 @@ namespace TacticalCombat.Combat
                 weaponHolder.rotation = Quaternion.LookRotation(muzzleDirection);
             }
             
-            PlayMuzzleFlash();
-            PlayFireSound();
+            // ✅ PROFESSIONAL FIX: Play muzzle flash at 3D position
+            PlayMuzzleFlashAt(muzzlePosition, muzzleDirection);
+            
+            // ✅ PROFESSIONAL FIX: Play spatial fire sound (3D audio for other players)
+            PlayFireSoundAt(muzzlePosition, !isLocalPlayer); // Spatial audio for remote players
             
             // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
             if (weaponAnimator != null)
@@ -622,6 +641,60 @@ namespace TacticalCombat.Combat
                     StopCoroutine(currentCameraShakeCoroutine);
                 }
                 currentCameraShakeCoroutine = StartCoroutine(CameraShake(0.05f, 0.1f));
+            }
+        }
+        
+        /// <summary>
+        /// ✅ PROFESSIONAL FIX: Play muzzle flash at specific 3D position
+        /// </summary>
+        private void PlayMuzzleFlashAt(Vector3 position, Vector3 direction)
+        {
+            if (muzzleFlashPrefab == null) return;
+            
+            GameObject flash = GetPooledMuzzleFlash();
+            if (flash != null)
+            {
+                flash.transform.position = position;
+                flash.transform.rotation = Quaternion.LookRotation(direction);
+                flash.SetActive(true);
+                
+                StartCoroutine(ReturnMuzzleFlashToPool(flash, 0.1f));
+            }
+        }
+        
+        /// <summary>
+        /// ✅ PROFESSIONAL FIX: Play fire sound at 3D position with spatial audio
+        /// </summary>
+        private void PlayFireSoundAt(Vector3 position, bool useSpatialAudio)
+        {
+            if (fireSounds == null || fireSounds.Length == 0) return;
+            
+            AudioClip clip = fireSounds[Random.Range(0, fireSounds.Length)];
+            if (clip == null) return;
+            
+            // ✅ PROFESSIONAL FIX: Use spatial audio for remote players, 2D for local player
+            if (useSpatialAudio)
+            {
+                // Create temporary AudioSource at position for 3D sound
+                GameObject tempAudio = new GameObject("TempFireSound");
+                tempAudio.transform.position = position;
+                AudioSource spatialSource = tempAudio.AddComponent<AudioSource>();
+                spatialSource.clip = clip;
+                spatialSource.spatialBlend = 1f; // Full 3D
+                spatialSource.maxDistance = 50f;
+                spatialSource.volume = 0.8f;
+                spatialSource.Play();
+                
+                // Destroy after clip finishes
+                Destroy(tempAudio, clip.length + 0.1f);
+            }
+            else
+            {
+                // Local player: use existing 2D audio source
+                if (audioSource != null)
+                {
+                    audioSource.PlayOneShot(clip, 0.8f);
+                }
             }
         }
         
@@ -1715,6 +1788,132 @@ namespace TacticalCombat.Combat
             Debug.Log($"🔇 [WeaponSystem] OnDisable - {gameObject.name} | isServer: {isServer} | isClient: {isClient} | Frame: {Time.frameCount}");
         }
 
+        /// <summary>
+        /// ✅ PROFESSIONAL FIX: Called when local player is ready (FPSController camera is initialized)
+        /// </summary>
+        public override void OnStartLocalPlayer()
+        {
+            base.OnStartLocalPlayer();
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"✅ [WeaponSystem] OnStartLocalPlayer called - attempting camera assignment");
+            #endif
+            
+            // ✅ CRITICAL FIX: Stop retry coroutine if it's running (we'll try directly now)
+            if (retryCameraCoroutine != null)
+            {
+                StopCoroutine(retryCameraCoroutine);
+                retryCameraCoroutine = null;
+            }
+            
+            // ✅ CRITICAL FIX: Try to get camera immediately when local player starts
+            // FPSController.OnStartLocalPlayer runs before this, so camera should be ready
+            if (TryAssignCamera())
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.Log($"✅ [WeaponSystem] Camera assigned successfully in OnStartLocalPlayer!");
+                #endif
+                
+                // Initialize ammo if on server
+                if (isServer && currentWeapon != null)
+                {
+                    currentAmmo = currentWeapon.magazineSize;
+                    reserveAmmo = currentWeapon.maxAmmo;
+                    OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
+                }
+            }
+            else
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"⚠️ [WeaponSystem] Camera not found in OnStartLocalPlayer - will retry in Update");
+                #endif
+            }
+        }
+        
+        /// <summary>
+        /// ✅ PROFESSIONAL FIX: Try to assign camera from FPSController
+        /// ✅ CRITICAL FIX: Use GetComponentInParent to find FPSController even if WeaponSystem is on a child GameObject
+        /// </summary>
+        private bool TryAssignCamera()
+        {
+            if (playerCamera != null) return true; // Already assigned
+            
+            // ✅ CRITICAL FIX: Search in parent GameObjects (WeaponSystem might be on child "CurrentWeapon" GameObject)
+            var fpsController = GetComponentInParent<TacticalCombat.Player.FPSController>();
+            if (fpsController != null)
+            {
+                playerCamera = fpsController.GetCamera();
+                if (playerCamera != null)
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log($"✅ [WeaponSystem] Camera assigned from FPSController! Camera: {playerCamera.name} (Found on parent: {fpsController.gameObject.name})");
+                    #endif
+                    
+                    // Re-enable weapon system now that camera is found
+                    enabled = true;
+                    return true;
+                }
+                else
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogWarning($"⚠️ [WeaponSystem] FPSController found on {fpsController.gameObject.name} but GetCamera() returned null");
+                    #endif
+                }
+            }
+            else
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                // Build hierarchy path for debug
+                string hierarchyPath = gameObject.name;
+                Transform parent = transform.parent;
+                while (parent != null)
+                {
+                    hierarchyPath = parent.name + "/" + hierarchyPath;
+                    parent = parent.parent;
+                }
+                Debug.LogWarning($"⚠️ [WeaponSystem] FPSController component not found in parent hierarchy. Searched: {hierarchyPath}");
+                #endif
+            }
+            
+            return false;
+        }
+        
+        /// <summary>
+        /// ✅ PROFESSIONAL FIX: Retry camera assignment (FPSController might not be ready in Start)
+        /// </summary>
+        private IEnumerator RetryCameraAssignment()
+        {
+            // Wait a bit longer for OnStartLocalPlayer to run
+            yield return new WaitForSeconds(0.2f);
+            
+            int maxRetries = 20; // Increased retries
+            float retryInterval = 0.15f; // 150ms between retries (was 100ms)
+            
+            for (int i = 0; i < maxRetries; i++)
+            {
+                // Try to assign camera
+                if (TryAssignCamera())
+                {
+                    // Initialize ammo if on server
+                    if (isServer && currentWeapon != null)
+                    {
+                        currentAmmo = currentWeapon.magazineSize;
+                        reserveAmmo = currentWeapon.maxAmmo;
+                        OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
+                    }
+                    yield break; // Success, exit coroutine
+                }
+                
+                yield return new WaitForSeconds(retryInterval);
+            }
+            
+            // Failed to find camera after all retries
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogError($"❌ [WeaponSystem] Failed to find camera after {maxRetries} retries. Weapon system disabled.");
+            #endif
+            enabled = false;
+        }
+        
         /// <summary>
         /// ✅ FIX: Cleanup coroutines on destroy
         /// </summary>

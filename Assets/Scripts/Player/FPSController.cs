@@ -372,6 +372,22 @@ namespace TacticalCombat.Player
         
         private void Update()
         {
+            // ✅ PROFESSIONAL FIX: Smooth interpolation for remote players
+            if (!isLocalPlayer && hasTargetPosition)
+            {
+                // Smooth interpolation towards target position
+                transform.position = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 15f);
+                transform.rotation = Quaternion.Lerp(transform.rotation, targetRotation, Time.deltaTime * 15f);
+                
+                // Stop interpolating if we're close enough
+                if (Vector3.Distance(transform.position, targetPosition) < 0.01f)
+                {
+                    transform.position = targetPosition;
+                    transform.rotation = targetRotation;
+                    hasTargetPosition = false;
+                }
+            }
+            
             if (!isLocalPlayer || Time.timeScale == 0f) return;
 
             // ✅ CRITICAL FIX: Don't interfere with UI clicks!
@@ -502,14 +518,23 @@ namespace TacticalCombat.Player
             // Calculate predicted speed from distance moved
             float predictedSpeed = distance / Time.fixedDeltaTime;
             
-            // Allow 15% tolerance for lag/network differences
-            if (predictedSpeed > runSpeed * 1.15f)
+            // ✅ PROFESSIONAL FIX: Increased tolerance for normal gameplay (zıplama, koşma, lag)
+            // Allow 50% tolerance for normal gameplay variations (was 15% - too strict)
+            float maxAllowedSpeed = runSpeed * 1.5f; // 50% tolerance
+            
+            // Only log and clamp if speed is suspiciously high (2x normal speed = likely hack)
+            if (predictedSpeed > runSpeed * 2.0f)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"🚨 [FPSController SERVER] Speed hack detected: {predictedSpeed}m/s > {runSpeed * 1.15f}m/s from player {netId}");
+                Debug.LogWarning($"🚨 [FPSController SERVER] SUSPICIOUS speed detected: {predictedSpeed:F2}m/s > {runSpeed * 2.0f:F2}m/s from player {netId} (clamping)");
                 #endif
-                // Clamp to server-calculated movement
-                serverMove = serverMove.normalized * Mathf.Min(predictedSpeed, runSpeed * 1.15f);
+                // Clamp to reasonable maximum
+                serverMove = serverMove.normalized * Mathf.Min(predictedSpeed, maxAllowedSpeed);
+            }
+            else if (predictedSpeed > maxAllowedSpeed)
+            {
+                // Silent clamp for minor violations (normal gameplay variations)
+                serverMove = serverMove.normalized * maxAllowedSpeed;
             }
             
             // Apply server movement
@@ -542,8 +567,13 @@ namespace TacticalCombat.Player
             return horizontalMove * currentSpeed;
         }
         
+        // ✅ PROFESSIONAL FIX: Smooth interpolation for remote players
+        private Vector3 targetPosition;
+        private Quaternion targetRotation;
+        private bool hasTargetPosition;
+        
         /// <summary>
-        /// ✅ CRITICAL FIX: Sync corrected position to clients
+        /// ✅ PROFESSIONAL FIX: Sync corrected position to clients with smooth interpolation
         /// </summary>
         [ClientRpc]
         private void RpcSetPosition(Vector3 serverPosition, Quaternion serverRotation)
@@ -552,9 +582,10 @@ namespace TacticalCombat.Player
             // Local player uses prediction, server corrections are rare
             if (!isLocalPlayer)
             {
-                // Smooth interpolation for other players
-                transform.position = Vector3.Lerp(transform.position, serverPosition, Time.fixedDeltaTime * 10f);
-                transform.rotation = Quaternion.Lerp(transform.rotation, serverRotation, Time.fixedDeltaTime * 10f);
+                // ✅ PROFESSIONAL FIX: Smooth interpolation for other players
+                targetPosition = serverPosition;
+                targetRotation = serverRotation;
+                hasTargetPosition = true;
             }
             else
             {
