@@ -407,6 +407,15 @@ namespace TacticalCombat.Network
                     if (nextHost != null)
                     {
                         room.hostPlayerId = nextHost.playerId;
+
+                        // ✅ CRITICAL FIX: Update SyncList after host transfer (prevents desync)
+                        int hostTransferIndex = roomList.IndexOf(room);
+                        if (hostTransferIndex >= 0)
+                        {
+                            roomList.RemoveAt(hostTransferIndex);
+                            roomList.Insert(hostTransferIndex, room); // Triggers sync
+                        }
+
                         RpcHostTransferred(roomId, nextHost.playerId);
                     }
                     else
@@ -523,9 +532,109 @@ namespace TacticalCombat.Network
         }
         
         // ═══════════════════════════════════════════════════════════
+        // PLAYER STATE UPDATES (Ready, Role Selection)
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Update player ready status (example for future use)
+        /// NOTE: Any modification to RoomPlayer properties requires SyncList update!
+        /// </summary>
+        [Command(requiresAuthority = false)]
+        public void CmdSetPlayerReady(ulong playerId, bool ready, NetworkConnectionToClient sender = null)
+        {
+            if (!isServer) return;
+
+            if (!playerToRoom.TryGetValue(playerId, out uint roomId))
+            {
+                TargetRoomOperationFailed(sender, "You are not in a room");
+                return;
+            }
+
+            if (!rooms.TryGetValue(roomId, out RoomData room))
+            {
+                TargetRoomOperationFailed(sender, "Room not found");
+                return;
+            }
+
+            // Find player in room
+            var player = room.GetPlayer(playerId);
+            if (player == null)
+            {
+                TargetRoomOperationFailed(sender, "Player not found in room");
+                return;
+            }
+
+            // Update ready status
+            player.isReady = ready;
+
+            // ✅ CRITICAL FIX: SyncList update required after modifying RoomPlayer properties
+            int index = roomList.IndexOf(room);
+            if (index >= 0)
+            {
+                roomList.RemoveAt(index);
+                roomList.Insert(index, room); // Triggers sync
+            }
+
+            // Notify clients
+            RpcPlayerReadyChanged(roomId, playerId, ready);
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"✅ [LobbyManager] Player {playerId} ready status: {ready}");
+            #endif
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Update player role selection (example for future use)
+        /// NOTE: Any modification to RoomPlayer properties requires SyncList update!
+        /// </summary>
+        [Command(requiresAuthority = false)]
+        public void CmdSetPlayerRole(ulong playerId, RoleId role, NetworkConnectionToClient sender = null)
+        {
+            if (!isServer) return;
+
+            if (!playerToRoom.TryGetValue(playerId, out uint roomId))
+            {
+                TargetRoomOperationFailed(sender, "You are not in a room");
+                return;
+            }
+
+            if (!rooms.TryGetValue(roomId, out RoomData room))
+            {
+                TargetRoomOperationFailed(sender, "Room not found");
+                return;
+            }
+
+            // Find player in room
+            var player = room.GetPlayer(playerId);
+            if (player == null)
+            {
+                TargetRoomOperationFailed(sender, "Player not found in room");
+                return;
+            }
+
+            // Update role
+            player.selectedRole = role;
+
+            // ✅ CRITICAL FIX: SyncList update required after modifying RoomPlayer properties
+            int index = roomList.IndexOf(room);
+            if (index >= 0)
+            {
+                roomList.RemoveAt(index);
+                roomList.Insert(index, room); // Triggers sync
+            }
+
+            // Notify clients
+            RpcPlayerRoleChanged(roomId, playerId, role);
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"✅ [LobbyManager] Player {playerId} selected role: {role}");
+            #endif
+        }
+
+        // ═══════════════════════════════════════════════════════════
         // HELPER METHODS
         // ═══════════════════════════════════════════════════════════
-        
+
         /// <summary>
         /// Get player username (placeholder - should get from PlayerController)
         /// </summary>
@@ -634,7 +743,25 @@ namespace TacticalCombat.Network
             Debug.Log($"📢 [LobbyManager CLIENT] Host transferred to {newHostId} in room {roomId}");
             #endif
         }
-        
+
+        [ClientRpc]
+        private void RpcPlayerReadyChanged(uint roomId, ulong playerId, bool ready)
+        {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"📢 [LobbyManager CLIENT] Player {playerId} ready: {ready} in room {roomId}");
+            #endif
+            // Update UI ready status
+        }
+
+        [ClientRpc]
+        private void RpcPlayerRoleChanged(uint roomId, ulong playerId, RoleId role)
+        {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"📢 [LobbyManager CLIENT] Player {playerId} selected role: {role} in room {roomId}");
+            #endif
+            // Update UI role selection
+        }
+
         // ═══════════════════════════════════════════════════════════
         // TARGET RPCS (Client-specific responses)
         // ═══════════════════════════════════════════════════════════

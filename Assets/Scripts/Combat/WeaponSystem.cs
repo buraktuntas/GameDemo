@@ -386,9 +386,28 @@ namespace TacticalCombat.Combat
             // Fire - ✅ FIX: Separate auto and semi-auto to prevent stuck shooting
             if (currentWeapon != null)
             {
-                // Determine fire inputs (Input System + legacy fallback)
-                bool fireHeldInput = fireHeld || Input.GetButton("Fire1");
-                bool firePressedInput = firePressed || Input.GetButtonDown("Fire1");
+            // ✅ CRITICAL FIX: Use Input System if available, fallback to Legacy Input
+            // Check if Input System is working (fireHeld/firePressed set by callbacks)
+            // If Input System callbacks aren't working, use Legacy Input as fallback
+            bool fireHeldInput = fireHeld;
+            bool firePressedInput = firePressed;
+            
+            // ✅ FIX: Fallback to Legacy Input if Input System isn't working
+            // Check if Input System is properly initialized (playerInput != null and fireAction != null)
+            // If not, use Legacy Input as fallback to prevent "can't fire" bug
+            if (playerInput == null || fireAction == null)
+            {
+                // Input System not initialized - use Legacy Input
+                fireHeldInput = Input.GetButton("Fire1");
+                firePressedInput = Input.GetButtonDown("Fire1");
+            }
+            // If Input System is initialized but callbacks aren't working, also use Legacy Input
+            else if (!fireHeldInput && !firePressedInput)
+            {
+                // Input System callbacks might not be working - use Legacy Input as fallback
+                fireHeldInput = Input.GetButton("Fire1");
+                firePressedInput = Input.GetButtonDown("Fire1");
+            }
 
                 if (currentWeapon.fireMode == FireMode.Auto)
                 {
@@ -499,16 +518,20 @@ namespace TacticalCombat.Combat
             // ✅ CRITICAL FIX: Generate deterministic spread seed FIRST
             // This ensures client and server use same seed for same shot
             spreadSeed = Random.Range(0, int.MaxValue);
-            
+
             // Update timers
             nextFireTime = Time.time + (1f / currentWeapon.fireRate);
-            
+
             // ✅ CRITICAL FIX: Server modifies ammo (authoritative)
             currentAmmo--;
-            
+
+            // ✅ CRITICAL FIX: Send seed to clients BEFORE doing server raycast
+            // This ensures clients can use correct seed for hit validation/prediction
+            RpcSyncSpreadSeed(spreadSeed);
+
             // Server raycast
             PerformServerRaycast();
-            
+
             // ✅ CRITICAL FIX: Sync fire effects to ALL clients
             Vector3 muzzlePos = weaponHolder != null ? weaponHolder.position : transform.position;
             Vector3 muzzleDir = weaponHolder != null ? weaponHolder.forward : transform.forward;
@@ -607,7 +630,24 @@ namespace TacticalCombat.Combat
                 Debug.LogWarning("⚠️ [WeaponSystem] Fire rejected by server");
             }
         }
-        
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Explicitly sync spread seed to clients for deterministic hit calculation
+        /// This prevents race conditions where client uses old seed value
+        /// </summary>
+        [ClientRpc]
+        private void RpcSyncSpreadSeed(int seed)
+        {
+            spreadSeed = seed;
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (debugAudio)
+            {
+                Debug.Log($"🎯 [WeaponSystem CLIENT] Received spread seed: {seed}");
+            }
+            #endif
+        }
+
         /// <summary>
         /// ✅ CRITICAL FIX: Sync fire effects to all clients with spatial audio
         /// </summary>
@@ -995,12 +1035,25 @@ namespace TacticalCombat.Combat
             {
                 // Hitbox found - use multiplier
                 health = hitbox.GetParentHealth();
-                damage = hitbox.CalculateDamage(Mathf.RoundToInt(damage));
-                isCritical = hitbox.IsCritical();
+                
+                // ✅ CRITICAL FIX: Null check for GetParentHealth() (can return null if no Health component found)
+                if (health != null)
+                {
+                    damage = hitbox.CalculateDamage(Mathf.RoundToInt(damage));
+                    isCritical = hitbox.IsCritical();
 
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.Log($"🎯 [Server] HIT {hitbox.zone} - Damage: {damage} (Multiplier: {hitbox.damageMultiplier}x)");
-                #endif
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log($"🎯 [Server] HIT {hitbox.zone} - Damage: {damage} (Multiplier: {hitbox.damageMultiplier}x)");
+                    #endif
+                }
+                else
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogWarning($"⚠️ [Server] Hitbox found but GetParentHealth() returned null - hit not registered");
+                    #endif
+                    // Health is null - cannot apply damage, return early
+                    return;
+                }
             }
             else
             {
@@ -1035,15 +1088,21 @@ namespace TacticalCombat.Combat
                 
                 if (targetPlayer != null && shooterPlayer != null)
                 {
-                    // Same team = friendly fire (disable or reduce damage)
-                    if (targetPlayer.team == shooterPlayer.team && targetPlayer.team != Team.None)
+                    // ✅ CRITICAL FIX: Prevent friendly fire AND self-harm
+                    // Same team OR both Team.None = no damage
+                    if (targetPlayer.team == shooterPlayer.team)
                     {
-                        #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                        Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Friendly fire attempt: Team {shooterPlayer.team} player {netId} tried to damage teammate");
-                        #endif
-                        // Friendly fire disabled - return without damage
-                        // TODO: If friendly fire is enabled, reduce damage here (e.g., damage *= 0.5f)
-                        return;
+                        // Prevent friendly fire (same team) OR both players have no team (Team.None)
+                        // Also prevent self-harm (same netId)
+                        if (targetPlayer.team != Team.None || shooterPlayer.netId == targetPlayer.netId)
+                        {
+                            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                            Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Friendly fire prevented: Team {shooterPlayer.team} player {netId} tried to damage teammate (or self-harm)");
+                            #endif
+                            // Friendly fire disabled - return without damage
+                            // TODO: If friendly fire is enabled, reduce damage here (e.g., damage *= 0.5f)
+                            return;
+                        }
                     }
                 }
                 

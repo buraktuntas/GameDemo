@@ -53,7 +53,10 @@ namespace TacticalCombat.Building
             else
             {
                 Debug.LogWarning("⚠️ [BuildValidator] Multiple instances detected! Destroying duplicate.");
+                // ✅ CRITICAL FIX: Disable immediately to prevent exploit (Destroy happens at end of frame)
+                enabled = false;
                 Destroy(gameObject);
+                return; // ✅ CRITICAL FIX: Stop execution immediately
             }
         }
 
@@ -139,6 +142,15 @@ namespace TacticalCombat.Building
         [Server]
         public bool ValidateAndPlace(BuildRequest request, Team team)
         {
+            // ✅ CRITICAL FIX: Prevent duplicate instances from processing requests (budget exploit)
+            if (Instance != this)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogError("❌ [BuildValidator] Duplicate instance attempted to process request - BLOCKED");
+                #endif
+                return false;
+            }
+
             // Phase check
             if (MatchManager.Instance.GetCurrentPhase() != Phase.Build)
             {
@@ -162,16 +174,8 @@ namespace TacticalCombat.Building
             StructureCategory category = Structure.GetStructureCategory(request.type);
             int cost = Structure.GetStructureCost(request.type);
 
-            // ✅ CRITICAL FIX: Budget check FIRST (before spawn) - prevents exploit
-            if (!MatchManager.Instance.SpendBudget(request.playerId, category, cost))
-            {
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"⚠️ [BuildValidator] Insufficient budget for {request.type} (Cost: {cost}, Category: {category})");
-                #endif
-                return false; // Budget yoksa spawn etme
-            }
-
             // ✅ CRITICAL FIX: Terrain anchor validation (height limit, ground distance, slope)
+            // DO ALL VALIDATION BEFORE SPENDING BUDGET (prevents resource drain exploit)
             if (request.position.y > maxBuildHeight)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -268,7 +272,17 @@ namespace TacticalCombat.Building
                 }
             }
 
-            // All validation checks passed (including budget) - now spawn structure
+            // ✅ CRITICAL FIX: Spend budget AFTER all validations pass (prevents resource drain exploit)
+            // If budget fails, no resources were wasted on failed spawns
+            if (!MatchManager.Instance.SpendBudget(request.playerId, category, cost))
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"⚠️ [BuildValidator] Insufficient budget for {request.type} (Cost: {cost}, Category: {category})");
+                #endif
+                return false; // Budget yoksa spawn etme
+            }
+
+            // All validation checks passed and budget spent - now spawn structure
             if (!SpawnStructure(request, team))
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD

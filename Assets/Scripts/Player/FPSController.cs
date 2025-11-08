@@ -16,11 +16,23 @@ namespace TacticalCombat.Player
         [Header("Camera")]
         public Camera playerCamera;
         
-        [Header("Movement")]
-        public float walkSpeed = 7f;
-        public float runSpeed = 14f;
-        public float jumpPower = 10f; // Daha düşük zıplama
-        public float gravity = 25f; // Daha güçlü gravity
+        [Header("Movement - Battlefield Style")]
+        [Tooltip("Normal walking speed (Battlefield: ~4.5 m/s)")]
+        public float walkSpeed = 4.5f; // ✅ BATTLEFIELD: Realistic walking speed
+        [Tooltip("Running/Sprinting speed (Battlefield: ~6.5 m/s)")]
+        public float runSpeed = 6.5f; // ✅ BATTLEFIELD: Realistic sprint speed (was 14f - too fast!)
+        [Tooltip("Jump power (Battlefield: moderate jump)")]
+        public float jumpPower = 8f; // ✅ BATTLEFIELD: More realistic jump (was 10f)
+        [Tooltip("Gravity strength")]
+        public float gravity = 20f; // ✅ BATTLEFIELD: Realistic gravity (was 25f)
+        
+        [Header("Movement Smoothing - Battlefield Style")]
+        [Tooltip("Acceleration time (how fast you reach max speed)")]
+        public float accelerationTime = 0.15f; // ✅ BATTLEFIELD: Smooth acceleration
+        [Tooltip("Deceleration time (how fast you stop)")]
+        public float decelerationTime = 0.1f; // ✅ BATTLEFIELD: Quick stop
+        private float currentSpeedVelocity = 0f; // Current speed for smooth interpolation
+        private float speedVelocityRef = 0f; // Reference for SmoothDamp (required parameter)
         
         [Header("Look")]
         public float lookSpeed = 5f;
@@ -378,7 +390,7 @@ namespace TacticalCombat.Player
                 // Smooth interpolation towards target position
                 transform.position = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 15f);
                 transform.rotation = Quaternion.Lerp(transform.rotation, targetRotation, Time.deltaTime * 15f);
-                
+
                 // Stop interpolating if we're close enough
                 if (Vector3.Distance(transform.position, targetPosition) < 0.01f)
                 {
@@ -387,7 +399,7 @@ namespace TacticalCombat.Player
                     hasTargetPosition = false;
                 }
             }
-            
+
             if (!isLocalPlayer || Time.timeScale == 0f) return;
 
             // ✅ CRITICAL FIX: Don't interfere with UI clicks!
@@ -413,7 +425,8 @@ namespace TacticalCombat.Player
                 }
             }
 
-            HandleRotation();
+            // ✅ CAMERA JITTER FIX: Read input in Update, apply in LateUpdate
+            ReadRotationInput();
         }
 
         private void OnApplicationFocus(bool hasFocus)
@@ -422,9 +435,18 @@ namespace TacticalCombat.Player
 
             if (hasFocus)
             {
-                // Always re-lock cursor when window gains focus
-                Cursor.lockState = CursorLockMode.Locked;
-                Cursor.visible = false;
+                // ✅ CRITICAL FIX: Only re-lock cursor if no UI is open (prevents menu interaction issues)
+                if (!IsAnyUIOpen())
+                {
+                    Cursor.lockState = CursorLockMode.Locked;
+                    Cursor.visible = false;
+                }
+                else
+                {
+                    // UI is open - keep cursor unlocked for menu interaction
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
+                }
 
                 // Re-enable movement (fix for multi-window freeze)
                 canMove = true;
@@ -436,6 +458,10 @@ namespace TacticalCombat.Player
         private void LateUpdate()
         {
             if (!isLocalPlayer) return;
+
+            // ✅ CAMERA JITTER FIX: Apply rotation in LateUpdate (after all movement)
+            // This ensures camera updates AFTER CharacterController.Move
+            ApplyRotation();
 
             // Visual effects only
             if (useStamina) HandleStamina();
@@ -639,7 +665,12 @@ namespace TacticalCombat.Player
         
         private Vector3 CalculateHorizontalMovement(Vector3 input)
         {
-            if (input.magnitude < 0.1f) return Vector3.zero;
+            if (input.magnitude < 0.1f)
+            {
+                // ✅ BATTLEFIELD: Smooth deceleration when stopping
+                currentSpeedVelocity = Mathf.SmoothDamp(currentSpeedVelocity, 0f, ref speedVelocityRef, decelerationTime);
+                return Vector3.zero;
+            }
             
             // Get direction vectors
             Vector3 forward = transform.forward;
@@ -660,10 +691,13 @@ namespace TacticalCombat.Player
             }
             
             bool isRunning = wantsToSprint && canSprint;
-            float currentSpeed = (isRunning ? runSpeed : walkSpeed) * speedMultiplier; // ✅ CRITICAL FIX: Apply speed multiplier
+            float targetSpeed = (isRunning ? runSpeed : walkSpeed) * speedMultiplier; // ✅ CRITICAL FIX: Apply speed multiplier
+            
+            // ✅ BATTLEFIELD: Smooth acceleration/deceleration (realistic movement feel)
+            currentSpeedVelocity = Mathf.SmoothDamp(currentSpeedVelocity, targetSpeed, ref speedVelocityRef, accelerationTime);
             
             Vector3 horizontalMove = (forward * input.z) + (right * input.x);
-            return horizontalMove * currentSpeed;
+            return horizontalMove.normalized * currentSpeedVelocity; // Use smoothed speed
         }
         
         private float CalculateVerticalVelocity()
@@ -713,47 +747,72 @@ namespace TacticalCombat.Player
             #endif
         }
         
-        private void HandleRotation()
+        // ✅ CAMERA JITTER FIX: Split rotation into Read (Update) and Apply (LateUpdate)
+        private float pendingMouseX;
+        private float pendingMouseY;
+
+        /// <summary>
+        /// Read mouse input in Update (high frequency)
+        /// </summary>
+        private void ReadRotationInput()
         {
             // Check if camera input is blocked
             if (inputManager != null && inputManager.BlockCameraInput)
             {
+                pendingMouseX = 0;
+                pendingMouseY = 0;
                 return;
             }
-            
-            // ✅ FIX: Build mode'da kamera çalışsın (Cursor.visible = false ama kamera dönsün)
+
+            // ✅ FIX: Build mode'da kamera çalışsın
             if (Cursor.visible && inputManager != null && !inputManager.IsInBuildMode)
             {
+                pendingMouseX = 0;
+                pendingMouseY = 0;
                 return;
             }
-            
-            if (!canMove) return;
-            
-            float mouseX;
-            float mouseY;
+
+            if (!canMove)
+            {
+                pendingMouseX = 0;
+                pendingMouseY = 0;
+                return;
+            }
+
+            // Read input
             if (lookAction != null)
             {
                 lookDelta = lookAction.ReadValue<Vector2>();
-                mouseX = lookDelta.x;
-                mouseY = lookDelta.y;
+                pendingMouseX = lookDelta.x;
+                pendingMouseY = lookDelta.y;
             }
             else
             {
-                mouseX = Input.GetAxis("Mouse X");
-                mouseY = Input.GetAxis("Mouse Y");
+                pendingMouseX = Input.GetAxis("Mouse X");
+                pendingMouseY = Input.GetAxis("Mouse Y");
             }
-            
+        }
+
+        /// <summary>
+        /// Apply rotation in LateUpdate (after movement, smooth)
+        /// </summary>
+        private void ApplyRotation()
+        {
             // Mouse Y -> Camera pitch (up/down)
-            rotationX += -mouseY * lookSpeed;
+            rotationX += -pendingMouseY * lookSpeed;
             rotationX = Mathf.Clamp(rotationX, -lookXLimit, lookXLimit);
-            
+
             if (playerCamera != null)
             {
                 playerCamera.transform.localRotation = Quaternion.Euler(rotationX, 0, 0);
             }
-            
+
             // Mouse X -> Player rotation (left/right)
-            transform.rotation *= Quaternion.Euler(0, mouseX * lookSpeed, 0);
+            transform.rotation *= Quaternion.Euler(0, pendingMouseX * lookSpeed, 0);
+
+            // Reset pending input
+            pendingMouseX = 0;
+            pendingMouseY = 0;
         }
         
         private void HandleStamina()

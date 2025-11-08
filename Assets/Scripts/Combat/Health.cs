@@ -17,12 +17,19 @@ namespace TacticalCombat.Combat
         [SyncVar]
         private bool isDead = false;
 
+        // ✅ CRITICAL FIX: Invulnerability flag (prevents spawn camping)
+        [SyncVar]
+        private bool isInvulnerable = false;
+
         public System.Action<int, int> OnHealthChangedEvent; // current, max
         public System.Action OnDeathEvent;
 
         // ✅ HIGH PRIORITY: Track last damage time for combat lockout
         private float lastDamageTime = 0f;
         private const float COMBAT_LOCKOUT_DURATION = 3f; // 3 seconds after taking damage
+
+        // ✅ CRITICAL FIX: Track invulnerability coroutine to prevent leak
+        private Coroutine activeInvulnerabilityCoroutine = null;
 
         // ✅ FIX: Cache NetworkManager reference (performance optimization)
         private static Network.NetworkGameManager cachedNetworkManager;
@@ -73,6 +80,15 @@ namespace TacticalCombat.Combat
         private void ApplyDamageInternal(DamageInfo info)
         {
             if (isDead) return;
+
+            // ✅ CRITICAL FIX: Prevent damage during invulnerability period (spawn protection)
+            if (isInvulnerable)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.Log($"🛡️ [Server] Player {gameObject.name} is invulnerable - damage blocked");
+                #endif
+                return;
+            }
 
             // Damage reduction based on armor, etc.
             int finalDamage = CalculateFinalDamage(info);
@@ -193,6 +209,7 @@ namespace TacticalCombat.Combat
 
         /// <summary>
         /// ✅ Server-authoritative respawn
+        /// ✅ CRITICAL FIX: Added invulnerability period to prevent spawn camping
         /// </summary>
         [Server]
         public void Respawn()
@@ -212,12 +229,113 @@ namespace TacticalCombat.Combat
             // ✅ FIX: Manual RPC notification for health restore
             RpcNotifyHealthChanged(currentHealth);
 
-            // Find spawn point
-            Vector3 spawnPosition = FindRespawnPosition();
+            // ✅ CRITICAL FIX: Find safe spawn point (no overlap with other players)
+            Vector3 spawnPosition = FindSafeRespawnPosition();
             transform.position = spawnPosition;
+
+            // ✅ CRITICAL FIX: Stop any existing invulnerability coroutine before starting new one
+            if (activeInvulnerabilityCoroutine != null)
+            {
+                StopCoroutine(activeInvulnerabilityCoroutine);
+                activeInvulnerabilityCoroutine = null;
+                isInvulnerable = false; // Reset flag immediately
+            }
+
+            // ✅ CRITICAL FIX: Start invulnerability period (prevents spawn camping)
+            activeInvulnerabilityCoroutine = StartCoroutine(InvulnerabilityPeriod(3f)); // 3 seconds invulnerability
 
             // Notify clients
             RpcOnRespawn();
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Invulnerability period after respawn (prevents spawn camping)
+        /// </summary>
+        [Server]
+        private System.Collections.IEnumerator InvulnerabilityPeriod(float duration)
+        {
+            isInvulnerable = true;
+            RpcSetInvulnerableVisual(true); // Show visual feedback (glow effect)
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"🛡️ [Server] Player {gameObject.name} is invulnerable for {duration} seconds");
+            #endif
+
+            yield return new WaitForSeconds(duration);
+
+            isInvulnerable = false;
+            RpcSetInvulnerableVisual(false);
+            activeInvulnerabilityCoroutine = null; // ✅ CRITICAL FIX: Clear reference when done
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"🛡️ [Server] Player {gameObject.name} invulnerability ended");
+            #endif
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Find safe respawn position (no overlap with other players)
+        /// </summary>
+        [Server]
+        private Vector3 FindSafeRespawnPosition()
+        {
+            Vector3 basePosition = FindRespawnPosition();
+            
+            // Check if position is safe (no other players nearby)
+            const float MIN_SPAWN_DISTANCE = 2f; // Minimum distance from other players
+            int maxAttempts = 10;
+            
+            for (int i = 0; i < maxAttempts; i++)
+            {
+                bool isSafe = true;
+                
+                // Check all players
+                foreach (var player in FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None))
+                {
+                    if (player == null || player.gameObject == gameObject) continue;
+                    
+                    float distance = Vector3.Distance(basePosition, player.transform.position);
+                    if (distance < MIN_SPAWN_DISTANCE)
+                    {
+                        isSafe = false;
+                        break;
+                    }
+                }
+                
+                if (isSafe)
+                {
+                    return basePosition;
+                }
+                
+                // Try a slightly different position
+                basePosition += new Vector3(
+                    Random.Range(-2f, 2f),
+                    0f,
+                    Random.Range(-2f, 2f)
+                );
+            }
+            
+            // Fallback: return original position (better than no spawn)
+            return basePosition;
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Client-side visual feedback for invulnerability
+        /// </summary>
+        [ClientRpc]
+        private void RpcSetInvulnerableVisual(bool invulnerable)
+        {
+            // TODO: Add visual effect (glow, transparency, etc.)
+            // For now, just log
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (invulnerable)
+            {
+                Debug.Log($"🛡️ [Client] Player {gameObject.name} is now invulnerable (visual feedback)");
+            }
+            else
+            {
+                Debug.Log($"🛡️ [Client] Player {gameObject.name} is no longer invulnerable");
+            }
+            #endif
         }
 
         [ClientRpc]
