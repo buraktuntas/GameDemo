@@ -29,6 +29,10 @@ namespace TacticalCombat.Core
         [Header("Team Tracking")]
         private Dictionary<ulong, PlayerState> playerStates = new Dictionary<ulong, PlayerState>();
         
+        [Header("Clan System")]
+        [SyncVar] private string clanAId;  // Clan A ID (if using clan system)
+        [SyncVar] private string clanBId;  // Clan B ID (if using clan system)
+        
         [SyncVar]
         private int teamAWins = 0;
         
@@ -232,42 +236,81 @@ namespace TacticalCombat.Core
             teamBWins = 0;
             currentRound = 0;
             playerStates.Clear();
+            
+            // ✅ CLAN SYSTEM: Reset clan IDs for new match
+            clanAId = null;
+            clanBId = null;
         }
 
+        /// <summary>
+        /// ✅ CLAN SYSTEM: Register player with optional clan support
+        /// </summary>
         [Server]
-        public void RegisterPlayer(ulong playerId, Team team, RoleId role)
+        public void RegisterPlayer(ulong playerId, Team team, RoleId role, string clanId = null)
         {
-            // ✅ CRITICAL FIX: Honor the team parameter from UI selection!
-            Team assignedTeam;
-
-            if (team != Team.None)
+            // ✅ CLAN SYSTEM: If clanId provided, map clan to team
+            if (!string.IsNullOrEmpty(clanId) && ClanManager.Instance != null)
             {
-                // Player selected a specific team - use it
-                assignedTeam = team;
-                Debug.Log($"✅ Player {playerId} registered with SELECTED team: {assignedTeam}, Role {role}");
+                // Check if this is first player from clan - assign clan to team
+                if (string.IsNullOrEmpty(clanAId) && string.IsNullOrEmpty(clanBId))
+                {
+                    // First clan - assign to TeamA
+                    clanAId = clanId;
+                    team = Team.TeamA;
+                }
+                else if (clanAId == clanId)
+                {
+                    // Player's clan is ClanA - assign to TeamA
+                    team = Team.TeamA;
+                }
+                else if (clanBId == clanId)
+                {
+                    // Player's clan is ClanB - assign to TeamB
+                    team = Team.TeamB;
+                }
+                else if (string.IsNullOrEmpty(clanBId))
+                {
+                    // Second clan - assign to TeamB
+                    clanBId = clanId;
+                    team = Team.TeamB;
+                }
+                else
+                {
+                    // Both teams have clans - auto-balance
+                    team = AssignTeamAutoBalance();
+                }
             }
             else
             {
-                // Team was not selected (Auto-balance) - assign automatically
-                assignedTeam = AssignTeamAutoBalance();
-                Debug.Log($"✅ Player {playerId} registered with AUTO-BALANCED team: {assignedTeam}, Role {role}");
+                // ✅ CRITICAL FIX: Honor the team parameter from UI selection!
+                if (team != Team.None)
+                {
+                    // Player selected a specific team - use it
+                    Debug.Log($"✅ Player {playerId} registered with SELECTED team: {team}, Role {role}");
+                }
+                else
+                {
+                    // Team was not selected (Auto-balance) - assign automatically
+                    team = AssignTeamAutoBalance();
+                    Debug.Log($"✅ Player {playerId} registered with AUTO-BALANCED team: {team}, Role {role}");
+                }
             }
 
             // Register or update player state
             if (!playerStates.ContainsKey(playerId))
             {
-                playerStates[playerId] = new PlayerState(playerId, assignedTeam, role);
+                playerStates[playerId] = new PlayerState(playerId, team, role);
             }
             else
             {
                 // Update existing player (re-registration with new team/role)
-                playerStates[playerId].team = assignedTeam;
+                playerStates[playerId].team = team;
                 playerStates[playerId].role = role;
-                Debug.Log($"♻️ Player {playerId} RE-registered: Team {assignedTeam}, Role {role}");
+                Debug.Log($"♻️ Player {playerId} RE-registered: Team {team}, Role {role}");
             }
 
             // Update player's team visually
-            UpdatePlayerTeam(playerId, assignedTeam);
+            UpdatePlayerTeam(playerId, team);
         }
 
         [Server]
@@ -541,11 +584,114 @@ namespace TacticalCombat.Core
         [Server]
         private void EndMatch(Team winner)
         {
-            Debug.Log($"{winner} wins the match!");
+            Debug.Log($"🏆 Match ended! Winner: {winner}");
+            
+            // Award win to team
+            if (winner == Team.TeamA)
+            {
+                teamAWins++;
+            }
+            else if (winner == Team.TeamB)
+            {
+                teamBWins++;
+            }
+            
+            // ✅ CLAN SYSTEM: Award XP to clans
+            if (ClanManager.Instance != null)
+            {
+                AwardClanXP(winner);
+            }
+            
             RpcOnMatchWon(winner);
             
             // Match ended - could return to lobby or disconnect
             currentPhase = Phase.Lobby;
+        }
+        
+        /// <summary>
+        /// ✅ CLAN SYSTEM: Award XP to clans based on match result
+        /// </summary>
+        [Server]
+        private void AwardClanXP(Team winner)
+        {
+            if (ClanManager.Instance == null) return;
+            
+            // Calculate XP for each team
+            int teamAXP = CalculateTeamXP(Team.TeamA, winner == Team.TeamA);
+            int teamBXP = CalculateTeamXP(Team.TeamB, winner == Team.TeamB);
+            
+            // Award to clans
+            if (!string.IsNullOrEmpty(clanAId))
+            {
+                ClanManager.Instance.AwardClanXP(clanAId, teamAXP);
+                ClanManager.Instance.UpdateClanMatchResult(clanAId, winner == Team.TeamA);
+            }
+            
+            if (!string.IsNullOrEmpty(clanBId))
+            {
+                ClanManager.Instance.AwardClanXP(clanBId, teamBXP);
+                ClanManager.Instance.UpdateClanMatchResult(clanBId, winner == Team.TeamB);
+            }
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"📈 [MatchManager] Clan XP awarded - ClanA: {teamAXP} XP, ClanB: {teamBXP} XP");
+            #endif
+        }
+        
+        /// <summary>
+        /// ✅ CLAN SYSTEM: Calculate XP for a team based on match performance
+        /// </summary>
+        [Server]
+        private int CalculateTeamXP(Team team, bool won)
+        {
+            int xp = 0;
+            
+            // Base XP
+            if (won)
+            {
+                xp += 100; // Win bonus
+            }
+            else
+            {
+                xp += 25;  // Loss consolation
+            }
+            
+            // Performance XP (kills, structures, etc.)
+            int teamKills = 0;
+            int teamStructures = 0;
+            int teamTraps = 0;
+            
+            foreach (var kvp in playerStates)
+            {
+                if (kvp.Value.team == team)
+                {
+                    // TODO: Get actual stats from PlayerProfile
+                    // For now, use base values
+                    teamKills += 0; // Will be updated when PlayerProfile integration is complete
+                    teamStructures += 0;
+                    teamTraps += 0;
+                }
+            }
+            
+            xp += teamKills * 10;        // 10 XP per kill
+            xp += teamStructures * 2;    // 2 XP per structure
+            xp += teamTraps * 3;         // 3 XP per trap
+            
+            // Win streak bonus
+            if (won && ClanManager.Instance != null)
+            {
+                string clanId = team == Team.TeamA ? clanAId : clanBId;
+                if (!string.IsNullOrEmpty(clanId))
+                {
+                    var clan = ClanManager.Instance.GetClan(clanId);
+                    if (clan != null && clan.winStreak > 0)
+                    {
+                        xp += Mathf.Min(clan.winStreak * 10, 100); // Max 100 bonus XP
+                    }
+                }
+            }
+            
+            return xp;
         }
 
         // Client-side phase change handler

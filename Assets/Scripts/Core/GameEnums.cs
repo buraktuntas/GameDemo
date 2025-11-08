@@ -50,6 +50,16 @@ namespace TacticalCombat.Core
         Static,
         Mechanical
     }
+
+    /// <summary>
+    /// ✅ CLAN SYSTEM: Clan member ranks
+    /// </summary>
+    public enum ClanRank
+    {
+        Member,     // Regular member
+        Officer,    // Can invite/kick members
+        Leader      // Full control (create/delete clan, assign ranks)
+    }
 }
 
 
