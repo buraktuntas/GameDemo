@@ -115,6 +115,12 @@ namespace TacticalCombat.Traps
         {
             isTriggered = true;
         }
+
+        // ✅ CRITICAL FIX: Cancel Invoke on destroy to prevent memory leaks
+        private void OnDestroy()
+        {
+            CancelInvoke(nameof(Arm)); // Cancel Arm Invoke if trap destroyed before arming
+        }
     }
 }
 

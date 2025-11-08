@@ -247,17 +247,21 @@ namespace TacticalCombat.Combat
             // ⚡ PERFORMANCE FIX: Cache camera reference
             if (playerCamera == null)
             {
-                // First try to find FPSController's camera
+                // ✅ HIGH PRIORITY FIX: Get camera from FPSController (never use Camera.main)
                 var fpsController = GetComponent<TacticalCombat.Player.FPSController>();
                 if (fpsController != null)
                 {
                     playerCamera = fpsController.GetCamera();
                 }
 
-                // Fallback to Camera.main (only once, then cached)
+                // ✅ FIX: If camera still null, disable weapon system (Camera.main is banned)
                 if (playerCamera == null)
                 {
-                    playerCamera = Camera.main;
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogError("❌ [WeaponSystem] No camera found! FPSController not available. Camera.main usage is banned in Unity 6.");
+                    #endif
+                    enabled = false; // Disable weapon system if no camera
+                    return;
                 }
             }
                 
@@ -662,14 +666,13 @@ namespace TacticalCombat.Combat
 
             if (validHit.HasValue)
             {
-                // Client prediction: show immediate feedback
+                // ✅ HIGH PRIORITY FIX: Client prediction - ProcessHit zaten ShowClientSideHitFeedback() çağırıyor
+                // Duplicate VFX ve audio kaldırıldı (RPC'de zaten oynatılıyor)
                 ProcessHit(validHit.Value);
-
-                // Visual feedback
-                SpawnHitEffect(validHit.Value);
-
-                // Audio feedback
-                PlayHitSound();
+                
+                // ❌ REMOVED: Duplicate VFX ve audio
+                // SpawnHitEffect(validHit.Value);  // REMOVED - ProcessHit zaten ShowClientSideHitFeedback() çağırıyor
+                // PlayHitSound();  // REMOVED - RPC'de PlayHitSound(surface) çağrılıyor
             }
         }
         
@@ -688,13 +691,7 @@ namespace TacticalCombat.Combat
             return new Vector3(x, y, 0);
         }
         
-        /// <summary>
-        /// Legacy method - redirects to deterministic version
-        /// </summary>
-        private Vector3 CalculateSpread()
-        {
-            return CalculateDeterministicSpread();
-        }
+        // ✅ MEDIUM PRIORITY FIX: Removed dead code CalculateSpread() - never used, all code uses CalculateDeterministicSpread()
         
         private void ProcessHit(RaycastHit hit)
         {
@@ -778,6 +775,15 @@ namespace TacticalCombat.Combat
                 return;
             }
 
+            // ✅ MEDIUM PRIORITY FIX: Validate weapon exists (prevent NullReferenceException)
+            if (currentWeapon == null)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"⚠️ [WeaponSystem SERVER] No weapon assigned for player {netId}");
+                #endif
+                return;
+            }
+
             // ANTI-CHEAT: Validate fire rate
             if (Time.time < nextFireTime)
             {
@@ -796,7 +802,7 @@ namespace TacticalCombat.Combat
                 return;
             }
 
-            // ANTI-CHEAT: Validate distance (within weapon range)
+            // ANTI-CHEAT: Validate distance (within weapon range) - now safe (currentWeapon checked)
             if (distance > currentWeapon.range)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD

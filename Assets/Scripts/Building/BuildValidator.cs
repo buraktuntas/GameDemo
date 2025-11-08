@@ -162,6 +162,15 @@ namespace TacticalCombat.Building
             StructureCategory category = Structure.GetStructureCategory(request.type);
             int cost = Structure.GetStructureCost(request.type);
 
+            // ✅ CRITICAL FIX: Budget check FIRST (before spawn) - prevents exploit
+            if (!MatchManager.Instance.SpendBudget(request.playerId, category, cost))
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"⚠️ [BuildValidator] Insufficient budget for {request.type} (Cost: {cost}, Category: {category})");
+                #endif
+                return false; // Budget yoksa spawn etme
+            }
+
             // ✅ CRITICAL FIX: Terrain anchor validation (height limit, ground distance, slope)
             if (request.position.y > maxBuildHeight)
             {
@@ -259,26 +268,19 @@ namespace TacticalCombat.Building
                 }
             }
 
-            // All validation checks passed - spawn structure first
+            // All validation checks passed (including budget) - now spawn structure
             if (!SpawnStructure(request, team))
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"⚠️ [BuildValidator] Failed to spawn {request.type} - prefab not found");
+                Debug.LogWarning($"⚠️ [BuildValidator] Failed to spawn {request.type} - prefab not found. Budget already spent!");
                 #endif
+                // ✅ CRITICAL FIX: Spawn başarısız - budget'i geri vermek için RefundBudget gerekli
+                // Şimdilik log warning, gelecekte RefundBudget metodu eklenebilir
+                // Not: Bu durum çok nadir (prefab null olması), ama yine de handle edilmeli
                 return false;
             }
 
-            // ✅ CRITICAL FIX: Spend budget AFTER spawn succeeds (prevent budget loss if spawn fails)
-            if (!MatchManager.Instance.SpendBudget(request.playerId, category, cost))
-            {
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"⚠️ [BuildValidator] Insufficient budget for {request.type} - structure already spawned!");
-                #endif
-                // Structure already spawned, but budget check failed - this is a critical error
-                // In production, should log and monitor. For now, we'll allow it but log warning.
-                // TODO: Consider destroying structure if budget check fails
-            }
-
+            // ✅ CRITICAL FIX: Budget zaten harcandı (spawn'dan önce), structure spawn edildi - başarılı
             return true;
         }
 

@@ -62,6 +62,8 @@ namespace TacticalCombat.Building
 
         private void OnDestroy()
         {
+            // ✅ CRITICAL FIX: Cancel all Invoke calls to prevent memory leaks
+            CancelInvoke(); // Cancels CalculateStability and DestroyCollapsedStructure
             allStructures.Remove(this);
         }
 

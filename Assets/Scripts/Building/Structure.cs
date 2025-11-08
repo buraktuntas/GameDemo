@@ -186,6 +186,9 @@ namespace TacticalCombat.Building
 
         private void OnDestroy()
         {
+            // ✅ CRITICAL FIX: Cancel Invoke on destroy to prevent memory leaks
+            CancelInvoke(nameof(DestroyStructure)); // Cancel delayed destruction if object destroyed early
+            
             // ✅ MEMORY LEAK FIX: Cleanup event subscription on destroy
             if (health != null)
             {

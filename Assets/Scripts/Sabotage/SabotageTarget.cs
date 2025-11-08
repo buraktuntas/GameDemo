@@ -94,6 +94,12 @@ namespace TacticalCombat.Sabotage
         {
             return !isDisabled && ownerTeam != sabotagingTeam;
         }
+
+        // ✅ CRITICAL FIX: Cancel Invoke on destroy to prevent memory leaks
+        private void OnDestroy()
+        {
+            CancelInvoke(nameof(Enable)); // Cancel Enable Invoke if object destroyed before duration
+        }
     }
 }
 

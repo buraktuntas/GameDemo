@@ -324,6 +324,9 @@ namespace TacticalCombat.Player
 
         private void OnDestroy()
         {
+            // ✅ CRITICAL FIX: Cancel Invoke on destroy to prevent memory leaks
+            CancelInvoke(nameof(RestoreVisibility)); // Cancel RestoreVisibility Invoke if object destroyed early
+            
             if (stealthMaterials != null)
             {
                 foreach (var mat in stealthMaterials)
