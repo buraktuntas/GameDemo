@@ -16,12 +16,22 @@ namespace TacticalCombat.Traps
         }
 
         [Server]
-        protected override void Trigger(GameObject target)
+        public override void Trigger(GameObject target)
         {
             // ✅ CRITICAL FIX: Use TryGetComponent instead of GetComponent (no GC allocation)
             if (target.TryGetComponent<Combat.Health>(out var health) && !health.IsDead())
             {
+                ulong victimId = target.GetComponent<Mirror.NetworkIdentity>()?.netId ?? 0;
+                bool wasAlive = !health.IsDead();
+                
                 health.TakeDamage(damage);
+                
+                // Check if trap killed the player
+                if (wasAlive && health.IsDead() && victimId != 0)
+                {
+                    AwardTrapKill(victimId);
+                }
+                
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log($"Spike trap dealt {damage} damage to {target.name}");
                 #endif

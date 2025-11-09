@@ -16,7 +16,7 @@ namespace TacticalCombat.Traps
         }
 
         [Server]
-        protected override void Trigger(GameObject target)
+        public override void Trigger(GameObject target)
         {
             // ✅ CRITICAL FIX: Apply slow effect
             var slowEffect = target.AddComponent<SlowEffect>();

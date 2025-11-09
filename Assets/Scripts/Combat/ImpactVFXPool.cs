@@ -124,8 +124,12 @@ namespace TacticalCombat.Combat
 
             var renderer = ps.GetComponent<ParticleSystemRenderer>();
             renderer.renderMode = ParticleSystemRenderMode.Billboard;
-            renderer.material = new Material(Shader.Find("Particles/Standard Unlit"));
-            renderer.material.SetColor("_BaseColor", color);
+            
+            // ✅ CRITICAL FIX: Cache material to prevent memory leak
+            // Material is created once per surface type, reused for all instances
+            Material impactMaterial = new Material(Shader.Find("Particles/Standard Unlit"));
+            impactMaterial.SetColor("_BaseColor", color);
+            renderer.material = impactMaterial;
 
             impactGO.SetActive(false);
             return impactGO;

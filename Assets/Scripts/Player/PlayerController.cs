@@ -15,15 +15,21 @@ namespace TacticalCombat.Player
         [SyncVar] public RoleId role = RoleId.Builder;
         [SyncVar] public ulong playerId;
         
+        [Header("Core Carrying")]
+        [SyncVar] private bool isCarryingCore = false;
+        [SyncVar] private ulong carriedCoreOwnerId = 0;
+        
         [Header("Debug")]
         [SerializeField] private bool showDebugInfo = true;
         
         // Components
         private PlayerVisuals playerVisuals;
+        private FPSController fpsController;
         
         private void Awake()
         {
             playerVisuals = GetComponent<PlayerVisuals>();
+            fpsController = GetComponent<FPSController>();
             playerId = netId; // Network ID'yi set et
         }
 
@@ -199,5 +205,50 @@ namespace TacticalCombat.Player
         public Team GetPlayerTeam() => team;
         public RoleId GetPlayerRole() => role;
         public ulong GetPlayerId() => playerId;
+
+        /// <summary>
+        /// Set core carrying state (called by ObjectiveManager)
+        /// </summary>
+        [Server]
+        public void SetCarryingCore(bool carrying, ulong coreOwnerId = 0)
+        {
+            isCarryingCore = carrying;
+            carriedCoreOwnerId = coreOwnerId;
+            RpcUpdateCoreCarrying(carrying);
+        }
+
+        [ClientRpc]
+        private void RpcUpdateCoreCarrying(bool carrying)
+        {
+            isCarryingCore = carrying;
+            
+            // Update FPSController speed multiplier
+            if (fpsController != null)
+            {
+                fpsController.speedMultiplier = carrying ? GameConstants.CORE_CARRY_SPEED_MULTIPLIER : 1f;
+            }
+        }
+
+        /// <summary>
+        /// Check if player is carrying a core
+        /// </summary>
+        public bool IsCarryingCore() => isCarryingCore;
+
+        /// <summary>
+        /// Try to return core (called when player interacts with return point)
+        /// </summary>
+        [Command]
+        public void CmdTryReturnCore()
+        {
+            if (!isCarryingCore || carriedCoreOwnerId == 0)
+                return;
+
+            var objectiveManager = Core.ObjectiveManager.Instance;
+            if (objectiveManager != null)
+            {
+                Vector3 playerPos = transform.position;
+                objectiveManager.TryReturnCore(carriedCoreOwnerId, netId, playerPos);
+            }
+        }
     }
 }

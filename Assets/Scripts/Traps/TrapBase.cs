@@ -18,6 +18,9 @@ namespace TacticalCombat.Traps
         [SyncVar]
         protected bool isTriggered = false;
 
+        // ✅ FIX: Public property for isArmed (needed by ThrowableSystem)
+        public bool IsArmed => isArmed;
+
         [SerializeField] protected float armingDelay = 2f;
         protected float armingTime;
 
@@ -108,12 +111,50 @@ namespace TacticalCombat.Traps
         }
 
         // Abstract method - derived classes should add [Server] attribute to their implementation
-        protected abstract void Trigger(GameObject target);
+        // ✅ FIX: Changed to public so TrapLinkSystem can call it
+        // ⚠️ MIRROR: Cannot add [Server] to abstract method - must be on override methods
+        public abstract void Trigger(GameObject target);
+
+        /// <summary>
+        /// Call this after trap is triggered to activate linked traps
+        /// </summary>
+        [Server]
+        protected void TriggerLinkedTraps()
+        {
+            var trapLinkSystem = TrapLinkSystem.Instance;
+            if (trapLinkSystem != null)
+            {
+                trapLinkSystem.TriggerLinkedTraps(netId);
+            }
+        }
 
         [Server]
         protected virtual void MarkAsTriggered()
         {
             isTriggered = true;
+            
+            // Trigger linked traps
+            TriggerLinkedTraps();
+        }
+
+        /// <summary>
+        /// Award trap kill to ScoreManager (call when trap kills a player)
+        /// </summary>
+        [Server]
+        protected void AwardTrapKill(ulong victimId)
+        {
+            // Find trap owner (structure owner)
+            var structure = GetComponent<Building.Structure>();
+            ulong trapOwnerId = structure != null ? structure.ownerId : 0;
+
+            if (trapOwnerId != 0 && victimId != 0)
+            {
+                var scoreManager = Core.ScoreManager.Instance;
+                if (scoreManager != null)
+                {
+                    scoreManager.AwardTrapKill(trapOwnerId, victimId);
+                }
+            }
         }
 
         // ✅ CRITICAL FIX: Cancel Invoke on destroy to prevent memory leaks

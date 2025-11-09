@@ -2,14 +2,18 @@ namespace TacticalCombat.Core
 {
     public static class GameConstants
     {
-        // Phase Durations
-        public const float BUILD_DURATION = 150f; // 2:30
-        public const float COMBAT_DURATION = 480f; // 8:00
-        public const float ROUND_END_DURATION = 5f;
+        // Phase Durations - Updated for new game structure
+        public const float BUILD_DURATION = 180f; // 3:00 minutes
+        public const float COMBAT_DURATION = 900f; // 15:00 minutes
+        public const float SUDDEN_DEATH_DURATION = 120f; // 2:00 minutes (final 2 minutes of combat)
+        public const float END_PHASE_DURATION = 10f; // 10 seconds to show scoreboard
 
-        // BO3
-        public const int ROUNDS_TO_WIN = 2;
-        public const int MAX_ROUNDS = 3;
+        // Game Mode Settings
+        public const int MAX_PLAYERS_FFA = 8;
+        public const int MAX_PLAYERS_TEAM = 8; // 4v4
+        public const int MIN_PLAYERS_TO_START = 2;
+
+        // Removed BO3 - single match structure now
 
         // Structure Health
         public const int CORE_HP = 1200;
@@ -62,6 +66,37 @@ namespace TacticalCombat.Core
         // Build
         public const float BUILD_PLACEMENT_RANGE = 5f;
         public const float BUILD_SNAP_DISTANCE = 0.5f;
+        public const float BUILD_MAX_DISTANCE_FROM_SPAWN = 50f; // Max distance from spawn for personal base
+
+        // Core Object
+        public const float CORE_CARRY_SPEED_MULTIPLIER = 0.7f; // 70% speed when carrying core
+        public const float CORE_RETURN_DISTANCE = 3f; // Distance to return core to base
+        public const int CORE_RETURN_SCORE = 100; // Points for returning core
+
+        // Throwables
+        public const float SMOKE_DURATION = 10f;
+        public const float EMP_DURATION = 5f;
+        public const float EMP_RADIUS = 10f;
+        public const float STICKY_BOMB_DAMAGE = 100f;
+        public const float REVEAL_DART_DURATION = 15f;
+        public const float REVEAL_DART_RADIUS = 20f;
+
+        // Info Tower
+        public const float INFO_TOWER_HACK_TIME = 5f;
+        public const float INFO_TOWER_REVEAL_DURATION = 30f;
+        public const float INFO_TOWER_REVEAL_RADIUS = 50f;
+
+        // Trap Linking
+        public const int MAX_TRAP_CHAIN_LENGTH = 5; // Max traps in a chain
+        public const float TRAP_CHAIN_DELAY = 0.2f; // Delay between chain triggers
+
+        // Scoring
+        public const int SCORE_KILL = 10;
+        public const int SCORE_ASSIST = 5;
+        public const int SCORE_STRUCTURE_BUILT = 2;
+        public const int SCORE_TRAP_KILL = 15;
+        public const int SCORE_CAPTURE = 100;
+        public const int SCORE_DEFENSE_TIME_PER_SECOND = 1;
 
         // Unity 6 Performance Settings
         public const int TARGET_FRAME_RATE = 60;

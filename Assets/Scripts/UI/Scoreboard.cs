@@ -119,28 +119,67 @@ namespace TacticalCombat.UI
             // Find all players
             PlayerController[] players = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
 
-            // Update team scores
+            // Update team scores (if team mode)
             if (MatchManager.Instance != null)
             {
-                int teamAWins = MatchManager.Instance.GetTeamAWins();
-                int teamBWins = MatchManager.Instance.GetTeamBWins();
-
-                if (teamAScoreText != null)
+                GameMode mode = MatchManager.Instance.GetGameMode();
+                
+                if (mode == GameMode.Team4v4)
                 {
-                    teamAScoreText.text = $"TEAM A - {teamAWins} Rounds";
+                    // Calculate team scores from match stats
+                    int teamAScore = 0;
+                    int teamBScore = 0;
+
+                    foreach (var player in players)
+                    {
+                        var stats = MatchManager.Instance.GetPlayerMatchStats(player.netId);
+                        if (stats != null)
+                        {
+                            if (player.GetPlayerTeam() == Team.TeamA)
+                                teamAScore += stats.totalScore;
+                            else if (player.GetPlayerTeam() == Team.TeamB)
+                                teamBScore += stats.totalScore;
+                        }
+                    }
+
+                    if (teamAScoreText != null)
+                    {
+                        teamAScoreText.text = $"TEAM A - {teamAScore}";
+                    }
+
+                    if (teamBScoreText != null)
+                    {
+                        teamBScoreText.text = $"TEAM B - {teamBScore}";
+                    }
                 }
-
-                if (teamBScoreText != null)
+                else // FFA
                 {
-                    teamBScoreText.text = $"TEAM B - {teamBWins} Rounds";
+                    if (teamAScoreText != null) teamAScoreText.text = "FFA MODE";
+                    if (teamBScoreText != null) teamBScoreText.text = "";
                 }
             }
+
+            // Sort players by total score
+            System.Array.Sort(players, (a, b) =>
+            {
+                var statsA = MatchManager.Instance?.GetPlayerMatchStats(a.netId);
+                var statsB = MatchManager.Instance?.GetPlayerMatchStats(b.netId);
+                int scoreA = statsA?.totalScore ?? 0;
+                int scoreB = statsB?.totalScore ?? 0;
+                return scoreB.CompareTo(scoreA); // Descending order
+            });
 
             // Populate player entries
             foreach (var player in players)
             {
                 Team team = player.GetPlayerTeam();
                 Transform content = team == Team.TeamA ? teamAContent : teamBContent;
+
+                // In FFA mode, use single column
+                if (MatchManager.Instance != null && MatchManager.Instance.GetGameMode() == GameMode.FFA)
+                {
+                    content = teamAContent; // Use Team A column for FFA
+                }
 
                 if (content != null && playerEntryPrefab != null)
                 {
@@ -159,11 +198,23 @@ namespace TacticalCombat.UI
             TextMeshProUGUI nameText = entry.transform.Find("NameText")?.GetComponent<TextMeshProUGUI>();
             TextMeshProUGUI killsText = entry.transform.Find("KillsText")?.GetComponent<TextMeshProUGUI>();
             TextMeshProUGUI deathsText = entry.transform.Find("DeathsText")?.GetComponent<TextMeshProUGUI>();
-            TextMeshProUGUI kdText = entry.transform.Find("KDText")?.GetComponent<TextMeshProUGUI>();
+            TextMeshProUGUI assistsText = entry.transform.Find("AssistsText")?.GetComponent<TextMeshProUGUI>();
+            TextMeshProUGUI structuresText = entry.transform.Find("StructuresText")?.GetComponent<TextMeshProUGUI>();
+            TextMeshProUGUI trapKillsText = entry.transform.Find("TrapKillsText")?.GetComponent<TextMeshProUGUI>();
+            TextMeshProUGUI capturesText = entry.transform.Find("CapturesText")?.GetComponent<TextMeshProUGUI>();
+            TextMeshProUGUI scoreText = entry.transform.Find("ScoreText")?.GetComponent<TextMeshProUGUI>();
+
+            // Get match stats
+            var stats = MatchManager.Instance?.GetPlayerMatchStats(player.netId);
+            int kills = stats?.kills ?? 0;
+            int deaths = stats?.deaths ?? 0;
+            int assists = stats?.assists ?? 0;
+            int structures = stats?.structuresBuilt ?? 0;
+            int trapKills = stats?.trapKills ?? 0;
+            int captures = stats?.captures ?? 0;
+            int totalScore = stats?.totalScore ?? 0;
 
             string playerName = $"Player {player.netId}";
-            int kills = 0; // TODO: Implement kill tracking
-            int deaths = 0; // TODO: Implement death tracking
             float kd = deaths > 0 ? (float)kills / deaths : kills;
 
             if (nameText != null)
@@ -188,9 +239,35 @@ namespace TacticalCombat.UI
                 deathsText.text = deaths.ToString();
             }
 
-            if (kdText != null)
+            if (assistsText != null)
             {
-                kdText.text = kd.ToString("F2");
+                assistsText.text = assists.ToString();
+            }
+
+            if (structuresText != null)
+            {
+                structuresText.text = structures.ToString();
+            }
+
+            if (trapKillsText != null)
+            {
+                trapKillsText.text = trapKills.ToString();
+            }
+
+            if (capturesText != null)
+            {
+                capturesText.text = captures.ToString();
+            }
+
+            if (scoreText != null)
+            {
+                scoreText.text = totalScore.ToString();
+                // Highlight highest score
+                if (totalScore > 0)
+                {
+                    scoreText.color = Color.green;
+                    scoreText.fontStyle = FontStyles.Bold;
+                }
             }
         }
 

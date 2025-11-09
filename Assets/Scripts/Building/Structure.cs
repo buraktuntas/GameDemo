@@ -225,8 +225,25 @@ namespace TacticalCombat.Building
                 StructureType.TrapDartTurret => StructureCategory.Trap,
                 StructureType.UtilityGate => StructureCategory.Utility,
                 StructureType.CoreStructure => StructureCategory.Core,
+                StructureType.InfoTower => StructureCategory.Utility,
                 _ => StructureCategory.Wall
             };
+        }
+
+        /// <summary>
+        /// Get structure type (for BlueprintSystem)
+        /// </summary>
+        public StructureType GetStructureType()
+        {
+            return structureType;
+        }
+
+        /// <summary>
+        /// Get owner ID (for BlueprintSystem)
+        /// </summary>
+        public ulong GetOwnerId()
+        {
+            return ownerId;
         }
     }
 }

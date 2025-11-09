@@ -147,10 +147,28 @@ namespace TacticalCombat.Combat
             isDead = true;
             Debug.Log($"💀 [Server] {gameObject.name} died (killed by {killerId}{(isHeadshot ? " - HEADSHOT" : "")})");
 
+            // Award kill/death to ScoreManager
+            ulong victimId = netId;
+            if (killerId != 0 && killerId != victimId)
+            {
+                var scoreManager = Core.ScoreManager.Instance;
+                if (scoreManager != null)
+                {
+                    scoreManager.AwardKill(killerId, victimId);
+                }
+            }
+
             // Notify MatchManager if this is a player
             if (TryGetComponent<TacticalCombat.Player.PlayerController>(out var player))
             {
                 MatchManager.Instance?.NotifyPlayerDeath(player.playerId);
+                
+                // Drop any cores the player was carrying
+                var objectiveManager = Core.ObjectiveManager.Instance;
+                if (objectiveManager != null)
+                {
+                    objectiveManager.OnPlayerDeath(player.netId, transform.position);
+                }
             }
 
             // Show kill feed
@@ -279,20 +297,24 @@ namespace TacticalCombat.Combat
         private Vector3 FindSafeRespawnPosition()
         {
             Vector3 basePosition = FindRespawnPosition();
-            
+
             // Check if position is safe (no other players nearby)
             const float MIN_SPAWN_DISTANCE = 2f; // Minimum distance from other players
             int maxAttempts = 10;
-            
+
+            // ✅ PERFORMANCE FIX: Find all players ONCE outside the loop
+            // Instead of calling FindObjectsByType 10 times (once per attempt)
+            var allPlayers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+
             for (int i = 0; i < maxAttempts; i++)
             {
                 bool isSafe = true;
-                
-                // Check all players
-                foreach (var player in FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None))
+
+                // ✅ Use cached player list
+                foreach (var player in allPlayers)
                 {
                     if (player == null || player.gameObject == gameObject) continue;
-                    
+
                     float distance = Vector3.Distance(basePosition, player.transform.position);
                     if (distance < MIN_SPAWN_DISTANCE)
                     {
@@ -300,12 +322,12 @@ namespace TacticalCombat.Combat
                         break;
                     }
                 }
-                
+
                 if (isSafe)
                 {
                     return basePosition;
                 }
-                
+
                 // Try a slightly different position
                 basePosition += new Vector3(
                     Random.Range(-2f, 2f),
@@ -313,7 +335,7 @@ namespace TacticalCombat.Combat
                     Random.Range(-2f, 2f)
                 );
             }
-            
+
             // Fallback: return original position (better than no spawn)
             return basePosition;
         }

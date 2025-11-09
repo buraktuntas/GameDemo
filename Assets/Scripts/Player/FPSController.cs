@@ -323,50 +323,30 @@ namespace TacticalCombat.Player
                 // 🔧 AUDIO LISTENER FIX: Only local player has AudioListener
                 if (isLocalPlayer)
                 {
-                    // ✅ CRITICAL FIX: Disable ALL other AudioListeners (bootstrap, other players, etc.)
-                    var allListeners = FindObjectsByType<AudioListener>(FindObjectsSortMode.None);
-                    foreach (var listener in allListeners)
-                    {
-                        if (listener != null && listener.gameObject != playerCamera.gameObject)
-                        {
-                            // Disable or destroy other listeners
-                            if (listener.gameObject.name.Contains("Bootstrap") || 
-                                listener.gameObject.name.Contains("URPCameraBootstrap"))
-                            {
-                                // Destroy bootstrap listeners (they'll be destroyed anyway)
-                                Destroy(listener);
-                            }
-                            else
-                            {
-                                // Just disable others (might be on other players)
-                                listener.enabled = false;
-                            }
-                        }
-                    }
-                    
-                    // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
-                    // Ensure local player's AudioListener is enabled
+                    // ✅ CRITICAL FIX: Ensure local player's AudioListener is enabled
                     if (!playerCamera.TryGetComponent<AudioListener>(out var audioListener))
                     {
                         audioListener = playerCamera.gameObject.AddComponent<AudioListener>();
                     }
                     audioListener.enabled = true;
-                    
+
+                    // ✅ CRITICAL FIX: Use delayed coroutine to clean scene listeners (prevents infinite loop)
+                    StartCoroutine(CleanSceneAudioListenersDelayed());
+
                     if (showDebugInfo)
                     {
-                        Debug.Log($"🔊 AudioListener enabled (local player) - Other listeners cleaned");
+                        Debug.Log($"🔊 AudioListener enabled for local player");
                     }
                 }
                 else
                 {
-                    // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
-                    // Non-local player - destroy AudioListener
+                    // ✅ CRITICAL FIX: Non-local player - ensure NO AudioListener exists
                     if (playerCamera.TryGetComponent<AudioListener>(out var audioListener))
                     {
                         Destroy(audioListener);
                         if (showDebugInfo)
                         {
-                            Debug.Log($"🔇 AudioListener destroyed (not local player)");
+                            Debug.Log($"🔇 AudioListener removed from non-local player");
                         }
                     }
                 }
@@ -477,11 +457,11 @@ namespace TacticalCombat.Player
         
         // ✅ PHASE 2: Movement RPC rate limiting
         private float lastMovementRpcTime = 0f;
-        private const float MOVEMENT_RPC_INTERVAL = 0.05f; // 20 RPC/saniye (50ms throttle)
+        private const float MOVEMENT_RPC_INTERVAL = 0.1f; // 10 RPC/saniye (100ms throttle) - reduced from 50ms to prevent jitter
         private Vector3 lastSentPosition;
         private Quaternion lastSentRotation;
-        private const float POSITION_THRESHOLD = 0.1f; // 10cm değişiklik olursa gönder
-        private const float ROTATION_THRESHOLD = 5f; // 5 derece değişiklik olursa gönder
+        private const float POSITION_THRESHOLD = 0.5f; // 50cm değişiklik olursa gönder (was 0.1m - too sensitive, caused jitter)
+        private const float ROTATION_THRESHOLD = 10f; // 10 derece değişiklik olursa gönder (was 5° - too sensitive)
         
         private void FixedUpdate()
         {
@@ -618,23 +598,26 @@ namespace TacticalCombat.Player
             }
             else
             {
-                // ✅ CRITICAL FIX: Local player correction threshold reduced (0.5m → 0.1m)
-                // Also use smooth lerp instead of instant snap
+                // ✅ CRITICAL FIX: Local player correction - only for major desyncs
+                // Client prediction is usually accurate, only correct big differences
                 float correctionDistance = Vector3.Distance(transform.position, serverPosition);
 
-                if (correctionDistance > 0.1f) // 10cm threshold (was 50cm - too high!)
+                // ✅ FIX: Increased threshold to prevent jitter (0.1m → 0.5m)
+                // Only correct if player is significantly out of sync (teleport, major lag spike)
+                if (correctionDistance > 0.5f)
                 {
-                    // ✅ FIX: Smooth correction instead of instant snap
-                    float lerpFactor = Mathf.Clamp01(correctionDistance / 0.5f); // Smooth 0→1 based on distance
-                    transform.position = Vector3.Lerp(transform.position, serverPosition, lerpFactor * 0.8f);
+                    // ✅ FIX: Instant snap for large corrections (smoother than lerp for big jumps)
+                    transform.position = serverPosition;
+                    transform.rotation = serverRotation;
 
                     #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     if (showDebugInfo)
                     {
-                        Debug.Log($"🔧 [FPSController] Position corrected by server: {correctionDistance:F3}m (smooth lerp)");
+                        Debug.Log($"🔧 [FPSController] Position corrected by server: {correctionDistance:F3}m (snap)");
                     }
                     #endif
                 }
+                // Small differences (< 0.5m) are ignored - client prediction handles them
             }
         }
         
@@ -1048,6 +1031,48 @@ namespace TacticalCombat.Player
                 GUILayout.Label($"Stamina: {currentStamina:F0}/{maxStamina}");
             }
             GUILayout.EndArea();
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Clean scene AudioListeners with delay (prevents infinite loop)
+        /// Only called once for local player on spawn
+        /// </summary>
+        private System.Collections.IEnumerator CleanSceneAudioListenersDelayed()
+        {
+            // Wait one frame to ensure all objects are initialized
+            yield return null;
+
+            // Find all AudioListeners in the scene
+            var allListeners = FindObjectsByType<AudioListener>(FindObjectsSortMode.None);
+            int disabledCount = 0;
+
+            foreach (var listener in allListeners)
+            {
+                // Skip if null or is our own listener
+                if (listener == null || listener.gameObject == playerCamera.gameObject)
+                    continue;
+
+                // Disable scene/bootstrap listeners
+                if (listener.gameObject.scene.IsValid()) // Scene object (not prefab)
+                {
+                    listener.enabled = false;
+                    disabledCount++;
+
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    if (showDebugInfo)
+                    {
+                        Debug.Log($"🔇 Disabled AudioListener on: {listener.gameObject.name}");
+                    }
+                    #endif
+                }
+            }
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (showDebugInfo && disabledCount > 0)
+            {
+                Debug.Log($"🔊 Cleaned {disabledCount} scene AudioListener(s) - Local player listener active");
+            }
+            #endif
         }
 
         /// <summary>

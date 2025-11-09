@@ -19,12 +19,14 @@ namespace TacticalCombat.Core
         [SyncVar]
         private float remainingTime;
         
-        private RoundState roundState = new RoundState();
+        private MatchState matchState = new MatchState();
 
         [Header("Configuration")]
         [SerializeField] private float buildDuration = GameConstants.BUILD_DURATION;
         [SerializeField] private float combatDuration = GameConstants.COMBAT_DURATION;
-        [SerializeField] private float roundEndDuration = GameConstants.ROUND_END_DURATION;
+        [SerializeField] private float suddenDeathDuration = GameConstants.SUDDEN_DEATH_DURATION;
+        [SerializeField] private float endPhaseDuration = GameConstants.END_PHASE_DURATION;
+        [SerializeField] private GameMode gameMode = GameMode.Team4v4;
 
         [Header("Team Tracking")]
         // ⚠️ NOTE: Dictionary doesn't sync to clients automatically
@@ -46,12 +48,15 @@ namespace TacticalCombat.Core
         private int teamBWins = 0;
         
         [SyncVar]
-        private int currentRound = 0;
+        private bool suddenDeathActive = false;
 
         // Events
         public System.Action<Phase> OnPhaseChangedEvent;
-        public System.Action<Team> OnRoundWonEvent;
         public System.Action<Team> OnMatchWonEvent;
+        public System.Action OnSuddenDeathActivated;
+        
+        // Reference to ObjectiveManager (will be set when ObjectiveManager is created)
+        private ObjectiveManager objectiveManager;
 
         private void Awake()
         {
@@ -236,16 +241,27 @@ namespace TacticalCombat.Core
         [Server]
         private void InitializeMatch()
         {
-            roundState = new RoundState();
+            matchState = new MatchState();
+            matchState.gameMode = gameMode;
             currentPhase = Phase.Lobby;
             teamAWins = 0;
             teamBWins = 0;
-            currentRound = 0;
+            suddenDeathActive = false;
             playerStates.Clear();
+            
+            // Initialize match stats for all players
+            matchState.playerStats.Clear();
+            foreach (var kvp in playerStates)
+            {
+                matchState.playerStats[kvp.Key] = new MatchStats(kvp.Key);
+            }
             
             // ✅ CLAN SYSTEM: Reset clan IDs for new match
             clanAId = null;
             clanBId = null;
+            
+            // Find ObjectiveManager
+            objectiveManager = FindFirstObjectByType<ObjectiveManager>();
         }
 
         /// <summary>
@@ -390,15 +406,21 @@ namespace TacticalCombat.Core
                 return;
             }
 
-            Debug.Log("Starting match...");
-            StartRound();
+            // Check minimum players
+            if (playerStates.Count < GameConstants.MIN_PLAYERS_TO_START)
+            {
+                Debug.LogWarning($"Cannot start match - need at least {GameConstants.MIN_PLAYERS_TO_START} players");
+                return;
+            }
+
+            Debug.Log($"Starting match - Mode: {gameMode}, Players: {playerStates.Count}");
+            StartBuildPhase();
         }
 
         [Server]
-        private void StartRound()
+        private void StartBuildPhase()
         {
-            currentRound++;
-            Debug.Log($"Starting Round {currentRound}");
+            Debug.Log("Starting Build Phase (3 minutes)");
             
             // Reset player states
             foreach (var state in playerStates.Values)
@@ -407,8 +429,18 @@ namespace TacticalCombat.Core
                 state.budget = BuildBudget.GetRoleBudget(state.role);
             }
 
+            // Initialize match stats
+            foreach (var kvp in playerStates)
+            {
+                if (!matchState.playerStats.ContainsKey(kvp.Key))
+                {
+                    matchState.playerStats[kvp.Key] = new MatchStats(kvp.Key);
+                }
+            }
+
             currentPhase = Phase.Build;
             remainingTime = buildDuration;
+            suddenDeathActive = false;
             RpcOnPhaseChanged(currentPhase);
             
             StartCoroutine(BuildPhaseTimer());
@@ -429,9 +461,17 @@ namespace TacticalCombat.Core
         [Server]
         private void TransitionToCombat()
         {
+            Debug.Log("Transitioning to Combat Phase (15 minutes)");
             currentPhase = Phase.Combat;
             remainingTime = combatDuration;
+            suddenDeathActive = false;
             RpcOnPhaseChanged(currentPhase);
+            
+            // Initialize core objects if ObjectiveManager exists
+            if (objectiveManager != null)
+            {
+                objectiveManager.InitializeCores();
+            }
             
             StartCoroutine(CombatPhaseTimer());
         }
@@ -440,13 +480,23 @@ namespace TacticalCombat.Core
         private IEnumerator CombatPhaseTimer()
         {
             const float winCheckInterval = 0.5f;
+            const float suddenDeathCheckInterval = 1f;
             float nextCheck = 0f;
+            float nextSuddenDeathCheck = 0f;
+            bool suddenDeathTriggered = false;
 
             while (remainingTime > 0)
             {
                 remainingTime -= Time.deltaTime;
 
-                // Check win condition every 0.5s, not every frame
+                // Check for sudden death (final 2 minutes)
+                if (!suddenDeathTriggered && remainingTime <= suddenDeathDuration)
+                {
+                    ActivateSuddenDeath();
+                    suddenDeathTriggered = true;
+                }
+
+                // Check win condition every 0.5s
                 if (Time.time >= nextCheck)
                 {
                     if (IsWinConditionMet()) break;
@@ -456,31 +506,135 @@ namespace TacticalCombat.Core
                 yield return null;
             }
 
-            EndRound();
+            // ✅ FIX: Determine winner when time runs out
+            Team winner = DetermineWinnerByScore();
+            EndMatch(winner);
+        }
+
+        [Server]
+        private Team DetermineWinnerByScore()
+        {
+            // If core returned, use that winner
+            if (objectiveManager != null && objectiveManager.HasCoreBeenReturned())
+            {
+                return objectiveManager.GetCoreReturnWinner();
+            }
+
+            // Otherwise, check by team elimination or highest score
+            if (gameMode == GameMode.Team4v4)
+            {
+                int teamAAlive = 0;
+                int teamBAlive = 0;
+
+                foreach (var state in playerStates.Values)
+                {
+                    if (state.isAlive)
+                    {
+                        if (state.team == Team.TeamA) teamAAlive++;
+                        else if (state.team == Team.TeamB) teamBAlive++;
+                    }
+                }
+
+                if (teamAAlive > 0 && teamBAlive == 0) return Team.TeamA;
+                if (teamBAlive > 0 && teamAAlive == 0) return Team.TeamB;
+
+                // If both teams alive, check by score
+                int teamAScore = 0;
+                int teamBScore = 0;
+
+                foreach (var kvp in matchState.playerStats)
+                {
+                    var stats = kvp.Value;
+                    var playerState = GetPlayerState(kvp.Key);
+                    if (playerState != null)
+                    {
+                        if (playerState.team == Team.TeamA)
+                            teamAScore += stats.totalScore;
+                        else if (playerState.team == Team.TeamB)
+                            teamBScore += stats.totalScore;
+                    }
+                }
+
+                if (teamAScore > teamBScore) return Team.TeamA;
+                if (teamBScore > teamAScore) return Team.TeamB;
+            }
+            else // FFA
+            {
+                // Find player with highest score
+                ulong winnerId = 0;
+                int maxScore = int.MinValue;
+
+                foreach (var kvp in matchState.playerStats)
+                {
+                    if (kvp.Value.totalScore > maxScore)
+                    {
+                        maxScore = kvp.Value.totalScore;
+                        winnerId = kvp.Key;
+                    }
+                }
+
+                if (winnerId != 0)
+                {
+                    var playerState = GetPlayerState(winnerId);
+                    if (playerState != null)
+                        return playerState.team;
+                }
+            }
+
+            return Team.None; // Draw
+        }
+
+        [Server]
+        private void ActivateSuddenDeath()
+        {
+            Debug.Log("⚡ SUDDEN DEATH ACTIVATED - Secret tunnel opens!");
+            suddenDeathActive = true;
+            matchState.suddenDeathActive = true;
+            RpcOnSuddenDeathActivated();
+            
+            // TODO: Open secret tunnel between bases (will be handled by ObjectiveManager)
+            if (objectiveManager != null)
+            {
+                objectiveManager.OpenSuddenDeathTunnel();
+            }
         }
 
         [Server]
         private bool IsWinConditionMet()
         {
-            // Check if all players of one team are dead
-            int teamAAlive = 0;
-            int teamBAlive = 0;
-
-            Debug.Log($"📊 Checking {playerStates.Count} player states:");
-            foreach (var kvp in playerStates)
+            // Check if core was returned (primary win condition)
+            if (objectiveManager != null && objectiveManager.HasCoreBeenReturned())
             {
-                var state = kvp.Value;
-                Debug.Log($"  Player {kvp.Key}: Team={state.team}, Alive={state.isAlive}");
-                if (state.isAlive)
-                {
-                    if (state.team == Team.TeamA) teamAAlive++;
-                    else if (state.team == Team.TeamB) teamBAlive++;
-                }
+                return true;
             }
 
-            bool winCondition = teamAAlive == 0 || teamBAlive == 0;
-            Debug.Log($"📊 IsWinConditionMet: TeamA={teamAAlive}, TeamB={teamBAlive}, Result={winCondition}");
-            return winCondition;
+            // Check if all players of one team are dead (secondary win condition)
+            if (gameMode == GameMode.Team4v4)
+            {
+                int teamAAlive = 0;
+                int teamBAlive = 0;
+
+                foreach (var kvp in playerStates)
+                {
+                    var state = kvp.Value;
+                    if (state.isAlive)
+                    {
+                        if (state.team == Team.TeamA) teamAAlive++;
+                        else if (state.team == Team.TeamB) teamBAlive++;
+                    }
+                }
+
+                return teamAAlive == 0 || teamBAlive == 0;
+            }
+            else // FFA mode
+            {
+                int aliveCount = 0;
+                foreach (var state in playerStates.Values)
+                {
+                    if (state.isAlive) aliveCount++;
+                }
+                return aliveCount <= 1; // Last player standing wins
+            }
         }
 
         [Server]
@@ -500,7 +654,7 @@ namespace TacticalCombat.Core
         public void OnCoreDestroyed(Team winner)
         {
             Debug.Log($"💥 Core destroyed! Winner: {winner}");
-            AwardRoundWin(winner);
+            EndMatch(winner);
         }
 
         [Server]
@@ -537,7 +691,7 @@ namespace TacticalCombat.Core
             if (winner != Team.None)
             {
                 Debug.Log($"🏆 Winner: {winner}");
-                AwardRoundWin(winner);
+                EndMatch(winner);
             }
             else
             {
@@ -546,92 +700,48 @@ namespace TacticalCombat.Core
         }
 
         [Server]
-        private void EndRound()
+        private void EndMatch(Team winner)
         {
-            // If time ran out, check who has more players alive or if a core is still standing
-            if (!IsWinConditionMet())
+            // ✅ FIX: EndMatch now takes winner as parameter (already determined by caller)
+            // Calculate final scores
+            foreach (var stats in matchState.playerStats.Values)
             {
-                int teamAAlive = 0;
-                int teamBAlive = 0;
+                stats.CalculateTotalScore();
+            }
 
-                foreach (var state in playerStates.Values)
+            // Calculate awards
+            var scoreManager = ScoreManager.Instance;
+            Dictionary<ulong, AwardType> awardsDict = null;
+            AwardData[] awardsArray = null;
+            if (scoreManager != null)
+            {
+                awardsDict = scoreManager.CalculateAwards();
+                
+                // ✅ FIX: Convert Dictionary to Array for Mirror RPC
+                if (awardsDict != null && awardsDict.Count > 0)
                 {
-                    if (state.isAlive)
+                    awardsArray = new AwardData[awardsDict.Count];
+                    int index = 0;
+                    foreach (var kvp in awardsDict)
                     {
-                        if (state.team == Team.TeamA) teamAAlive++;
-                        else if (state.team == Team.TeamB) teamBAlive++;
+                        awardsArray[index] = new AwardData(kvp.Key, kvp.Value);
+                        index++;
                     }
                 }
-
-                Team winner = teamAAlive > teamBAlive ? Team.TeamA : 
-                             teamBAlive > teamAAlive ? Team.TeamB : Team.None;
-
-                if (winner != Team.None)
-                {
-                    AwardRoundWin(winner);
-                }
-                else
-                {
-                    // Draw - no one wins this round
-                    Debug.Log("Round ended in a draw");
-                    StartCoroutine(RoundEndSequence(Team.None));
-                }
             }
+
+            EndMatch(winner, awardsArray);
         }
 
         [Server]
-        private void AwardRoundWin(Team winner)
-        {
-            Debug.Log($"{winner} wins the round!");
-            
-            if (winner == Team.TeamA)
-                teamAWins++;
-            else if (winner == Team.TeamB)
-                teamBWins++;
-
-            RpcOnRoundWon(winner);
-            StartCoroutine(RoundEndSequence(winner));
-        }
-
-        [Server]
-        private IEnumerator RoundEndSequence(Team roundWinner)
-        {
-            currentPhase = Phase.RoundEnd;
-            remainingTime = roundEndDuration;
-            RpcOnPhaseChanged(currentPhase);
-
-            yield return new WaitForSeconds(roundEndDuration);
-
-            // Check if match is over (BO3)
-            if (teamAWins >= GameConstants.ROUNDS_TO_WIN)
-            {
-                EndMatch(Team.TeamA);
-            }
-            else if (teamBWins >= GameConstants.ROUNDS_TO_WIN)
-            {
-                EndMatch(Team.TeamB);
-            }
-            else
-            {
-                // Start next round
-                StartRound();
-            }
-        }
-
-        [Server]
-        private void EndMatch(Team winner)
+        private void EndMatch(Team winner, AwardData[] awards = null)
         {
             Debug.Log($"🏆 Match ended! Winner: {winner}");
             
-            // Award win to team
-            if (winner == Team.TeamA)
-            {
-                teamAWins++;
-            }
-            else if (winner == Team.TeamB)
-            {
-                teamBWins++;
-            }
+            currentPhase = Phase.End;
+            remainingTime = endPhaseDuration;
+            RpcOnPhaseChanged(currentPhase);
+            RpcOnMatchWon(winner, awards);
             
             // ✅ CLAN SYSTEM: Award XP to clans
             if (ClanManager.Instance != null)
@@ -639,10 +749,20 @@ namespace TacticalCombat.Core
                 AwardClanXP(winner);
             }
             
-            RpcOnMatchWon(winner);
+            // Show end screen with scoreboard and awards
+            StartCoroutine(EndPhaseSequence(winner));
+        }
+
+        [Server]
+        private IEnumerator EndPhaseSequence(Team winner)
+        {
+            yield return new WaitForSeconds(endPhaseDuration);
             
-            // Match ended - could return to lobby or disconnect
+            // Return to lobby
             currentPhase = Phase.Lobby;
+            RpcOnPhaseChanged(currentPhase);
+            
+            // TODO: Disconnect players or return to lobby scene
         }
         
         /// <summary>
@@ -745,22 +865,43 @@ namespace TacticalCombat.Core
         }
 
         [ClientRpc]
-        private void RpcOnRoundWon(Team winner)
+        private void RpcOnSuddenDeathActivated()
         {
-            OnRoundWonEvent?.Invoke(winner);
-
-            // Show UI
-            if (GameHUD.Instance != null)
-            {
-                string winnerName = winner == Team.TeamA ? "TEAM A" : "TEAM B";
-                GameHUD.Instance.ShowRoundWin(winnerName, teamAWins, teamBWins);
-            }
+            OnSuddenDeathActivated?.Invoke();
+            Debug.Log("⚡ SUDDEN DEATH ACTIVATED!");
         }
 
         [ClientRpc]
-        private void RpcOnMatchWon(Team winner)
+        private void RpcOnMatchWon(Team winner, AwardData[] awards)
         {
             OnMatchWonEvent?.Invoke(winner);
+            
+            // Convert array to dictionary for UI
+            Dictionary<ulong, AwardType> awardsDict = null;
+            if (awards != null && awards.Length > 0)
+            {
+                awardsDict = new Dictionary<ulong, AwardType>();
+                foreach (var award in awards)
+                {
+                    awardsDict[award.playerId] = award.awardType;
+                }
+            }
+            
+            // Show end-game scoreboard
+            var endScoreboard = FindFirstObjectByType<UI.EndGameScoreboard>();
+            if (endScoreboard != null)
+            {
+                endScoreboard.ShowScoreboard(winner, awardsDict);
+            }
+            
+            Debug.Log($"[Client] Match won by {winner}");
+            if (awards != null)
+            {
+                foreach (var award in awards)
+                {
+                    Debug.Log($"[Client] Award: Player {award.playerId} - {award.awardType}");
+                }
+            }
         }
 
         // Public getters
@@ -768,7 +909,18 @@ namespace TacticalCombat.Core
         public float GetRemainingTime() => remainingTime;
         public int GetTeamAWins() => teamAWins;
         public int GetTeamBWins() => teamBWins;
-        public int GetCurrentRound() => currentRound;
+        public bool IsSuddenDeathActive() => suddenDeathActive;
+        public GameMode GetGameMode() => gameMode;
+        public MatchStats GetPlayerMatchStats(ulong playerId)
+        {
+            return matchState.playerStats.ContainsKey(playerId) ? matchState.playerStats[playerId] : null;
+        }
+
+        [Server]
+        public MatchState GetMatchState()
+        {
+            return matchState;
+        }
 
         // ✅ FIX: Public getters for synced player counts (client-side UI can use this)
         public int GetTeamAPlayerCount() => teamAPlayerCount;
@@ -778,6 +930,12 @@ namespace TacticalCombat.Core
         public PlayerState GetPlayerState(ulong playerId)
         {
             return playerStates.ContainsKey(playerId) ? playerStates[playerId] : null;
+        }
+
+        [Server]
+        public Dictionary<ulong, PlayerState> GetAllPlayerStates()
+        {
+            return new Dictionary<ulong, PlayerState>(playerStates);
         }
 
         /// <summary>

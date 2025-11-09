@@ -13,7 +13,7 @@ namespace TacticalCombat.UI
         [Header("Phase & Timer")]
         [SerializeField] private TextMeshProUGUI phaseText;
         [SerializeField] private TextMeshProUGUI timerText;
-        [SerializeField] private TextMeshProUGUI roundText;
+        [SerializeField] private TextMeshProUGUI gameModeText; // FFA or Team4v4
 
         [Header("Resources")]
         [SerializeField] private TextMeshProUGUI wallPointsText;
@@ -70,9 +70,21 @@ namespace TacticalCombat.UI
         [SerializeField] private Slider controlPointBar;
         [SerializeField] private GameObject controlPointPanel;
 
+        [Header("Core Carrying")]
+        [SerializeField] private GameObject coreCarryingPanel;
+        [SerializeField] private TextMeshProUGUI coreCarryingText;
+        [SerializeField] private TextMeshProUGUI returnCoreHintText;
+
+        [Header("Sudden Death")]
+        [SerializeField] private GameObject suddenDeathPanel;
+        [SerializeField] private TextMeshProUGUI suddenDeathText;
+
         // ✅ PERFORMANCE FIX: Throttle UI updates to avoid 60 FPS string allocations
         private float lastUIUpdateTime;
         private const float UI_UPDATE_INTERVAL = 0.1f; // 10 Hz instead of 60 Hz
+
+        // ✅ CRITICAL FIX: Cache local player reference to avoid FindFirstObjectByType every frame
+        private Player.PlayerController cachedLocalPlayer;
 
         private void Awake()
         {
@@ -94,11 +106,14 @@ namespace TacticalCombat.UI
             if (MatchManager.Instance != null)
             {
                 MatchManager.Instance.OnPhaseChangedEvent += OnPhaseChanged;
+                MatchManager.Instance.OnSuddenDeathActivated += OnSuddenDeathActivated;
             }
 
             // Hide panels initially
             if (sabotagePanel != null) sabotagePanel.SetActive(false);
             if (buildFeedbackPanel != null) buildFeedbackPanel.SetActive(false);
+            if (coreCarryingPanel != null) coreCarryingPanel.SetActive(false);
+            if (suddenDeathPanel != null) suddenDeathPanel.SetActive(false);
         }
 
         private void Update()
@@ -107,7 +122,8 @@ namespace TacticalCombat.UI
             if (Time.time - lastUIUpdateTime >= UI_UPDATE_INTERVAL)
             {
                 UpdateTimer();
-                UpdateRoundInfo();
+                UpdateGameModeInfo();
+                UpdateCoreCarrying();
                 lastUIUpdateTime = Time.time;
             }
         }
@@ -130,25 +146,83 @@ namespace TacticalCombat.UI
             }
         }
 
-        private void UpdateRoundInfo()
+        private void UpdateGameModeInfo()
         {
             if (MatchManager.Instance == null)
             {
-                if (roundText != null) roundText.text = "Round 0";
+                if (gameModeText != null) gameModeText.text = "";
                 return;
             }
 
-            if (roundText != null)
+            if (gameModeText != null)
             {
-                int round = MatchManager.Instance.GetCurrentRound();
-                roundText.text = $"Round {round}";
+                GameMode mode = MatchManager.Instance.GetGameMode();
+                gameModeText.text = mode == GameMode.FFA ? "FFA" : "4v4";
             }
 
-            if (teamScoreText != null)
+            // Hide team score in FFA mode
+            if (teamStatusPanel != null)
             {
-                int teamAWins = MatchManager.Instance.GetTeamAWins();
-                int teamBWins = MatchManager.Instance.GetTeamBWins();
-                teamScoreText.text = $"{teamAWins} - {teamBWins}";
+                GameMode mode = MatchManager.Instance.GetGameMode();
+                teamStatusPanel.SetActive(mode == GameMode.Team4v4);
+            }
+        }
+
+        private void UpdateCoreCarrying()
+        {
+            // ✅ CRITICAL FIX: Cache local player instead of FindFirstObjectByType every 100ms
+            if (cachedLocalPlayer == null)
+            {
+                // Try to find local player (only when null)
+                var players = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+                foreach (var player in players)
+                {
+                    if (player.isLocalPlayer)
+                    {
+                        cachedLocalPlayer = player;
+                        break;
+                    }
+                }
+
+                // If still not found, hide panel and return
+                if (cachedLocalPlayer == null)
+                {
+                    if (coreCarryingPanel != null)
+                    {
+                        coreCarryingPanel.SetActive(false);
+                    }
+                    return;
+                }
+            }
+
+            // Check if cached player is still valid
+            if (cachedLocalPlayer != null && cachedLocalPlayer.isLocalPlayer)
+            {
+                bool isCarrying = cachedLocalPlayer.IsCarryingCore();
+
+                if (coreCarryingPanel != null)
+                {
+                    coreCarryingPanel.SetActive(isCarrying);
+                }
+
+                if (coreCarryingText != null && isCarrying)
+                {
+                    coreCarryingText.text = "CARRYING CORE";
+                }
+
+                if (returnCoreHintText != null && isCarrying)
+                {
+                    returnCoreHintText.text = "Press E at your base to return";
+                }
+            }
+            else
+            {
+                // Player became invalid, reset cache
+                cachedLocalPlayer = null;
+                if (coreCarryingPanel != null)
+                {
+                    coreCarryingPanel.SetActive(false);
+                }
             }
         }
 
@@ -156,13 +230,51 @@ namespace TacticalCombat.UI
         {
             if (phaseText != null)
             {
-                phaseText.text = newPhase.ToString().ToUpper();
+                string phaseName = newPhase switch
+                {
+                    Phase.Build => "BUILD PHASE",
+                    Phase.Combat => "COMBAT PHASE",
+                    Phase.SuddenDeath => "SUDDEN DEATH",
+                    Phase.End => "MATCH END",
+                    _ => newPhase.ToString().ToUpper()
+                };
+                phaseText.text = phaseName;
             }
 
             // Show/hide resource panel based on phase
             if (resourcePanel != null)
             {
                 resourcePanel.SetActive(newPhase == Phase.Build);
+            }
+
+            // Show/hide ammo panel based on phase
+            if (ammoPanel != null)
+            {
+                ammoPanel.SetActive(newPhase == Phase.Combat || newPhase == Phase.SuddenDeath);
+            }
+        }
+
+        private void OnSuddenDeathActivated()
+        {
+            if (suddenDeathPanel != null)
+            {
+                suddenDeathPanel.SetActive(true);
+            }
+
+            if (suddenDeathText != null)
+            {
+                suddenDeathText.text = "⚡ SUDDEN DEATH ⚡\nSECRET TUNNEL OPENED!";
+            }
+
+            // Hide after 5 seconds
+            Invoke(nameof(HideSuddenDeathNotification), 5f);
+        }
+
+        private void HideSuddenDeathNotification()
+        {
+            if (suddenDeathPanel != null)
+            {
+                suddenDeathPanel.SetActive(false);
             }
         }
 
@@ -371,6 +483,7 @@ namespace TacticalCombat.UI
             if (MatchManager.Instance != null)
             {
                 MatchManager.Instance.OnPhaseChangedEvent -= OnPhaseChanged;
+                MatchManager.Instance.OnSuddenDeathActivated -= OnSuddenDeathActivated;
             }
         }
     }

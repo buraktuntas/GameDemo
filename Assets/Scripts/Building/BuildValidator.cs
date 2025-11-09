@@ -23,6 +23,11 @@ namespace TacticalCombat.Building
         // NonAlloc buffers for performance
         private static readonly Collider[] overlapBuffer = new Collider[64];
 
+        // ✅ PERFORMANCE FIX: Store last spawned structure for BuildManager tracking
+        // This eliminates Physics.OverlapSphere in BuildManager.TrackStructureAfterPlacement
+        private GameObject lastSpawnedStructure;
+        public GameObject GetLastSpawnedStructure() => lastSpawnedStructure;
+
         [Header("Structure Prefabs")]
         [SerializeField] private GameObject wallPrefab;
         [SerializeField] private GameObject platformPrefab;
@@ -335,7 +340,10 @@ namespace TacticalCombat.Building
             {
                 trap.Initialize(team);
             }
-            
+
+            // ✅ PERFORMANCE FIX: Store spawned object for BuildManager tracking
+            lastSpawnedStructure = structureObj;
+
             return true;
         }
 

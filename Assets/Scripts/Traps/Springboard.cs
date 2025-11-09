@@ -16,7 +16,7 @@ namespace TacticalCombat.Traps
         }
 
         [Server]
-        protected override void Trigger(GameObject target)
+        public override void Trigger(GameObject target)
         {
             // ✅ CRITICAL FIX: Use TryGetComponent instead of GetComponent (no GC allocation)
             if (!target.TryGetComponent<NetworkIdentity>(out var targetIdentity))

@@ -116,7 +116,7 @@ namespace TacticalCombat.Traps
         }
 
         [Server]
-        protected override void Trigger(GameObject target)
+        public override void Trigger(GameObject target)
         {
             // Dart turret doesn't use trigger - it scans automatically
         }
