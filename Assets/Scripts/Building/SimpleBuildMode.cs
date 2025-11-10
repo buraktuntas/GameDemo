@@ -726,7 +726,24 @@ namespace TacticalCombat.Building
         private void PlaceStructure()
         {
             if (availableStructures == null || currentStructureIndex >= availableStructures.Length) return;
-            
+
+            // ✅ CRITICAL FIX: Check affordability before sending placement command
+            if (!CanAffordStructure())
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                int cost = GetCurrentStructureCost();
+                Debug.LogWarning($"⚠️ [SimpleBuildMode] Cannot afford structure (Cost: {cost})");
+                #endif
+
+                // Show UI feedback to player
+                var gameHUD = TacticalCombat.UI.GameHUD.Instance;
+                if (gameHUD != null)
+                {
+                    gameHUD.ShowBuildFeedback(false, "Insufficient budget!");
+                }
+                return;
+            }
+
             GameObject selectedStructure = availableStructures[currentStructureIndex];
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
             string structureName = selectedStructure.name;
@@ -1080,9 +1097,39 @@ namespace TacticalCombat.Building
         /// </summary>
         private bool CanAffordStructure()
         {
-            // TODO: Get player budget from MatchManager
-            // For now, always return true
-            return true;
+            // ✅ IMPLEMENTED: Get player budget from MatchManager
+            var matchManager = MatchManager.Instance;
+            if (matchManager == null) return false;
+
+            var playerState = matchManager.GetPlayerState(netId);
+            if (playerState == null) return false;
+
+            int cost = GetCurrentStructureCost();
+            StructureType structureType = GetStructureTypeFromIndex(currentStructureIndex);
+
+            // Check budget category based on structure type
+            switch (structureType)
+            {
+                case StructureType.Wall:
+                case StructureType.CoreStructure:
+                    return playerState.budget.wallPoints >= cost;
+
+                case StructureType.Platform:
+                case StructureType.Ramp:
+                    return playerState.budget.elevationPoints >= cost;
+
+                case StructureType.TrapSpike:
+                case StructureType.TrapGlue:
+                case StructureType.TrapSpringboard:
+                case StructureType.TrapDartTurret:
+                    return playerState.budget.trapPoints >= cost;
+
+                case StructureType.UtilityGate:
+                    return playerState.budget.utilityPoints >= cost;
+
+                default:
+                    return false;
+            }
         }
 
         /// <summary>

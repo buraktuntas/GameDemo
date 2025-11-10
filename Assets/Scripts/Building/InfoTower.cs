@@ -172,7 +172,9 @@ namespace TacticalCombat.Building
             StartCoroutine(revealCoroutine);
 
             RpcOnHackCompleted(hackerId);
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[InfoTower] Hacked by player {hackerId}!");
+            #endif
         }
 
         [Server]
@@ -230,49 +232,100 @@ namespace TacticalCombat.Building
         [ClientRpc]
         private void RpcOnHackStarted(ulong hackerId)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Info Tower hack started by player {hackerId}");
-            // TODO: Show hack progress UI
+            #endif
+
+            // ✅ IMPLEMENTED: Show hack progress UI
+            var gameHUD = UI.GameHUD.Instance;
+            if (gameHUD != null)
+            {
+                gameHUD.ShowInfoTowerHackProgress("HACKING INFO TOWER...");
+            }
         }
 
         [ClientRpc]
         private void RpcUpdateHackProgress(float progress)
         {
-            // TODO: Update hack progress UI
+            // ✅ IMPLEMENTED: Update hack progress UI
+            var gameHUD = UI.GameHUD.Instance;
+            if (gameHUD != null)
+            {
+                gameHUD.UpdateInfoTowerHackProgress(progress);
+            }
         }
 
         [ClientRpc]
         private void RpcOnHackStopped()
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("[Client] Info Tower hack stopped");
-            // TODO: Hide hack progress UI
+            #endif
+
+            // ✅ IMPLEMENTED: Hide hack progress UI
+            var gameHUD = UI.GameHUD.Instance;
+            if (gameHUD != null)
+            {
+                gameHUD.HideInfoTowerHackProgress();
+            }
         }
 
         [ClientRpc]
         private void RpcOnHackCompleted(ulong hackerId)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Info Tower hacked by player {hackerId}!");
-            // TODO: Show hack complete effect
+            #endif
+
+            // ✅ IMPLEMENTED: Show hack complete effect
+            var gameHUD = UI.GameHUD.Instance;
+            if (gameHUD != null)
+            {
+                gameHUD.ShowInfoTowerHackComplete();
+            }
         }
 
         [ClientRpc]
         private void RpcRevealStructure(uint structureId)
         {
-            // TODO: Show structure on minimap
+            // ✅ FIX: Integrate with MinimapManager
+            var minimapManager = UI.MinimapManager.Instance;
+            if (minimapManager != null)
+            {
+                minimapManager.RevealStructure(structureId, GameConstants.INFO_TOWER_REVEAL_DURATION);
+            }
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Structure {structureId} revealed on minimap");
+            #endif
         }
 
         [ClientRpc]
         private void RpcRevealPlayer(ulong playerId)
         {
-            // TODO: Show player on minimap
+            // ✅ FIX: Integrate with MinimapManager
+            var minimapManager = UI.MinimapManager.Instance;
+            if (minimapManager != null)
+            {
+                minimapManager.RevealPlayer(playerId, GameConstants.INFO_TOWER_REVEAL_DURATION);
+            }
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Player {playerId} revealed on minimap");
+            #endif
         }
 
         [ClientRpc]
         private void RpcOnHackExpired()
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("[Client] Info Tower hack expired");
-            // TODO: Hide revealed structures/players
+            #endif
+            // ✅ FIX: Hide revealed structures/players via MinimapManager
+            var minimapManager = UI.MinimapManager.Instance;
+            if (minimapManager != null)
+            {
+                // Clear all reveals when hack expires
+                minimapManager.ClearAllReveals();
+            }
         }
 
         private void OnDrawGizmosSelected()

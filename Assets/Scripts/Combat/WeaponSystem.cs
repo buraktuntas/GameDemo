@@ -1082,33 +1082,53 @@ namespace TacticalCombat.Combat
                     return;
                 }
                 
-                // ✅ CRITICAL FIX: Check team damage (prevent friendly fire)
+                // ✅ CRITICAL FIX: Check team damage (friendly fire logic)
                 health.TryGetComponent<TacticalCombat.Player.PlayerController>(out var targetPlayer);
                 TryGetComponent<TacticalCombat.Player.PlayerController>(out var shooterPlayer);
-                
+
+                bool isFriendlyFire = false;
+
                 if (targetPlayer != null && shooterPlayer != null)
                 {
-                    // ✅ CRITICAL FIX: Prevent friendly fire AND self-harm
-                    // Same team OR both Team.None = no damage
-                    if (targetPlayer.team == shooterPlayer.team)
+                    // Check if same team
+                    if (targetPlayer.team == shooterPlayer.team && targetPlayer.team != Team.None)
                     {
-                        // Prevent friendly fire (same team) OR both players have no team (Team.None)
-                        // Also prevent self-harm (same netId)
-                        if (targetPlayer.team != Team.None || shooterPlayer.netId == targetPlayer.netId)
+                        // ✅ ALWAYS prevent self-harm
+                        if (shooterPlayer.netId == targetPlayer.netId)
                         {
                             #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                            Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Friendly fire prevented: Team {shooterPlayer.team} player {netId} tried to damage teammate (or self-harm)");
+                            Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Self-harm prevented");
                             #endif
-                            // Friendly fire disabled - return without damage
-                            // TODO: If friendly fire is enabled, reduce damage here (e.g., damage *= 0.5f)
+                            return;
+                        }
+
+                        // ✅ IMPLEMENTED: Friendly fire with reduced damage
+                        if (GameConstants.FRIENDLY_FIRE_ENABLED)
+                        {
+                            isFriendlyFire = true;
+                            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                            Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Friendly fire: Team {shooterPlayer.team} player {netId} damaged teammate - damage reduced by {(1f - GameConstants.FRIENDLY_FIRE_DAMAGE_MULTIPLIER) * 100f}%");
+                            #endif
+                        }
+                        else
+                        {
+                            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                            Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Friendly fire disabled - no damage");
+                            #endif
                             return;
                         }
                     }
                 }
-                
+
                 // Distance falloff
                 float distanceFactor = Mathf.Clamp01(1f - (distance / currentWeapon.range));
                 damage *= distanceFactor;
+
+                // ✅ IMPLEMENTED: Apply friendly fire damage reduction
+                if (isFriendlyFire)
+                {
+                    damage *= GameConstants.FRIENDLY_FIRE_DAMAGE_MULTIPLIER;
+                }
 
                 // Apply damage (server-side)
                 DamageInfo damageInfo = new DamageInfo(

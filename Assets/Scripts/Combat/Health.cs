@@ -388,6 +388,19 @@ namespace TacticalCombat.Combat
         private const float SPAWN_POINT_CACHE_DURATION = 30f; // Refresh cache every 30 seconds
 
         /// <summary>
+        /// ✅ PUBLIC: Get cached spawn points for use by other systems (e.g., ObjectiveManager)
+        /// </summary>
+        public static Transform[] GetCachedSpawnPoints()
+        {
+            // Refresh cache if expired or null
+            if (cachedSpawnPoints == null || Time.time - lastSpawnPointCacheTime > SPAWN_POINT_CACHE_DURATION)
+            {
+                RefreshSpawnPointCache();
+            }
+            return cachedSpawnPoints;
+        }
+
+        /// <summary>
         /// Find a safe respawn position
         /// ✅ PERFORMANCE: Uses cached spawn points to prevent GC spikes from FindGameObjectsWithTag
         /// </summary>

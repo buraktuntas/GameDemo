@@ -140,7 +140,7 @@ namespace TacticalCombat.Network
         /// ✅ SERVER-ONLY: Create a new room
         /// </summary>
         [Command(requiresAuthority = false)]
-        public void CmdCreateRoom(string roomName, string clanAId, string clanBId, bool isPrivate, string password, NetworkConnectionToClient sender = null)
+        public void CmdCreateRoom(string roomName, bool isPrivate, string password, NetworkConnectionToClient sender = null)
         {
             if (!isServer) return;
             
@@ -174,19 +174,7 @@ namespace TacticalCombat.Network
                 return;
             }
             
-            // Get clan data if provided
-            ClanData clanA = null;
-            ClanData clanB = null;
-            
-            if (!string.IsNullOrEmpty(clanAId) && ClanManager.Instance != null)
-            {
-                clanA = ClanManager.Instance.GetClan(clanAId);
-            }
-            
-            if (!string.IsNullOrEmpty(clanBId) && ClanManager.Instance != null)
-            {
-                clanB = ClanManager.Instance.GetClan(clanBId);
-            }
+            // ✅ REMOVED: Clan system (clanAId, clanBId parameters removed)
             
             // Create room
             RoomData newRoom = new RoomData
@@ -194,19 +182,15 @@ namespace TacticalCombat.Network
                 roomId = nextRoomId++,
                 roomName = roomName,
                 hostPlayerId = playerId,
-                clanA = clanA,
-                clanB = clanB,
                 isPrivate = isPrivate,
                 password = password
             };
             
-            // Add host to room
-            RoomPlayer host = new RoomPlayer(playerId, GetPlayerUsername(playerId));
-            if (clanA != null)
+            // Add host to room (auto-assign to Team A)
+            RoomPlayer host = new RoomPlayer(playerId, GetPlayerUsername(playerId))
             {
-                host.clanId = clanA.clanId;
-                host.assignedTeam = Team.TeamA;
-            }
+                assignedTeam = Team.TeamA
+            };
             newRoom.players.Add(host);
             
             // Store room
@@ -315,40 +299,15 @@ namespace TacticalCombat.Network
                 return;
             }
             
-            // Get player's clan
-            string playerClanId = null;
-            if (ClanManager.Instance != null)
-            {
-                playerClanId = ClanManager.Instance.GetPlayerClanId(playerId);
-            }
-            
-            // Determine team assignment
-            Team assignedTeam = Team.None;
-            if (playerClanId != null)
-            {
-                // Auto-assign to clan's team
-                if (room.clanA != null && room.clanA.clanId == playerClanId)
-                {
-                    assignedTeam = Team.TeamA;
-                }
-                else if (room.clanB != null && room.clanB.clanId == playerClanId)
-                {
-                    assignedTeam = Team.TeamB;
-                }
-            }
-            
-            // Auto-balance if no clan assignment
-            if (assignedTeam == Team.None)
-            {
-                int clanACount = room.GetClanAPlayers().Count;
-                int clanBCount = room.GetClanBPlayers().Count;
-                assignedTeam = clanACount <= clanBCount ? Team.TeamA : Team.TeamB;
-            }
+            // ✅ REMOVED: Clan system - simple team balancing
+            // Determine team assignment (auto-balance)
+            int teamACount = room.GetClanAPlayers().Count; // Team A
+            int teamBCount = room.GetClanBPlayers().Count; // Team B
+            Team assignedTeam = teamACount <= teamBCount ? Team.TeamA : Team.TeamB;
             
             // Add player to room
             RoomPlayer newPlayer = new RoomPlayer(playerId, GetPlayerUsername(playerId))
             {
-                clanId = playerClanId,
                 assignedTeam = assignedTeam
             };
             room.players.Add(newPlayer);

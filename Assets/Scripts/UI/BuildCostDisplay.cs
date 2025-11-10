@@ -15,9 +15,9 @@ namespace TacticalCombat.UI
 
         [Header("Settings")]
         [SerializeField] private Vector3 offset = new Vector3(0, 2, 0);
-        [SerializeField] private float fontSize = 24f;
-        [SerializeField] private Color affordableColor = Color.green;
-        [SerializeField] private Color unaffordableColor = Color.red;
+        [SerializeField] private float fontSize = 18f; // ✅ Smaller font - less intrusive
+        [SerializeField] private Color affordableColor = new Color(0.3f, 1f, 0.3f, 0.7f); // ✅ More transparent green
+        [SerializeField] private Color unaffordableColor = new Color(1f, 0.3f, 0.3f, 0.7f); // ✅ More transparent red
 
         private Camera playerCamera;
 

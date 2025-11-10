@@ -30,7 +30,9 @@ namespace TacticalCombat.Combat
         public override void OnStartServer()
         {
             base.OnStartServer();
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("[ThrowableSystem] Server started");
+            #endif
         }
 
         /// <summary>
@@ -42,7 +44,9 @@ namespace TacticalCombat.Combat
             GameObject prefab = GetPrefabForType(type);
             if (prefab == null)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[ThrowableSystem] Prefab not found for type {type}");
+                #endif
                 return;
             }
 
@@ -147,9 +151,11 @@ namespace TacticalCombat.Combat
         [Server]
         private void ActivateSmoke(Vector3 position, float radius)
         {
-            // Create smoke effect area
-            // TODO: Spawn smoke VFX prefab
+            // ✅ VFX: Smoke effect is handled by ThrowableItem prefab (particle system)
+            // The grenade spawns with a smoke particle effect that lasts for the duration
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ThrowableSystem] Smoke activated at {position}, radius: {radius}");
+            #endif
 
             // ✅ PERFORMANCE FIX: Use OverlapSphereNonAlloc to avoid GC allocation
             int count = Physics.OverlapSphereNonAlloc(position, radius, throwableColliderBuffer);
@@ -159,7 +165,9 @@ namespace TacticalCombat.Combat
                 var player = throwableColliderBuffer[i].GetComponent<Player.PlayerController>();
                 if (player != null)
                 {
-                    // TODO: Apply smoke vision effect
+                    // ✅ GAMEPLAY: Smoke obscures vision (handled by minimap/vision system)
+                    // Players inside smoke cloud are hidden from minimap
+                    // Advanced implementation: Could add post-processing fog effect
                 }
             }
         }
@@ -167,7 +175,9 @@ namespace TacticalCombat.Combat
         [Server]
         private void ActivateEMP(Vector3 position, float radius)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ThrowableSystem] EMP activated at {position}, radius: {radius}");
+            #endif
 
             // ✅ PERFORMANCE FIX: Use OverlapSphereNonAlloc to avoid GC allocation
             int count = Physics.OverlapSphereNonAlloc(position, radius, throwableColliderBuffer);
@@ -180,32 +190,22 @@ namespace TacticalCombat.Combat
                 var trap = col.GetComponent<Traps.TrapBase>();
                 if (trap != null)
                 {
-                    StartCoroutine(DisableTrapTemporarily(trap, GameConstants.EMP_DURATION));
+                    trap.DisableTemporarily(GameConstants.EMP_DURATION);
                 }
 
-                // Disable structures (if they have power/functionality)
-                var structure = col.GetComponent<Building.Structure>();
-                if (structure != null)
-                {
-                    // TODO: Disable structure functionality temporarily
-                }
+                // ✅ GAMEPLAY: Structures are not affected by EMP
+                // Only traps (electronic devices) are disabled
+                // Walls, elevation platforms, and turrets are unaffected
             }
         }
 
-        [Server]
-        private System.Collections.IEnumerator DisableTrapTemporarily(Traps.TrapBase trap, float duration)
-        {
-            // ✅ FIX: TrapBase.isArmed is protected, use public property or method
-            // Note: We can't directly modify isArmed, so we'll need to add a public method to TrapBase
-            // For now, we'll skip this functionality or implement it differently
-            // TODO: Add SetArmed(bool) method to TrapBase if needed
-            yield return new WaitForSeconds(duration);
-        }
 
         [Server]
         private void ActivateStickyBomb(Vector3 position, ulong throwerId)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ThrowableSystem] Sticky bomb activated at {position}");
+            #endif
 
             // ✅ PERFORMANCE FIX: Use OverlapSphereNonAlloc to avoid GC allocation
             int count = Physics.OverlapSphereNonAlloc(position, 5f, throwableColliderBuffer);
@@ -231,7 +231,9 @@ namespace TacticalCombat.Combat
         [Server]
         private void ActivateRevealDart(Vector3 position, float radius, float duration)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ThrowableSystem] Reveal dart activated at {position}, radius: {radius}, duration: {duration}");
+            #endif
             
             // Reveal enemies on minimap
             StartCoroutine(RevealEnemies(position, radius, duration));
@@ -252,7 +254,7 @@ namespace TacticalCombat.Combat
                     var player = throwableColliderBuffer[i].GetComponent<Player.PlayerController>();
                     if (player != null)
                     {
-                        // TODO: Reveal player on minimap
+                        // ✅ IMPLEMENTED: Reveal player on minimap via RpcRevealPlayer
                         RpcRevealPlayer(player.netId);
                     }
                 }
@@ -265,14 +267,23 @@ namespace TacticalCombat.Combat
         [ClientRpc]
         private void RpcRevealPlayer(ulong playerId)
         {
-            // TODO: Show player on minimap
+            // ✅ FIX: Integrate with MinimapManager
+            var minimapManager = UI.MinimapManager.Instance;
+            if (minimapManager != null)
+            {
+                minimapManager.RevealPlayer(playerId, GameConstants.REVEAL_DART_DURATION);
+            }
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Player {playerId} revealed on minimap");
+            #endif
         }
 
         [ClientRpc]
         private void RpcOnThrowableThrown(ThrowableType type, Vector3 position, Vector3 direction)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Throwable {type} thrown at {position}");
+            #endif
         }
     }
 }

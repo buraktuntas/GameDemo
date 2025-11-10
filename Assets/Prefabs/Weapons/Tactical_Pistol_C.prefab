@@ -545,6 +545,7 @@ GameObject:
   - component: {fileID: 7581895784927574176}
   - component: {fileID: 6233374289805678796}
   - component: {fileID: 3173003829927677365}
+  - component: {fileID: -672991311639637747}
   m_Layer: 0
   m_Name: Tactical_Pistol_C
   m_TagString: Untagged
@@ -682,6 +683,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 453a38a7aa90de142aadb0a7e462f629, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TacticalCombat.Combat.WeaponSystem
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
   currentWeapon: {fileID: 11400000, guid: 8ec3748977c782e4a959d5e0b24bdc72, type: 2}
   playerCamera: {fileID: 0}
   weaponHolder: {fileID: 0}
@@ -701,5 +705,23 @@ MonoBehaviour:
   hitSounds:
   - {fileID: 8300000, guid: 2d3ed17a47d2f28488a31ca3e9b9ecd3, type: 3}
   - {fileID: 8300000, guid: 3b547d7641b558e449cb2967ade24482, type: 3}
+  actionsAsset: {fileID: 0}
   debugAudio: 1
   debugInputs: 1
+--- !u!114 &-672991311639637747
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9201487182967502245}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9b91ecbcc199f4492b9a91e820070131, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Mirror::Mirror.NetworkIdentity
+  sceneId: 0
+  _assetId: 179974023
+  serverOnly: 0
+  visibility: 0
+  hasSpawned: 0

@@ -904,14 +904,17 @@ namespace TacticalCombat.Player
             {
                 float fallSpeed = Mathf.Abs(moveDirection.y);
                 PlaySound(landSound);
-                
+
                 if (showDebugInfo)
                 {
                     Debug.Log($"🎯 Landed (fall speed: {fallSpeed:F1})");
                 }
-                
-                // TODO: Add landing damage for high falls
-                // if (fallSpeed > 25f) TakeFallDamage(fallSpeed);
+
+                // ✅ IMPLEMENTED: Landing damage for high falls
+                if (fallSpeed > 25f)
+                {
+                    TakeFallDamage(fallSpeed);
+                }
             }
             
             wasGrounded = grounded;
@@ -935,7 +938,48 @@ namespace TacticalCombat.Player
             AudioClip clip = footstepSounds[Random.Range(0, footstepSounds.Length)];
             PlaySound(clip);
         }
-        
+
+        /// <summary>
+        /// ✅ IMPLEMENTED: Apply fall damage based on fall speed
+        /// </summary>
+        [Client]
+        private void TakeFallDamage(float fallSpeed)
+        {
+            if (!isLocalPlayer) return;
+
+            // Calculate damage based on fall speed
+            // 25 m/s = threshold (no damage)
+            // 30 m/s = 20 HP
+            // 35 m/s = 40 HP
+            // 40+ m/s = 60 HP (likely death from 100 HP)
+            float damageThreshold = 25f;
+            float excessSpeed = fallSpeed - damageThreshold;
+            int damage = Mathf.RoundToInt(excessSpeed * 4f); // 4 HP per m/s above threshold
+
+            if (damage > 0)
+            {
+                // Get Health component
+                var health = GetComponent<Combat.Health>();
+                if (health != null)
+                {
+                    // Create fall damage info
+                    var damageInfo = new Combat.DamageInfo(
+                        damage,
+                        netId, // Self-inflicted
+                        Combat.DamageType.Fall,
+                        transform.position
+                    );
+
+                    // Apply damage (server-authoritative)
+                    health.ApplyDamage(damageInfo);
+
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log($"💀 [FallDamage] Took {damage} HP from fall (speed: {fallSpeed:F1} m/s)");
+                    #endif
+                }
+            }
+        }
+
         // ═══════════════════════════════════════════════════════════
         // PUBLIC API - Other scripts can use these
         // ═══════════════════════════════════════════════════════════

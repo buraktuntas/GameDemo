@@ -6,7 +6,7 @@ using TacticalCombat.Core;
 namespace TacticalCombat.Network
 {
     /// <summary>
-    /// ✅ CLAN SYSTEM: Room data structure for lobby system
+    /// ✅ REMOVED CLAN SYSTEM: Room data structure for lobby system
     /// Serializable for network sync
     /// </summary>
     [System.Serializable]
@@ -17,9 +17,7 @@ namespace TacticalCombat.Network
         public string roomName;            // Display name
         public ulong hostPlayerId;        // Host player's netId
         
-        [Header("Clan Teams")]
-        public ClanData clanA;            // Left team (Clan A)
-        public ClanData clanB;            // Right team (Clan B)
+        // ✅ REMOVED: Clan system (clanA, clanB removed)
         
         [Header("Room Settings")]
         public int maxPlayers;           // Max players per team (default: 4)
@@ -47,19 +45,19 @@ namespace TacticalCombat.Network
         }
         
         /// <summary>
-        /// Get players in Clan A
+        /// ✅ UPDATED: Get players in Team A (clan system removed)
         /// </summary>
         public List<RoomPlayer> GetClanAPlayers()
         {
-            return players.FindAll(p => p.clanId == (clanA?.clanId ?? ""));
+            return players.FindAll(p => p.assignedTeam == Team.TeamA);
         }
         
         /// <summary>
-        /// Get players in Clan B
+        /// ✅ UPDATED: Get players in Team B (clan system removed)
         /// </summary>
         public List<RoomPlayer> GetClanBPlayers()
         {
-            return players.FindAll(p => p.clanId == (clanB?.clanId ?? ""));
+            return players.FindAll(p => p.assignedTeam == Team.TeamB);
         }
         
         /// <summary>
@@ -81,10 +79,10 @@ namespace TacticalCombat.Network
             if (GetPlayerCount() < minPlayersToStart) return false;
             
             // Check if both teams have at least 1 player
-            int clanACount = GetClanAPlayers().Count;
-            int clanBCount = GetClanBPlayers().Count;
+            int teamACount = GetClanAPlayers().Count; // Team A
+            int teamBCount = GetClanBPlayers().Count; // Team B
             
-            return clanACount >= 1 && clanBCount >= 1;
+            return teamACount >= 1 && teamBCount >= 1;
         }
         
         /// <summary>
@@ -105,14 +103,14 @@ namespace TacticalCombat.Network
     }
     
     /// <summary>
-    /// ✅ CLAN SYSTEM: Player data in room
+    /// ✅ REMOVED CLAN SYSTEM: Player data in room
     /// </summary>
     [System.Serializable]
     public class RoomPlayer
     {
         public ulong playerId;           // NetworkIdentity.netId
         public string username;           // Display name
-        public string clanId;             // Clan ID (null if no clan)
+        // ✅ REMOVED: clanId (clan system removed)
         public Team assignedTeam;         // Assigned team (TeamA or TeamB)
         public RoleId selectedRole;       // Selected role
         public bool isReady;              // Ready to start match

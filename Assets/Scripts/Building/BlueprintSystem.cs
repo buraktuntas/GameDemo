@@ -36,7 +36,9 @@ namespace TacticalCombat.Building
         public override void OnStartServer()
         {
             base.OnStartServer();
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("[BlueprintSystem] Server started");
+            #endif
         }
 
         /// <summary>
@@ -47,7 +49,10 @@ namespace TacticalCombat.Building
         {
             if (string.IsNullOrEmpty(blueprintName))
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("[BlueprintSystem] Blueprint name cannot be empty");
+                #endif
+                RpcBlueprintSaveFailed(playerId, "Blueprint name cannot be empty");
                 return;
             }
 
@@ -62,7 +67,9 @@ namespace TacticalCombat.Building
             // Check max blueprints limit
             if (blueprints.Count >= maxBlueprintsPerPlayer)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[BlueprintSystem] Player {playerId} has reached max blueprints ({maxBlueprintsPerPlayer})");
+                #endif
                 RpcBlueprintSaveFailed(playerId, "Maximum blueprints reached");
                 return;
             }
@@ -70,7 +77,9 @@ namespace TacticalCombat.Building
             // Check if name already exists
             if (blueprints.Exists(b => b.blueprintName == blueprintName))
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[BlueprintSystem] Blueprint '{blueprintName}' already exists");
+                #endif
                 RpcBlueprintSaveFailed(playerId, "Blueprint name already exists");
                 return;
             }
@@ -81,7 +90,9 @@ namespace TacticalCombat.Building
 
             if (blueprint.structures.Count == 0)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("[BlueprintSystem] No structures found to save");
+                #endif
                 RpcBlueprintSaveFailed(playerId, "No structures found");
                 return;
             }
@@ -89,7 +100,9 @@ namespace TacticalCombat.Building
             // Save blueprint
             blueprints.Add(blueprint);
             RpcBlueprintSaved(playerId, blueprintName, blueprint.structures.Count);
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[BlueprintSystem] Saved blueprint '{blueprintName}' with {blueprint.structures.Count} structures");
+            #endif
         }
 
         [Server]
@@ -151,7 +164,9 @@ namespace TacticalCombat.Building
         {
             if (!playerBlueprints.ContainsKey(playerId))
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[BlueprintSystem] Player {playerId} has no blueprints");
+                #endif
                 RpcBlueprintDeployFailed(playerId, "No blueprints found");
                 return;
             }
@@ -161,7 +176,9 @@ namespace TacticalCombat.Building
 
             if (blueprint == null)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[BlueprintSystem] Blueprint '{blueprintName}' not found");
+                #endif
                 RpcBlueprintDeployFailed(playerId, "Blueprint not found");
                 return;
             }
@@ -170,7 +187,9 @@ namespace TacticalCombat.Building
             var matchManager = MatchManager.Instance;
             if (matchManager != null && matchManager.GetCurrentPhase() != Phase.Build)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("[BlueprintSystem] Can only deploy blueprints in build phase");
+                #endif
                 RpcBlueprintDeployFailed(playerId, "Not in build phase");
                 return;
             }
@@ -179,7 +198,9 @@ namespace TacticalCombat.Building
             var playerState = matchManager.GetPlayerState(playerId);
             if (playerState == null)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[BlueprintSystem] Player {playerId} state not found");
+                #endif
                 return;
             }
 
@@ -187,7 +208,9 @@ namespace TacticalCombat.Building
             int totalCost = CalculateTotalCost(blueprint);
             if (!HasEnoughBudget(playerState, blueprint))
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[BlueprintSystem] Not enough budget to deploy blueprint");
+                #endif
                 RpcBlueprintDeployFailed(playerId, "Not enough budget");
                 return;
             }
@@ -197,7 +220,9 @@ namespace TacticalCombat.Building
             var buildManager = BuildManager.Instance;
             if (buildManager == null)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogError("[BlueprintSystem] BuildManager not found");
+                #endif
                 return;
             }
 
@@ -213,7 +238,9 @@ namespace TacticalCombat.Building
             }
 
             RpcBlueprintDeployed(playerId, blueprintName, deployedCount);
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[BlueprintSystem] Deployed blueprint '{blueprintName}' - {deployedCount}/{blueprint.structures.Count} structures placed");
+            #endif
         }
 
         [Server]
@@ -283,31 +310,41 @@ namespace TacticalCombat.Building
         [ClientRpc]
         private void RpcBlueprintSaved(ulong playerId, string blueprintName, int structureCount)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Blueprint '{blueprintName}' saved with {structureCount} structures");
+            #endif
         }
 
         [ClientRpc]
         private void RpcBlueprintSaveFailed(ulong playerId, string reason)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.LogWarning($"[Client] Failed to save blueprint: {reason}");
+            #endif
         }
 
         [ClientRpc]
         private void RpcBlueprintDeployed(ulong playerId, string blueprintName, int deployedCount)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Blueprint '{blueprintName}' deployed - {deployedCount} structures");
+            #endif
         }
 
         [ClientRpc]
         private void RpcBlueprintDeployFailed(ulong playerId, string reason)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.LogWarning($"[Client] Failed to deploy blueprint: {reason}");
+            #endif
         }
 
         [ClientRpc]
         private void RpcBlueprintList(ulong playerId, List<string> blueprintNames)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Blueprint list: {string.Join(", ", blueprintNames)}");
+            #endif
         }
     }
 }

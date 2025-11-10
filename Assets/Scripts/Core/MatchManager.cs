@@ -37,15 +37,7 @@ namespace TacticalCombat.Core
         [SyncVar] private int teamAPlayerCount = 0;
         [SyncVar] private int teamBPlayerCount = 0;
         
-        [Header("Clan System")]
-        [SyncVar] private string clanAId;  // Clan A ID (if using clan system)
-        [SyncVar] private string clanBId;  // Clan B ID (if using clan system)
-        
-        [SyncVar]
-        private int teamAWins = 0;
-        
-        [SyncVar]
-        private int teamBWins = 0;
+        // ✅ REMOVED: Clan system and round wins (clan system removed, rounds removed)
         
         [SyncVar]
         private bool suddenDeathActive = false;
@@ -244,8 +236,7 @@ namespace TacticalCombat.Core
             matchState = new MatchState();
             matchState.gameMode = gameMode;
             currentPhase = Phase.Lobby;
-            teamAWins = 0;
-            teamBWins = 0;
+            // ✅ REMOVED: teamAWins, teamBWins (round system removed)
             suddenDeathActive = false;
             playerStates.Clear();
             
@@ -256,67 +247,29 @@ namespace TacticalCombat.Core
                 matchState.playerStats[kvp.Key] = new MatchStats(kvp.Key);
             }
             
-            // ✅ CLAN SYSTEM: Reset clan IDs for new match
-            clanAId = null;
-            clanBId = null;
+            // ✅ REMOVED: Clan system reset (clan system removed)
             
             // Find ObjectiveManager
             objectiveManager = FindFirstObjectByType<ObjectiveManager>();
         }
 
         /// <summary>
-        /// ✅ CLAN SYSTEM: Register player with optional clan support
+        /// ✅ REMOVED CLAN SYSTEM: Register player (clan support removed)
         /// </summary>
         [Server]
-        public void RegisterPlayer(ulong playerId, Team team, RoleId role, string clanId = null)
+        public void RegisterPlayer(ulong playerId, Team team, RoleId role)
         {
-            // ✅ CLAN SYSTEM: If clanId provided, map clan to team
-            if (!string.IsNullOrEmpty(clanId) && ClanManager.Instance != null)
-            {
-                // Check if this is first player from clan - assign clan to team
-                if (string.IsNullOrEmpty(clanAId) && string.IsNullOrEmpty(clanBId))
-                {
-                    // First clan - assign to TeamA
-                    clanAId = clanId;
-                    team = Team.TeamA;
-                }
-                else if (clanAId == clanId)
-                {
-                    // Player's clan is ClanA - assign to TeamA
-                    team = Team.TeamA;
-                }
-                else if (clanBId == clanId)
-            {
-                    // Player's clan is ClanB - assign to TeamB
-                    team = Team.TeamB;
-                }
-                else if (string.IsNullOrEmpty(clanBId))
-                {
-                    // Second clan - assign to TeamB
-                    clanBId = clanId;
-                    team = Team.TeamB;
-                }
-                else
-                {
-                    // Both teams have clans - auto-balance
-                    team = AssignTeamAutoBalance();
-                }
-            }
-            else
-            {
-                // ✅ CRITICAL FIX: Honor the team parameter from UI selection!
-                if (team != Team.None)
-                {
-                    // Player selected a specific team - use it
-                    Debug.Log($"✅ Player {playerId} registered with SELECTED team: {team}, Role {role}");
-            }
-            else
+            // ✅ REMOVED: Clan system - simple team assignment
+            // Honor the team parameter from UI selection
+            if (team == Team.None)
             {
                 // Team was not selected (Auto-balance) - assign automatically
-                    team = AssignTeamAutoBalance();
-                    Debug.Log($"✅ Player {playerId} registered with AUTO-BALANCED team: {team}, Role {role}");
-                }
+                team = AssignTeamAutoBalance();
             }
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"✅ Player {playerId} registered with team: {team}, Role {role}");
+            #endif
 
             // Register or update player state
             if (!playerStates.ContainsKey(playerId))
@@ -337,7 +290,9 @@ namespace TacticalCombat.Core
                 // Update existing player (re-registration with new team/role)
                 playerStates[playerId].team = team;
                 playerStates[playerId].role = role;
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log($"♻️ Player {playerId} RE-registered: Team {team}, Role {role}");
+                #endif
             }
 
             // ✅ FIX: Update synced player counts
@@ -743,118 +698,106 @@ namespace TacticalCombat.Core
             RpcOnPhaseChanged(currentPhase);
             RpcOnMatchWon(winner, awards);
             
-            // ✅ CLAN SYSTEM: Award XP to clans
-            if (ClanManager.Instance != null)
-            {
-                AwardClanXP(winner);
-            }
+            // ✅ REMOVED: Clan system XP award (clan system removed)
             
             // Show end screen with scoreboard and awards
-            StartCoroutine(EndPhaseSequence(winner));
+            // Match stays in End phase until restart
         }
 
-        [Server]
-        private IEnumerator EndPhaseSequence(Team winner)
-        {
-            yield return new WaitForSeconds(endPhaseDuration);
-            
-            // Return to lobby
-            currentPhase = Phase.Lobby;
-            RpcOnPhaseChanged(currentPhase);
-            
-            // TODO: Disconnect players or return to lobby scene
-        }
+        // ✅ REMOVED: EndPhaseSequence, AwardClanXP, CalculateTeamXP (clan system and round system removed)
         
         /// <summary>
-        /// ✅ CLAN SYSTEM: Award XP to clans based on match result
+        /// ✅ NEW: Restart match (host only)
         /// </summary>
-        [Server]
-        private void AwardClanXP(Team winner)
+        [Command(requiresAuthority = false)]
+        public void CmdRestartMatch(NetworkConnectionToClient sender = null)
         {
-            if (ClanManager.Instance == null) return;
+            if (!isServer) return;
             
-            // Calculate XP for each team
-            int teamAXP = CalculateTeamXP(Team.TeamA, winner == Team.TeamA);
-            int teamBXP = CalculateTeamXP(Team.TeamB, winner == Team.TeamB);
-            
-            // Award to clans
-            if (!string.IsNullOrEmpty(clanAId))
+            // Only host can restart (connectionId 0 is host)
+            if (sender != null && sender.connectionId != 0)
             {
-                ClanManager.Instance.AwardClanXP(clanAId, teamAXP);
-                ClanManager.Instance.UpdateClanMatchResult(clanAId, winner == Team.TeamA);
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("[MatchManager] Only host can restart match");
+                #endif
+                return;
             }
             
-            if (!string.IsNullOrEmpty(clanBId))
-            {
-                ClanManager.Instance.AwardClanXP(clanBId, teamBXP);
-                ClanManager.Instance.UpdateClanMatchResult(clanBId, winner == Team.TeamB);
-            }
-            
+            RestartMatch();
+        }
+        
+        [Server]
+        private void RestartMatch()
+        {
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"📈 [MatchManager] Clan XP awarded - ClanA: {teamAXP} XP, ClanB: {teamBXP} XP");
+            Debug.Log("🔄 [MatchManager] Restarting match...");
             #endif
+            
+            // Reset match state
+            currentPhase = Phase.Lobby;
+            remainingTime = 0f;
+            suddenDeathActive = false;
+            
+            // Clear player stats (recreate MatchStats objects)
+            if (matchState != null)
+            {
+                matchState.playerStats.Clear();
+                foreach (var kvp in playerStates)
+                {
+                    matchState.playerStats[kvp.Key] = new MatchStats(kvp.Key);
+                }
+            }
+            
+            // Reset objective manager
+            if (objectiveManager != null)
+            {
+                objectiveManager.InitializeCores();
+            }
+            
+            // Reset build manager (clear placed structures)
+            if (BuildManager.Instance != null)
+            {
+                // BuildManager will reset when new build phase starts
+            }
+            
+            // Notify clients
+            RpcOnPhaseChanged(currentPhase);
+            RpcOnMatchRestarted();
+            
+            // Start new match after short delay
+            StartCoroutine(RestartMatchSequence());
         }
         
-        /// <summary>
-        /// ✅ CLAN SYSTEM: Calculate XP for a team based on match performance
-        /// </summary>
         [Server]
-        private int CalculateTeamXP(Team team, bool won)
+        private System.Collections.IEnumerator RestartMatchSequence()
         {
-            int xp = 0;
+            yield return new WaitForSeconds(2f);
             
-            // Base XP
-            if (won)
+            // Start new match
+            StartMatch();
+        }
+        
+        [ClientRpc]
+        private void RpcOnMatchRestarted()
+        {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log("[Client] Match restarted!");
+            #endif
+            
+            // Hide end game scoreboard
+            var endScoreboard = FindFirstObjectByType<UI.EndGameScoreboard>();
+            if (endScoreboard != null)
             {
-                xp += 100; // Win bonus
+                endScoreboard.HideScoreboard();
             }
-            else
-            {
-                xp += 25;  // Loss consolation
-            }
-            
-            // Performance XP (kills, structures, etc.)
-            int teamKills = 0;
-            int teamStructures = 0;
-            int teamTraps = 0;
-            
-            foreach (var kvp in playerStates)
-            {
-                if (kvp.Value.team == team)
-                {
-                    // TODO: Get actual stats from PlayerProfile
-                    // For now, use base values
-                    teamKills += 0; // Will be updated when PlayerProfile integration is complete
-                    teamStructures += 0;
-                    teamTraps += 0;
-                }
-            }
-            
-            xp += teamKills * 10;        // 10 XP per kill
-            xp += teamStructures * 2;    // 2 XP per structure
-            xp += teamTraps * 3;         // 3 XP per trap
-            
-            // Win streak bonus
-            if (won && ClanManager.Instance != null)
-            {
-                string clanId = team == Team.TeamA ? clanAId : clanBId;
-                if (!string.IsNullOrEmpty(clanId))
-                {
-                    var clan = ClanManager.Instance.GetClan(clanId);
-                    if (clan != null && clan.winStreak > 0)
-                    {
-                        xp += Mathf.Min(clan.winStreak * 10, 100); // Max 100 bonus XP
-                    }
-                }
-            }
-            
-            return xp;
         }
 
         // Client-side phase change handler
         private void OnPhaseChanged(Phase oldPhase, Phase newPhase)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"Phase changed: {oldPhase} -> {newPhase}");
+            #endif
             OnPhaseChangedEvent?.Invoke(newPhase);
         }
 
@@ -907,8 +850,7 @@ namespace TacticalCombat.Core
         // Public getters
         public Phase GetCurrentPhase() => currentPhase;
         public float GetRemainingTime() => remainingTime;
-        public int GetTeamAWins() => teamAWins;
-        public int GetTeamBWins() => teamBWins;
+        // ✅ REMOVED: GetTeamAWins(), GetTeamBWins() (round system removed)
         public bool IsSuddenDeathActive() => suddenDeathActive;
         public GameMode GetGameMode() => gameMode;
         public MatchStats GetPlayerMatchStats(ulong playerId)
@@ -952,7 +894,9 @@ namespace TacticalCombat.Core
                 // Update synced player counts
                 UpdatePlayerCounts();
 
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log($"🚪 [MatchManager] Player {playerId} unregistered (Team: {team})");
+                #endif
             }
         }
 

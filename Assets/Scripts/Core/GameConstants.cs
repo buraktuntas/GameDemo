@@ -40,10 +40,14 @@ namespace TacticalCombat.Core
         public const float BOW_PROJECTILE_SPEED = 30f;
         public const int BOW_DAMAGE = 50;
         public const float BOW_COOLDOWN = 1f;
-        
+
         public const float SPEAR_RANGE = 2.5f;
         public const int SPEAR_DAMAGE = 75;
         public const float SPEAR_COOLDOWN = 1.2f;
+
+        // Friendly Fire
+        public const bool FRIENDLY_FIRE_ENABLED = true;
+        public const float FRIENDLY_FIRE_DAMAGE_MULTIPLIER = 0.5f; // 50% damage to teammates
 
         // Player
         public const int PLAYER_MAX_HEALTH = 100;

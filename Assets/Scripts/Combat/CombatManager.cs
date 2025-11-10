@@ -228,8 +228,16 @@ namespace TacticalCombat.Combat
         
         public void ShowHitMarker(bool isHeadshot = false)
         {
-            // TODO: Show UI hit marker
+            // ✅ IMPLEMENTED: Show UI hit marker via GameHUD
+            var gameHUD = TacticalCombat.UI.GameHUD.Instance;
+            if (gameHUD != null)
+            {
+                gameHUD.ShowHitMarker(isHeadshot);
+            }
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"💥 Hit Marker {(isHeadshot ? "(HEADSHOT)" : "")}");
+            #endif
         }
         
         public void ShowDamageNumber(Vector3 worldPosition, float damage, bool isCritical = false)

@@ -26,6 +26,10 @@ namespace TacticalCombat.UI
         [SerializeField] private Transform awardsContent;
         [SerializeField] private GameObject awardEntryPrefab;
 
+        [Header("Restart Button")]
+        [SerializeField] private Button restartButton;
+        [SerializeField] private TextMeshProUGUI restartButtonText;
+
         [Header("Stats Columns")]
         [SerializeField] private TextMeshProUGUI headerText; // "K/D/A/Structures/Traps/Captures/Score"
 
@@ -44,6 +48,17 @@ namespace TacticalCombat.UI
             if (MatchManager.Instance != null)
             {
                 MatchManager.Instance.OnMatchWonEvent += OnMatchWon;
+            }
+
+            // Setup restart button
+            if (restartButton != null)
+            {
+                restartButton.onClick.AddListener(OnRestartButtonClicked);
+            }
+
+            if (restartButtonText != null)
+            {
+                restartButtonText.text = "YENİDEN OYNA";
             }
         }
 
@@ -78,6 +93,25 @@ namespace TacticalCombat.UI
             if (awards != null)
             {
                 ShowAwards(awards);
+            }
+            
+            // ✅ NEW: Show restart button (only for host)
+            if (restartButton != null)
+            {
+                bool isHost = MatchManager.Instance != null && MatchManager.Instance.isServer;
+                restartButton.gameObject.SetActive(isHost);
+                restartButton.interactable = isHost;
+            }
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Hide scoreboard
+        /// </summary>
+        public void HideScoreboard()
+        {
+            if (scoreboardPanel != null)
+            {
+                scoreboardPanel.SetActive(false);
             }
         }
 
@@ -231,11 +265,34 @@ namespace TacticalCombat.UI
             awardEntries.Clear();
         }
 
+        /// <summary>
+        /// ✅ NEW: Restart match button handler
+        /// </summary>
+        private void OnRestartButtonClicked()
+        {
+            // Only host can restart
+            if (MatchManager.Instance != null && MatchManager.Instance.isServer)
+            {
+                MatchManager.Instance.CmdRestartMatch();
+            }
+            else
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("[EndGameScoreboard] Only host can restart match");
+                #endif
+            }
+        }
+
         private void OnDestroy()
         {
             if (MatchManager.Instance != null)
             {
                 MatchManager.Instance.OnMatchWonEvent -= OnMatchWon;
+            }
+
+            if (restartButton != null)
+            {
+                restartButton.onClick.RemoveListener(OnRestartButtonClicked);
             }
 
             ClearPlayerEntries();

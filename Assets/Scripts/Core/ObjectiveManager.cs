@@ -43,7 +43,9 @@ namespace TacticalCombat.Core
         public override void OnStartServer()
         {
             base.OnStartServer();
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("[ObjectiveManager] Server started");
+            #endif
         }
 
         /// <summary>
@@ -66,12 +68,16 @@ namespace TacticalCombat.Core
                 // ✅ CRITICAL FIX: Null check for spawn arrays
                 if (teamACoreSpawns == null || teamACoreSpawns.Length == 0)
                 {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     Debug.LogError("[ObjectiveManager] Team A core spawns not assigned!");
+                    #endif
                     return;
                 }
                 if (teamBCoreSpawns == null || teamBCoreSpawns.Length == 0)
                 {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     Debug.LogError("[ObjectiveManager] Team B core spawns not assigned!");
+                    #endif
                     return;
                 }
                 
@@ -100,7 +106,9 @@ namespace TacticalCombat.Core
         {
             if (coreObjectPrefab == null)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogError("[ObjectiveManager] Core object prefab not assigned!");
+                #endif
                 return;
             }
 
@@ -121,14 +129,67 @@ namespace TacticalCombat.Core
                 coreComponent.Initialize(teamId, this);
             }
 
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ObjectiveManager] Spawned core for Team {team} at {position}");
+            #endif
         }
 
         [Server]
         private Vector3 GetPlayerSpawnPosition(ulong playerId)
         {
-            // TODO: Get actual spawn position from NetworkGameManager
-            return Vector3.zero;
+            // ✅ FIX: Get spawn position from cached spawn points or generate fallback
+            // Check if we have cached spawn points
+            if (Combat.Health.GetCachedSpawnPoints() != null && Combat.Health.GetCachedSpawnPoints().Length > 0)
+            {
+                // Use random spawn point from cache
+                var spawnPoints = Combat.Health.GetCachedSpawnPoints();
+                int randomIndex = UnityEngine.Random.Range(0, spawnPoints.Length);
+                return spawnPoints[randomIndex].position;
+            }
+
+            // Fallback: Try to find spawn points by tag
+            GameObject[] spawnObjects = GameObject.FindGameObjectsWithTag("SpawnPoint");
+            if (spawnObjects.Length > 0)
+            {
+                int randomIndex = UnityEngine.Random.Range(0, spawnObjects.Length);
+                return spawnObjects[randomIndex].transform.position;
+            }
+
+            // Last resort: Generate random position around origin
+            // Spread players in a circle pattern for FFA
+            int playerIndex = GetPlayerIndex(playerId);
+            float angle = (playerIndex * 360f / 8f) * Mathf.Deg2Rad; // 8 player positions max
+            float radius = 30f; // 30m radius circle
+
+            Vector3 position = new Vector3(
+                Mathf.Cos(angle) * radius,
+                5f, // Y height
+                Mathf.Sin(angle) * radius
+            );
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogWarning($"[ObjectiveManager] Using fallback spawn position for player {playerId}: {position}");
+            #endif
+
+            return position;
+        }
+
+        [Server]
+        private int GetPlayerIndex(ulong playerId)
+        {
+            // Get player index from MatchManager
+            if (MatchManager.Instance != null)
+            {
+                var allStates = MatchManager.Instance.GetAllPlayerStates();
+                int index = 0;
+                foreach (var kvp in allStates)
+                {
+                    if (kvp.Key == playerId)
+                        return index;
+                    index++;
+                }
+            }
+            return 0;
         }
 
         /// <summary>
@@ -139,7 +200,9 @@ namespace TacticalCombat.Core
         {
             if (!coreObjects.ContainsKey(coreOwnerId))
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[ObjectiveManager] Core not found for owner {coreOwnerId}");
+                #endif
                 return false;
             }
 
@@ -158,7 +221,9 @@ namespace TacticalCombat.Core
                 var playerState = matchManager.GetPlayerState(playerId);
                 if (playerState != null && playerState.team == (Team)coreOwnerId)
                 {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     Debug.Log($"[ObjectiveManager] Player {playerId} cannot pick up their own core");
+                    #endif
                     return false;
                 }
             }
@@ -179,7 +244,9 @@ namespace TacticalCombat.Core
             }
 
             RpcOnCorePickedUp(coreOwnerId, playerId);
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ObjectiveManager] Player {playerId} picked up core from Team {coreOwnerId}");
+            #endif
 
             return true;
         }
@@ -227,7 +294,9 @@ namespace TacticalCombat.Core
             }
 
             RpcOnCoreDropped(coreOwnerId, dropPosition);
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ObjectiveManager] Core from Team {coreOwnerId} dropped at {dropPosition}");
+            #endif
         }
 
         /// <summary>
@@ -285,7 +354,9 @@ namespace TacticalCombat.Core
             // ✅ CRITICAL FIX: Null check for return points
             if (returnPoints == null || returnPoints.Length == 0)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[ObjectiveManager] Return points not assigned for team {playerState.team}");
+                #endif
                 return false;
             }
             
@@ -319,7 +390,9 @@ namespace TacticalCombat.Core
             }
 
             RpcOnCoreReturned(coreOwnerId, playerId);
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ObjectiveManager] Player {playerId} (Team {playerState.team}) returned core from Team {coreOwnerId}!");
+            #endif
 
             return true;
         }
@@ -371,26 +444,34 @@ namespace TacticalCombat.Core
                 GameObject tunnel = Instantiate(suddenDeathTunnelPrefab, tunnelSpawnPoint.position, tunnelSpawnPoint.rotation);
                 NetworkServer.Spawn(tunnel);
                 suddenDeathTunnelOpen = true;
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log("[ObjectiveManager] Sudden death tunnel opened!");
+                #endif
             }
         }
 
         [ClientRpc]
         private void RpcOnCorePickedUp(ulong coreOwnerId, ulong playerId)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Player {playerId} picked up core from Team {coreOwnerId}");
+            #endif
         }
 
         [ClientRpc]
         private void RpcOnCoreDropped(ulong coreOwnerId, Vector3 position)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Core from Team {coreOwnerId} dropped at {position}");
+            #endif
         }
 
         [ClientRpc]
         private void RpcOnCoreReturned(ulong coreOwnerId, ulong playerId)
         {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Player {playerId} returned core from Team {coreOwnerId}!");
+            #endif
         }
     }
 }

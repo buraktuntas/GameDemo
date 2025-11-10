@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using Mirror;
 using TacticalCombat.Core;
 
 namespace TacticalCombat.UI
@@ -49,9 +50,7 @@ namespace TacticalCombat.UI
         [SerializeField] private Slider sabotageProgressBar;
         [SerializeField] private GameObject sabotagePanel;
 
-        [Header("Round Win")]
-        [SerializeField] private GameObject roundWinPanel;
-        [SerializeField] private TextMeshProUGUI roundWinText;
+        // ✅ REMOVED: Round Win UI (round system removed)
 
         [Header("Kill Feed")]
         [SerializeField] private GameObject killFeedPanel;
@@ -79,6 +78,16 @@ namespace TacticalCombat.UI
         [SerializeField] private GameObject suddenDeathPanel;
         [SerializeField] private TextMeshProUGUI suddenDeathText;
 
+        [Header("Info Tower Hack")]
+        [SerializeField] private GameObject infoTowerHackPanel;
+        [SerializeField] private Slider infoTowerHackSlider;
+        [SerializeField] private TextMeshProUGUI infoTowerHackText;
+
+        [Header("Hit Marker")]
+        [SerializeField] private GameObject hitMarkerPanel;
+        [SerializeField] private Image hitMarkerImage;
+        [SerializeField] private Image headshotMarkerImage;
+
         // ✅ PERFORMANCE FIX: Throttle UI updates to avoid 60 FPS string allocations
         private float lastUIUpdateTime;
         private const float UI_UPDATE_INTERVAL = 0.1f; // 10 Hz instead of 60 Hz
@@ -97,7 +106,18 @@ namespace TacticalCombat.UI
             {
                 Debug.LogWarning("⚠️ [GameHUD] Multiple instances detected! Destroying duplicate.");
                 Destroy(gameObject);
+                return;
             }
+
+            // ✅ CRITICAL FIX: Force hide all conditional panels IMMEDIATELY (before Start)
+            // This prevents flickering on game start even if scene has them enabled
+            if (sabotagePanel != null) sabotagePanel.SetActive(false);
+            if (buildFeedbackPanel != null) buildFeedbackPanel.SetActive(false);
+            if (coreCarryingPanel != null) coreCarryingPanel.SetActive(false);
+            if (suddenDeathPanel != null) suddenDeathPanel.SetActive(false);
+            if (infoTowerHackPanel != null) infoTowerHackPanel.SetActive(false);
+            if (hitMarkerPanel != null) hitMarkerPanel.SetActive(false);
+            if (controlPointPanel != null) controlPointPanel.SetActive(false);
         }
 
         private void Start()
@@ -109,11 +129,14 @@ namespace TacticalCombat.UI
                 MatchManager.Instance.OnSuddenDeathActivated += OnSuddenDeathActivated;
             }
 
-            // Hide panels initially
+            // ✅ FIX: Hide all conditional panels initially (prevent crosshair blocking)
             if (sabotagePanel != null) sabotagePanel.SetActive(false);
             if (buildFeedbackPanel != null) buildFeedbackPanel.SetActive(false);
             if (coreCarryingPanel != null) coreCarryingPanel.SetActive(false);
             if (suddenDeathPanel != null) suddenDeathPanel.SetActive(false);
+            if (infoTowerHackPanel != null) infoTowerHackPanel.SetActive(false);
+            if (hitMarkerPanel != null) hitMarkerPanel.SetActive(false);
+            if (controlPointPanel != null) controlPointPanel.SetActive(false); // Only show during control point objective
         }
 
         private void Update()
@@ -160,11 +183,64 @@ namespace TacticalCombat.UI
                 gameModeText.text = mode == GameMode.FFA ? "FFA" : "4v4";
             }
 
-            // Hide team score in FFA mode
+            // Hide team score in FFA mode, show team scores in Team mode
             if (teamStatusPanel != null)
             {
                 GameMode mode = MatchManager.Instance.GetGameMode();
                 teamStatusPanel.SetActive(mode == GameMode.Team4v4);
+                
+                // Update team score text in Team mode
+                if (mode == GameMode.Team4v4 && teamScoreText != null)
+                {
+                    // ✅ PERFORMANCE FIX: Use NetworkServer.spawned instead of FindObjectsByType
+                    int teamAScore = 0;
+                    int teamBScore = 0;
+                    
+                    // ✅ PERFORMANCE FIX: Use NetworkServer.spawned (server) or NetworkClient.spawned (client)
+                    if (NetworkServer.active)
+                    {
+                        foreach (var kvp in NetworkServer.spawned)
+                        {
+                            var player = kvp.Value.GetComponent<Player.PlayerController>();
+                            if (player != null)
+                            {
+                                var stats = MatchManager.Instance.GetPlayerMatchStats(player.netId);
+                                if (stats != null)
+                                {
+                                    if (player.GetPlayerTeam() == Team.TeamA)
+                                        teamAScore += stats.totalScore;
+                                    else if (player.GetPlayerTeam() == Team.TeamB)
+                                        teamBScore += stats.totalScore;
+                                }
+                            }
+                        }
+                    }
+                    else if (NetworkClient.active)
+                    {
+                        // Client-side: Use NetworkClient.spawned
+                        foreach (var kvp in NetworkClient.spawned)
+                        {
+                            var player = kvp.Value.GetComponent<Player.PlayerController>();
+                            if (player != null)
+                            {
+                                var stats = MatchManager.Instance?.GetPlayerMatchStats(player.netId);
+                                if (stats != null)
+                                {
+                                    if (player.GetPlayerTeam() == Team.TeamA)
+                                        teamAScore += stats.totalScore;
+                                    else if (player.GetPlayerTeam() == Team.TeamB)
+                                        teamBScore += stats.totalScore;
+                                }
+                            }
+                        }
+                    }
+                    
+                    teamScoreText.text = $"{teamAScore} - {teamBScore}";
+                }
+                else if (teamScoreText != null)
+                {
+                    teamScoreText.text = ""; // Empty in FFA
+                }
             }
         }
 
@@ -350,6 +426,10 @@ namespace TacticalCombat.UI
                 buildFeedbackText.text = message;
                 buildFeedbackText.color = valid ? Color.green : Color.red;
             }
+
+            // ✅ FIX: Auto-hide after 2 seconds to prevent crosshair blocking
+            CancelInvoke(nameof(HideBuildFeedback));
+            Invoke(nameof(HideBuildFeedback), 2f);
         }
 
         public void HideBuildFeedback()
@@ -360,23 +440,7 @@ namespace TacticalCombat.UI
             }
         }
 
-        public void ShowRoundWin(string winnerTeam, int teamAScore, int teamBScore)
-        {
-            if (roundWinPanel != null && roundWinText != null)
-            {
-                roundWinText.text = $"{winnerTeam} WINS!\n{teamAScore} - {teamBScore}";
-                roundWinPanel.SetActive(true);
-                Invoke(nameof(HideRoundWin), 3f);
-            }
-        }
-
-        private void HideRoundWin()
-        {
-            if (roundWinPanel != null)
-            {
-                roundWinPanel.SetActive(false);
-            }
-        }
+        // ✅ REMOVED: ShowRoundWin and HideRoundWin methods (round system removed)
 
         public void ShowKillFeed(string killerName, string victimName, bool isHeadshot = false)
         {
@@ -455,6 +519,12 @@ namespace TacticalCombat.UI
 
         public void UpdateControlPoint(Team controllingTeam, float progress)
         {
+            // ✅ FIX: Show panel when control point is active
+            if (controlPointPanel != null)
+            {
+                controlPointPanel.SetActive(true);
+            }
+
             if (controlPointText != null)
             {
                 if (controllingTeam == Team.None)
@@ -471,6 +541,133 @@ namespace TacticalCombat.UI
             {
                 controlPointBar.value = (progress + 1f) / 2f; // Convert -1 to 1 range to 0 to 1
             }
+        }
+
+        /// <summary>
+        /// Hide control point UI (called when objective changes)
+        /// </summary>
+        public void HideControlPoint()
+        {
+            if (controlPointPanel != null)
+            {
+                controlPointPanel.SetActive(false);
+            }
+        }
+
+        /// <summary>
+        /// Show Info Tower hack progress UI
+        /// </summary>
+        public void ShowInfoTowerHackProgress(string message)
+        {
+            if (infoTowerHackPanel != null)
+            {
+                infoTowerHackPanel.SetActive(true);
+            }
+
+            if (infoTowerHackText != null)
+            {
+                infoTowerHackText.text = message;
+            }
+
+            if (infoTowerHackSlider != null)
+            {
+                infoTowerHackSlider.value = 0f;
+            }
+        }
+
+        /// <summary>
+        /// Update Info Tower hack progress (0-1)
+        /// </summary>
+        public void UpdateInfoTowerHackProgress(float progress)
+        {
+            if (infoTowerHackSlider != null)
+            {
+                infoTowerHackSlider.value = progress;
+            }
+
+            if (infoTowerHackText != null)
+            {
+                infoTowerHackText.text = $"HACKING INFO TOWER... {Mathf.RoundToInt(progress * 100)}%";
+            }
+        }
+
+        /// <summary>
+        /// Hide Info Tower hack progress UI
+        /// </summary>
+        public void HideInfoTowerHackProgress()
+        {
+            if (infoTowerHackPanel != null)
+            {
+                infoTowerHackPanel.SetActive(false);
+            }
+        }
+
+        /// <summary>
+        /// Show Info Tower hack complete notification
+        /// </summary>
+        public void ShowInfoTowerHackComplete()
+        {
+            if (infoTowerHackText != null)
+            {
+                infoTowerHackText.text = "INFO TOWER HACKED!";
+                infoTowerHackText.color = Color.green;
+            }
+
+            if (infoTowerHackSlider != null)
+            {
+                infoTowerHackSlider.value = 1f;
+            }
+
+            // Hide after 3 seconds
+            Invoke(nameof(HideInfoTowerHackProgress), 3f);
+        }
+
+        /// <summary>
+        /// Show hit marker (called when player lands a hit)
+        /// </summary>
+        public void ShowHitMarker(bool isHeadshot = false)
+        {
+            // Cancel any existing hide invoke
+            CancelInvoke(nameof(HideHitMarker));
+
+            if (hitMarkerPanel != null)
+            {
+                hitMarkerPanel.SetActive(true);
+            }
+
+            // Show regular or headshot marker
+            if (isHeadshot)
+            {
+                if (hitMarkerImage != null) hitMarkerImage.enabled = false;
+                if (headshotMarkerImage != null)
+                {
+                    headshotMarkerImage.enabled = true;
+                    headshotMarkerImage.color = Color.red; // Headshot is red
+                }
+            }
+            else
+            {
+                if (hitMarkerImage != null)
+                {
+                    hitMarkerImage.enabled = true;
+                    hitMarkerImage.color = Color.white; // Normal hit is white
+                }
+                if (headshotMarkerImage != null) headshotMarkerImage.enabled = false;
+            }
+
+            // Hide after short duration (typical FPS style: 0.1-0.2 seconds)
+            Invoke(nameof(HideHitMarker), 0.15f);
+        }
+
+        private void HideHitMarker()
+        {
+            if (hitMarkerPanel != null)
+            {
+                hitMarkerPanel.SetActive(false);
+            }
+
+            if (hitMarkerImage != null) hitMarkerImage.enabled = false;
+            if (headshotMarkerImage != null) headshotMarkerImage.enabled = false;
         }
 
         private void OnDestroy()

@@ -157,10 +157,52 @@ namespace TacticalCombat.Traps
             }
         }
 
+        /// <summary>
+        /// Temporarily disable trap (used by EMP throwables)
+        /// </summary>
+        [Server]
+        public void DisableTemporarily(float duration)
+        {
+            if (!isArmed) return; // Already disabled
+
+            // Disarm trap
+            isArmed = false;
+            RpcOnDisabled();
+
+            // Re-arm after duration
+            Invoke(nameof(Rearm), duration);
+        }
+
+        [Server]
+        private void Rearm()
+        {
+            if (!isTriggered) // Don't rearm if already triggered
+            {
+                isArmed = true;
+                RpcOnArmed();
+            }
+        }
+
+        [ClientRpc]
+        protected virtual void RpcOnDisabled()
+        {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"{gameObject.name} disabled by EMP");
+            #endif
+
+            // Stop particle effects if any
+            var particles = GetComponentInChildren<ParticleSystem>();
+            if (particles != null)
+            {
+                particles.Stop();
+            }
+        }
+
         // ✅ CRITICAL FIX: Cancel Invoke on destroy to prevent memory leaks
         private void OnDestroy()
         {
             CancelInvoke(nameof(Arm)); // Cancel Arm Invoke if trap destroyed before arming
+            CancelInvoke(nameof(Rearm)); // Cancel Rearm Invoke if trap destroyed while disabled
         }
     }
 }

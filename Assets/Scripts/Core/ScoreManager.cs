@@ -31,7 +31,9 @@ namespace TacticalCombat.Core
             base.OnStartServer();
             matchManager = MatchManager.Instance;
             
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("[ScoreManager] Server started - Event-driven scoring active");
+            #endif
         }
 
         /// <summary>
@@ -54,7 +56,9 @@ namespace TacticalCombat.Core
                 victimStats.deaths++;
             }
 
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ScoreManager] Kill: Player {killerId} killed Player {victimId}");
+            #endif
         }
 
         /// <summary>
@@ -105,7 +109,9 @@ namespace TacticalCombat.Core
                 victimStats.deaths++;
             }
 
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ScoreManager] Trap Kill: Trap owner {trapOwnerId} killed Player {victimId}");
+            #endif
         }
 
         /// <summary>
@@ -121,7 +127,9 @@ namespace TacticalCombat.Core
                 stats.CalculateTotalScore();
             }
 
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[ScoreManager] Capture: Player {playerId} captured core");
+            #endif
         }
 
         /// <summary>

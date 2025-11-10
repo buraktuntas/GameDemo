@@ -140,7 +140,7 @@ namespace TacticalCombat.Editor
             CreateAmmoUI(hudObj, gameHUD);
             CreateTimerUI(hudObj, gameHUD);
             CreateScoreUI(hudObj, gameHUD);
-            CreateRoundWinUI(hudObj, gameHUD);
+            // ✅ REMOVED: CreateRoundWinUI (round system removed)
             CreateKillFeedUI(hudObj, gameHUD);
             CreateHeadshotUI(hudObj, gameHUD);
             CreateRespawnUI(hudObj, gameHUD);
@@ -314,17 +314,13 @@ namespace TacticalCombat.Editor
             TextMeshProUGUI phaseText = phaseObj.GetComponent<TextMeshProUGUI>();
             phaseText.color = new Color(1f, 0.9f, 0.3f, 1f);
 
-            // Round Text (small, below timer)
-            GameObject roundObj = CreateText(timerPanel, "RoundText", "Round 1", 14,
-                new Vector2(0, -20), TextAlignmentOptions.Center, new Vector2(150, 25));
-            TextMeshProUGUI roundText = roundObj.GetComponent<TextMeshProUGUI>();
-            roundText.color = new Color(0.9f, 0.9f, 0.9f, 0.8f);
+            // ✅ REMOVED: Round Text (round system removed)
 
             // Assign to GameHUD
             SerializedObject so = new SerializedObject(gameHUD);
             so.FindProperty("timerText").objectReferenceValue = timerText;
             so.FindProperty("phaseText").objectReferenceValue = phaseText;
-            so.FindProperty("roundText").objectReferenceValue = roundText;
+            // ✅ REMOVED: roundText assignment (round system removed)
             so.ApplyModifiedProperties();
 
             Debug.Log("  ✅ Timer UI created");
@@ -340,12 +336,13 @@ namespace TacticalCombat.Editor
             Image panelBg = scorePanel.GetComponent<Image>();
             if (panelBg != null) panelBg.color = new Color(0, 0, 0, 0.15f);
 
-            // Team Score Text (clean format)
-            GameObject scoreObj = CreateText(scorePanel, "TeamScoreText", "0 - 0", 22,
+            // Team Score Text (dynamic - shows team scores in Team mode, hidden in FFA)
+            GameObject scoreObj = CreateText(scorePanel, "TeamScoreText", "", 22,
                 Vector2.zero, TextAlignmentOptions.Center, new Vector2(180, 40));
             TextMeshProUGUI scoreText = scoreObj.GetComponent<TextMeshProUGUI>();
             scoreText.fontStyle = FontStyles.Bold;
             scoreText.color = Color.white;
+            // ✅ FIX: Empty by default - will be updated by GameHUD.UpdateGameModeInfo()
 
             // Assign to GameHUD
             SerializedObject so = new SerializedObject(gameHUD);
@@ -356,29 +353,7 @@ namespace TacticalCombat.Editor
             Debug.Log("  ✅ Score UI created");
         }
 
-        static void CreateRoundWinUI(GameObject parent, GameHUD gameHUD)
-        {
-            // Center screen - big victory message
-            GameObject winPanel = CreatePanel(parent, "RoundWinPanel", new Vector2(600, 200),
-                Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-
-            Image winBg = winPanel.GetComponent<Image>();
-            winBg.color = new Color(0, 0, 0, 0.8f);
-            winPanel.SetActive(false);
-
-            GameObject winTextObj = CreateText(winPanel, "RoundWinText", "TEAM A WINS!\n3 - 2", 48,
-                Vector2.zero, TextAlignmentOptions.Center, new Vector2(580, 180));
-            TextMeshProUGUI winText = winTextObj.GetComponent<TextMeshProUGUI>();
-            winText.fontStyle = FontStyles.Bold;
-            winText.color = Color.yellow;
-
-            SerializedObject so = new SerializedObject(gameHUD);
-            so.FindProperty("roundWinPanel").objectReferenceValue = winPanel;
-            so.FindProperty("roundWinText").objectReferenceValue = winText;
-            so.ApplyModifiedProperties();
-
-            Debug.Log("  ✅ Round Win UI created");
-        }
+        // ✅ REMOVED: CreateRoundWinUI - Round system removed, replaced with EndGameScoreboard
 
         static void CreateKillFeedUI(GameObject parent, GameHUD gameHUD)
         {
@@ -405,9 +380,9 @@ namespace TacticalCombat.Editor
 
         static void CreateHeadshotUI(GameObject parent, GameHUD gameHUD)
         {
-            // Center screen, slightly above center - headshot indicator
+            // Top center, above crosshair - headshot indicator (brief flash, doesn't block crosshair)
             GameObject headshotPanel = CreatePanel(parent, "HeadshotPanel", new Vector2(400, 120),
-                new Vector2(0, 100), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+                new Vector2(0, 324), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f)); // ✅ Above crosshair (1080 * 0.3 = 324)
 
             Image headshotBg = headshotPanel.GetComponent<Image>();
             headshotBg.color = new Color(1, 0, 0, 0.8f); // Red background
@@ -429,9 +404,9 @@ namespace TacticalCombat.Editor
 
         static void CreateRespawnUI(GameObject parent, GameHUD gameHUD)
         {
-            // Center screen - respawn countdown
+            // Bottom center, below crosshair - respawn countdown (doesn't block crosshair)
             GameObject respawnPanel = CreatePanel(parent, "RespawnPanel", new Vector2(400, 100),
-                Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+                new Vector2(0, -324), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f)); // ✅ Below crosshair (1080 * 0.3 = -324)
 
             Image respawnBg = respawnPanel.GetComponent<Image>();
             respawnBg.color = new Color(0, 0, 0, 0.7f);
