@@ -178,16 +178,22 @@ namespace TacticalCombat.Core
         private int GetPlayerIndex(ulong playerId)
         {
             // Get player index from MatchManager
-            if (MatchManager.Instance != null)
+            var matchManager = MatchManager.Instance;
+            if (matchManager == null)
             {
-                var allStates = MatchManager.Instance.GetAllPlayerStates();
-                int index = 0;
-                foreach (var kvp in allStates)
-                {
-                    if (kvp.Key == playerId)
-                        return index;
-                    index++;
-                }
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("[ObjectiveManager] MatchManager.Instance is null");
+                #endif
+                return 0;
+            }
+            
+            var allStates = matchManager.GetAllPlayerStates();
+            int index = 0;
+            foreach (var kvp in allStates)
+            {
+                if (kvp.Key == playerId)
+                    return index;
+                index++;
             }
             return 0;
         }

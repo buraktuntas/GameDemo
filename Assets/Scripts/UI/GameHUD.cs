@@ -204,7 +204,8 @@ namespace TacticalCombat.UI
                             var player = kvp.Value.GetComponent<Player.PlayerController>();
                             if (player != null)
                             {
-                                var stats = MatchManager.Instance.GetPlayerMatchStats(player.netId);
+                                // ✅ FIX: Server-side access (server can use GetPlayerMatchStats)
+                                var stats = MatchManager.Instance?.GetPlayerMatchStats(player.netId);
                                 if (stats != null)
                                 {
                                     if (player.GetPlayerTeam() == Team.TeamA)
@@ -223,7 +224,8 @@ namespace TacticalCombat.UI
                             var player = kvp.Value.GetComponent<Player.PlayerController>();
                             if (player != null)
                             {
-                                var stats = MatchManager.Instance?.GetPlayerMatchStats(player.netId);
+                                // ✅ FIX: Client-side access (use client cache)
+                                var stats = MatchManager.Instance?.GetPlayerMatchStatsClient(player.netId);
                                 if (stats != null)
                                 {
                                     if (player.GetPlayerTeam() == Team.TeamA)

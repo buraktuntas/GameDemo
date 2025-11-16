@@ -18,7 +18,7 @@ namespace TacticalCombat.Combat
 
         [Header("Throw Settings")]
         [SerializeField] private float throwForce = 15f;
-        [SerializeField] private float throwArc = 45f;
+        // ✅ REMOVED: throwArc - not currently used (future feature for arc visualization)
 
         // Server-only tracking
         private Dictionary<uint, ThrowableData> activeThrowables = new Dictionary<uint, ThrowableData>();

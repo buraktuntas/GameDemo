@@ -36,9 +36,149 @@ namespace TacticalCombat.Building
         public override void OnStartServer()
         {
             base.OnStartServer();
+            
+            // Subscribe to build phase start for auto-deploy
+            var matchManager = MatchManager.Instance;
+            if (matchManager != null)
+            {
+                matchManager.OnPhaseChangedEvent += OnPhaseChanged;
+            }
+            
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log("[BlueprintSystem] Server started");
+            Debug.Log("[BlueprintSystem] Server started - Auto-deploy enabled");
             #endif
+        }
+        
+        private void OnDestroy()
+        {
+            // Unsubscribe from events
+            var matchManager = MatchManager.Instance;
+            if (matchManager != null)
+            {
+                matchManager.OnPhaseChangedEvent -= OnPhaseChanged;
+            }
+        }
+        
+        private void OnPhaseChanged(Phase newPhase)
+        {
+            if (newPhase == Phase.Build)
+            {
+                // Auto-deploy last blueprint for all players when build phase starts
+                StartCoroutine(AutoDeployAllBlueprints());
+            }
+        }
+        
+        /// <summary>
+        /// Auto-deploy last blueprint for all players at build phase start
+        /// </summary>
+        [Server]
+        private System.Collections.IEnumerator AutoDeployAllBlueprints()
+        {
+            var matchManager = MatchManager.Instance;
+            if (matchManager == null) yield break;
+            
+            // Wait a short delay to ensure all systems are initialized
+            yield return new WaitForSeconds(0.5f);
+            
+            foreach (var kvp in playerBlueprints)
+            {
+                ulong playerId = kvp.Key;
+                var blueprints = kvp.Value;
+                
+                if (blueprints.Count == 0) continue;
+                
+                // Get last blueprint (most recently saved)
+                var lastBlueprint = blueprints[blueprints.Count - 1];
+                
+                // Get player spawn position
+                Vector3 deployPosition = GetPlayerSpawnPosition(playerId);
+                if (deployPosition == Vector3.zero) continue;
+                
+                // Deploy blueprint (server-side, no command needed)
+                DeployBlueprintInternal(lastBlueprint, playerId, deployPosition);
+                
+                // Small delay between players to prevent lag spike
+                yield return new WaitForSeconds(GameConstants.BLUEPRINT_AUTO_DEPLOY_DELAY);
+            }
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log("[BlueprintSystem] Auto-deploy completed for all players");
+            #endif
+        }
+        
+        [Server]
+        private Vector3 GetPlayerSpawnPosition(ulong playerId)
+        {
+            // Try to get from BuildManager
+            var buildManager = BuildManager.Instance;
+            if (buildManager != null)
+            {
+                // BuildManager should have player spawn positions registered
+                // For now, try to find player GameObject
+                var player = FindPlayerById(playerId);
+                if (player != null)
+                {
+                    return player.transform.position;
+                }
+            }
+            
+            // Fallback: Try to find spawn point by tag
+            GameObject[] spawnPoints = GameObject.FindGameObjectsWithTag("SpawnPoint");
+            if (spawnPoints.Length > 0)
+            {
+                // Return first spawn point (should be improved with team-based spawns)
+                return spawnPoints[0].transform.position;
+            }
+            
+            return Vector3.zero;
+        }
+        
+        [Server]
+        private UnityEngine.GameObject FindPlayerById(ulong playerId)
+        {
+            // Use NetworkServer.spawned for O(1) lookup
+            uint netId = (uint)playerId;
+            if (NetworkServer.spawned.TryGetValue(netId, out NetworkIdentity identity))
+            {
+                return identity.gameObject;
+            }
+            return null;
+        }
+        
+        /// <summary>
+        /// Internal blueprint deployment (server-side, no validation needed)
+        /// </summary>
+        [Server]
+        private void DeployBlueprintInternal(Blueprint blueprint, ulong playerId, Vector3 deployPosition)
+        {
+            var matchManager = MatchManager.Instance;
+            if (matchManager == null) return;
+            
+            var playerState = matchManager.GetPlayerState(playerId);
+            if (playerState == null) return;
+            
+            var buildManager = BuildManager.Instance;
+            if (buildManager == null) return;
+            
+            int deployedCount = 0;
+            
+            foreach (var blueprintStruct in blueprint.structures)
+            {
+                Vector3 worldPos = deployPosition + blueprintStruct.localPosition;
+                BuildRequest request = new BuildRequest(worldPos, blueprintStruct.rotation, blueprintStruct.type, playerId);
+                
+                if (buildManager.ValidateAndPlace(request, playerState.team))
+                {
+                    deployedCount++;
+                }
+            }
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"[BlueprintSystem] Auto-deployed blueprint '{blueprint.blueprintName}' for player {playerId} - {deployedCount}/{blueprint.structures.Count} structures");
+            #endif
+            
+            // Notify client
+            RpcBlueprintAutoDeployed(playerId, blueprint.blueprintName, deployedCount);
         }
 
         /// <summary>
@@ -135,25 +275,15 @@ namespace TacticalCombat.Building
         [Server]
         private StructureCategory GetCategoryForType(StructureType type)
         {
-            return type switch
-            {
-                StructureType.Wall => StructureCategory.Wall,
-                StructureType.Platform => StructureCategory.Elevation,
-                StructureType.Ramp => StructureCategory.Elevation,
-                StructureType.TrapSpike => StructureCategory.Trap,
-                StructureType.TrapGlue => StructureCategory.Trap,
-                StructureType.TrapSpringboard => StructureCategory.Trap,
-                StructureType.TrapDartTurret => StructureCategory.Trap,
-                StructureType.InfoTower => StructureCategory.Utility,
-                _ => StructureCategory.Wall
-            };
+            // Use Structure's static method for consistency
+            return Structure.GetStructureCategory(type);
         }
 
         [Server]
         private int GetCostForType(StructureType type)
         {
-            // TODO: Get actual cost from Structure or BuildValidator
-            return 1; // Placeholder
+            // Use Structure's static method for consistency
+            return Structure.GetStructureCost(type);
         }
 
         /// <summary>
@@ -344,6 +474,14 @@ namespace TacticalCombat.Building
         {
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"[Client] Blueprint list: {string.Join(", ", blueprintNames)}");
+            #endif
+        }
+        
+        [ClientRpc]
+        private void RpcBlueprintAutoDeployed(ulong playerId, string blueprintName, int deployedCount)
+        {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"[Client] Blueprint '{blueprintName}' auto-deployed - {deployedCount} structures");
             #endif
         }
     }

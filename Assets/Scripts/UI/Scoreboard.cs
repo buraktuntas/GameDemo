@@ -132,7 +132,8 @@ namespace TacticalCombat.UI
 
                     foreach (var player in players)
                     {
-                        var stats = MatchManager.Instance.GetPlayerMatchStats(player.netId);
+                        // ✅ FIX: Use client-side stats cache
+                        var stats = MatchManager.Instance?.GetPlayerMatchStatsClient(player.netId);
                         if (stats != null)
                         {
                             if (player.GetPlayerTeam() == Team.TeamA)
@@ -140,6 +141,12 @@ namespace TacticalCombat.UI
                             else if (player.GetPlayerTeam() == Team.TeamB)
                                 teamBScore += stats.totalScore;
                         }
+                    }
+                    
+                    // ✅ NEW: Request stats if not cached (first time)
+                    if (MatchManager.Instance != null && NetworkClient.active)
+                    {
+                        MatchManager.Instance.CmdRequestAllPlayerStats();
                     }
 
                     if (teamAScoreText != null)
@@ -162,8 +169,9 @@ namespace TacticalCombat.UI
             // Sort players by total score
             System.Array.Sort(players, (a, b) =>
             {
-                var statsA = MatchManager.Instance?.GetPlayerMatchStats(a.netId);
-                var statsB = MatchManager.Instance?.GetPlayerMatchStats(b.netId);
+                // ✅ FIX: Use client-side stats cache
+                var statsA = MatchManager.Instance?.GetPlayerMatchStatsClient(a.netId);
+                var statsB = MatchManager.Instance?.GetPlayerMatchStatsClient(b.netId);
                 int scoreA = statsA?.totalScore ?? 0;
                 int scoreB = statsB?.totalScore ?? 0;
                 return scoreB.CompareTo(scoreA); // Descending order
@@ -205,7 +213,8 @@ namespace TacticalCombat.UI
             TextMeshProUGUI scoreText = entry.transform.Find("ScoreText")?.GetComponent<TextMeshProUGUI>();
 
             // Get match stats
-            var stats = MatchManager.Instance?.GetPlayerMatchStats(player.netId);
+            // ✅ FIX: Use client-side stats cache
+            var stats = MatchManager.Instance?.GetPlayerMatchStatsClient(player.netId);
             int kills = stats?.kills ?? 0;
             int deaths = stats?.deaths ?? 0;
             int assists = stats?.assists ?? 0;

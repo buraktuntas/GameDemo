@@ -47,6 +47,7 @@ namespace TacticalCombat.Core
             {
                 stats.kills++;
                 stats.CalculateTotalScore();
+                matchManager?.NotifyStatsChanged(killerId); // ✅ Sync to clients
             }
 
             // Award death to victim
@@ -54,6 +55,7 @@ namespace TacticalCombat.Core
             if (victimStats != null)
             {
                 victimStats.deaths++;
+                matchManager?.NotifyStatsChanged(victimId); // ✅ Sync to clients
             }
 
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -72,6 +74,7 @@ namespace TacticalCombat.Core
             {
                 stats.assists++;
                 stats.CalculateTotalScore();
+                matchManager?.NotifyStatsChanged(playerId); // ✅ Sync to clients
             }
         }
 
@@ -86,6 +89,7 @@ namespace TacticalCombat.Core
             {
                 stats.structuresBuilt++;
                 stats.CalculateTotalScore();
+                matchManager?.NotifyStatsChanged(playerId); // ✅ Sync to clients
             }
         }
 
@@ -100,6 +104,7 @@ namespace TacticalCombat.Core
             {
                 stats.trapKills++;
                 stats.CalculateTotalScore();
+                matchManager?.NotifyStatsChanged(trapOwnerId); // ✅ Sync to clients
             }
 
             // Award death to victim
@@ -107,6 +112,7 @@ namespace TacticalCombat.Core
             if (victimStats != null)
             {
                 victimStats.deaths++;
+                matchManager?.NotifyStatsChanged(victimId); // ✅ Sync to clients
             }
 
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -125,6 +131,7 @@ namespace TacticalCombat.Core
             {
                 stats.captures++;
                 stats.CalculateTotalScore();
+                matchManager?.NotifyStatsChanged(playerId); // ✅ Sync to clients
             }
 
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -143,6 +150,21 @@ namespace TacticalCombat.Core
             {
                 stats.defenseTime += timeDelta;
                 stats.CalculateTotalScore();
+                // Note: Defense time updates frequently, sync periodically instead of every frame
+                // Sync will happen on next major stat change or via periodic update
+            }
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Periodic sync for defense time (called every few seconds)
+        /// </summary>
+        [Server]
+        public void SyncDefenseTime(ulong playerId)
+        {
+            var stats = matchManager?.GetPlayerMatchStats(playerId);
+            if (stats != null)
+            {
+                matchManager?.NotifyStatsChanged(playerId);
             }
         }
 

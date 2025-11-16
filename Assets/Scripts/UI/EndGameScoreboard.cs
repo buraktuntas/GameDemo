@@ -126,12 +126,19 @@ namespace TacticalCombat.UI
             // Sort by total score
             System.Array.Sort(players, (a, b) =>
             {
-                var statsA = MatchManager.Instance?.GetPlayerMatchStats(a.netId);
-                var statsB = MatchManager.Instance?.GetPlayerMatchStats(b.netId);
+                // ✅ FIX: Use client-side stats cache
+                var statsA = MatchManager.Instance?.GetPlayerMatchStatsClient(a.netId);
+                var statsB = MatchManager.Instance?.GetPlayerMatchStatsClient(b.netId);
                 int scoreA = statsA?.totalScore ?? 0;
                 int scoreB = statsB?.totalScore ?? 0;
                 return scoreB.CompareTo(scoreA); // Descending order
             });
+            
+            // ✅ NEW: Request stats if not cached (first time)
+            if (MatchManager.Instance != null && NetworkClient.active)
+            {
+                MatchManager.Instance.CmdRequestAllPlayerStats();
+            }
 
             // Create entries
             foreach (var player in players)
@@ -158,8 +165,8 @@ namespace TacticalCombat.UI
             TextMeshProUGUI defenseTimeText = entry.transform.Find("DefenseTimeText")?.GetComponent<TextMeshProUGUI>();
             TextMeshProUGUI scoreText = entry.transform.Find("ScoreText")?.GetComponent<TextMeshProUGUI>();
 
-            // Get stats
-            var stats = MatchManager.Instance?.GetPlayerMatchStats(player.netId);
+            // ✅ FIX: Use client-side stats cache
+            var stats = MatchManager.Instance?.GetPlayerMatchStatsClient(player.netId);
             int kills = stats?.kills ?? 0;
             int deaths = stats?.deaths ?? 0;
             int assists = stats?.assists ?? 0;

@@ -869,7 +869,7 @@ namespace TacticalCombat.Building
             }
 
             // ✅ FIX: Ensure prefabs are set in BuildValidator (lazy initialization)
-            if (isServer && (validator.GetStructurePrefab(StructureType.Wall) == null || 
+            if (isServer && (validator.GetStructurePrefab(StructureType.WoodWall) == null || 
                            validator.GetStructurePrefab(StructureType.Platform) == null ||
                            validator.GetStructurePrefab(StructureType.Ramp) == null))
             {
@@ -912,21 +912,22 @@ namespace TacticalCombat.Building
         private StructureType GetStructureTypeFromIndex(int index)
         {
             if (availableStructures == null || index >= availableStructures.Length || index < 0)
-                return StructureType.Wall; // Default fallback
+                return StructureType.WoodWall; // Default fallback
 
             GameObject structure = availableStructures[index];
-            if (structure == null) return StructureType.Wall;
+            if (structure == null) return StructureType.WoodWall;
 
             // Map prefab name to StructureType
             string name = structure.name.ToLower();
-            if (name.Contains("wall")) return StructureType.Wall;
+            if (name.Contains("wall")) return StructureType.WoodWall; // Default to WoodWall
+            if (name.Contains("metal")) return StructureType.MetalWall; // Metal wall
             if (name.Contains("floor") || name.Contains("platform")) return StructureType.Platform;
             if (name.Contains("roof")) return StructureType.Platform; // Roof is elevation
-            if (name.Contains("door")) return StructureType.Wall; // Door is wall type
-            if (name.Contains("window")) return StructureType.Wall; // Window is wall type
+            if (name.Contains("door")) return StructureType.WoodWall; // Door is wall type (default to wood)
+            if (name.Contains("window")) return StructureType.WoodWall; // Window is wall type (default to wood)
             if (name.Contains("stair") || name.Contains("ramp")) return StructureType.Ramp;
 
-            return StructureType.Wall; // Default fallback
+            return StructureType.WoodWall; // Default fallback
         }
 
         [ClientRpc]
@@ -1110,7 +1111,8 @@ namespace TacticalCombat.Building
             // Check budget category based on structure type
             switch (structureType)
             {
-                case StructureType.Wall:
+                case StructureType.WoodWall:
+                case StructureType.MetalWall:
                 case StructureType.CoreStructure:
                     return playerState.budget.wallPoints >= cost;
 

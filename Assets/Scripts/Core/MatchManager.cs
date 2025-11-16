@@ -398,6 +398,15 @@ namespace TacticalCombat.Core
             suddenDeathActive = false;
             RpcOnPhaseChanged(currentPhase);
             
+            // ✅ NEW: Sync initial stats to all clients when build phase starts
+            RpcSyncAllStats();
+            
+            // ✅ NEW: Notify BuildManager that build phase started
+            if (Building.BuildManager.Instance != null)
+            {
+                Building.BuildManager.Instance.BeginBuildPhase();
+            }
+            
             StartCoroutine(BuildPhaseTimer());
         }
 
@@ -422,6 +431,12 @@ namespace TacticalCombat.Core
             suddenDeathActive = false;
             RpcOnPhaseChanged(currentPhase);
             
+            // ✅ NEW: Notify BuildManager that build phase ended
+            if (Building.BuildManager.Instance != null)
+            {
+                Building.BuildManager.Instance.EndBuildPhase();
+            }
+            
             // Initialize core objects if ObjectiveManager exists
             if (objectiveManager != null)
             {
@@ -435,35 +450,85 @@ namespace TacticalCombat.Core
         private IEnumerator CombatPhaseTimer()
         {
             const float winCheckInterval = 0.5f;
-            const float suddenDeathCheckInterval = 1f;
             float nextCheck = 0f;
-            float nextSuddenDeathCheck = 0f;
-            bool suddenDeathTriggered = false;
 
             while (remainingTime > 0)
             {
                 remainingTime -= Time.deltaTime;
 
-                // Check for sudden death (final 2 minutes)
-                if (!suddenDeathTriggered && remainingTime <= suddenDeathDuration)
+                // Check for sudden death transition (final 2 minutes)
+                if (!suddenDeathActive && remainingTime <= suddenDeathDuration)
                 {
-                    ActivateSuddenDeath();
-                    suddenDeathTriggered = true;
+                    TransitionToSuddenDeath();
+                    yield break; // Exit combat phase, sudden death phase will start
                 }
 
                 // Check win condition every 0.5s
                 if (Time.time >= nextCheck)
                 {
-                    if (IsWinConditionMet()) break;
+                    if (IsWinConditionMet())
+                    {
+                        Team winner = DetermineWinnerByScore();
+                        EndMatch(winner);
+                        yield break;
+                    }
                     nextCheck = Time.time + winCheckInterval;
                 }
 
                 yield return null;
             }
 
-            // ✅ FIX: Determine winner when time runs out
-            Team winner = DetermineWinnerByScore();
-            EndMatch(winner);
+            // Combat phase ended, transition to Sudden Death
+            TransitionToSuddenDeath();
+        }
+        
+        [Server]
+        private void TransitionToSuddenDeath()
+        {
+            Debug.Log("⚡ Transitioning to Sudden Death Phase (2 minutes)");
+            currentPhase = Phase.SuddenDeath;
+            remainingTime = suddenDeathDuration;
+            suddenDeathActive = true;
+            RpcOnPhaseChanged(currentPhase);
+            RpcOnSuddenDeathActivated();
+            
+            // Open sudden death tunnel
+            if (objectiveManager != null)
+            {
+                objectiveManager.OpenSuddenDeathTunnel();
+            }
+            
+            StartCoroutine(SuddenDeathPhaseTimer());
+        }
+        
+        [Server]
+        private IEnumerator SuddenDeathPhaseTimer()
+        {
+            const float winCheckInterval = 0.5f;
+            float nextCheck = 0f;
+
+            while (remainingTime > 0)
+            {
+                remainingTime -= Time.deltaTime;
+
+                // Check win condition every 0.5s
+                if (Time.time >= nextCheck)
+                {
+                    if (IsWinConditionMet())
+                    {
+                        Team winnerTeam = DetermineWinnerByScore();
+                        EndMatch(winnerTeam);
+                        yield break;
+                    }
+                    nextCheck = Time.time + winCheckInterval;
+                }
+
+                yield return null;
+            }
+
+            // Sudden death ended, determine winner by score
+            Team finalWinner = DetermineWinnerByScore();
+            EndMatch(finalWinner);
         }
 
         [Server]
@@ -539,20 +604,7 @@ namespace TacticalCombat.Core
             return Team.None; // Draw
         }
 
-        [Server]
-        private void ActivateSuddenDeath()
-        {
-            Debug.Log("⚡ SUDDEN DEATH ACTIVATED - Secret tunnel opens!");
-            suddenDeathActive = true;
-            matchState.suddenDeathActive = true;
-            RpcOnSuddenDeathActivated();
-            
-            // TODO: Open secret tunnel between bases (will be handled by ObjectiveManager)
-            if (objectiveManager != null)
-            {
-                objectiveManager.OpenSuddenDeathTunnel();
-            }
-        }
+        // ✅ REMOVED: ActivateSuddenDeath() - Now handled by TransitionToSuddenDeath()
 
         [Server]
         private bool IsWinConditionMet()
@@ -853,9 +905,108 @@ namespace TacticalCombat.Core
         // ✅ REMOVED: GetTeamAWins(), GetTeamBWins() (round system removed)
         public bool IsSuddenDeathActive() => suddenDeathActive;
         public GameMode GetGameMode() => gameMode;
+        
+        /// <summary>
+        /// Get player match stats (server-only, use Command for client access)
+        /// </summary>
+        [Server]
         public MatchStats GetPlayerMatchStats(ulong playerId)
         {
             return matchState.playerStats.ContainsKey(playerId) ? matchState.playerStats[playerId] : null;
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Client can request stats via Command
+        /// </summary>
+        [Command(requiresAuthority = false)]
+        public void CmdRequestPlayerStats(ulong playerId, NetworkConnectionToClient sender = null)
+        {
+            if (!isServer) return;
+            
+            var stats = GetPlayerMatchStats(playerId);
+            if (stats != null)
+            {
+                RpcSendPlayerStats(playerId, stats.kills, stats.deaths, stats.assists, 
+                    stats.structuresBuilt, stats.trapKills, stats.captures, stats.defenseTime, stats.totalScore);
+            }
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Request all player stats (for scoreboard)
+        /// </summary>
+        [Command(requiresAuthority = false)]
+        public void CmdRequestAllPlayerStats(NetworkConnectionToClient sender = null)
+        {
+            if (!isServer) return;
+            
+            foreach (var kvp in matchState.playerStats)
+            {
+                var stats = kvp.Value;
+                RpcSendPlayerStats(kvp.Key, stats.kills, stats.deaths, stats.assists,
+                    stats.structuresBuilt, stats.trapKills, stats.captures, stats.defenseTime, stats.totalScore);
+            }
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Client-side cache for player stats
+        /// </summary>
+        private Dictionary<ulong, MatchStats> clientStatsCache = new Dictionary<ulong, MatchStats>();
+        
+        /// <summary>
+        /// ✅ NEW: Get player stats from cache (client-side)
+        /// </summary>
+        public MatchStats GetPlayerMatchStatsClient(ulong playerId)
+        {
+            return clientStatsCache.ContainsKey(playerId) ? clientStatsCache[playerId] : null;
+        }
+        
+        [ClientRpc]
+        private void RpcSendPlayerStats(ulong playerId, int kills, int deaths, int assists,
+            int structuresBuilt, int trapKills, int captures, float defenseTime, int totalScore)
+        {
+            // Update client-side cache
+            if (!clientStatsCache.ContainsKey(playerId))
+            {
+                clientStatsCache[playerId] = new MatchStats(playerId);
+            }
+            
+            var stats = clientStatsCache[playerId];
+            stats.kills = kills;
+            stats.deaths = deaths;
+            stats.assists = assists;
+            stats.structuresBuilt = structuresBuilt;
+            stats.trapKills = trapKills;
+            stats.captures = captures;
+            stats.defenseTime = defenseTime;
+            stats.totalScore = totalScore;
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Sync all stats to clients (called at phase start)
+        /// </summary>
+        [Server]
+        private void RpcSyncAllStats()
+        {
+            foreach (var kvp in matchState.playerStats)
+            {
+                var stats = kvp.Value;
+                RpcSendPlayerStats(kvp.Key, stats.kills, stats.deaths, stats.assists,
+                    stats.structuresBuilt, stats.trapKills, stats.captures, stats.defenseTime, stats.totalScore);
+            }
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Notify clients when stats change (called from ScoreManager)
+        /// </summary>
+        [Server]
+        public void NotifyStatsChanged(ulong playerId)
+        {
+            var stats = GetPlayerMatchStats(playerId);
+            if (stats != null)
+            {
+                RpcSendPlayerStats(playerId, stats.kills, stats.deaths, stats.assists,
+                    stats.structuresBuilt, stats.trapKills, stats.captures, stats.defenseTime, stats.totalScore);
+            }
         }
 
         [Server]

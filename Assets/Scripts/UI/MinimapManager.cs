@@ -20,6 +20,8 @@ namespace TacticalCombat.UI
         private HashSet<uint> revealedStructures = new HashSet<uint>();
         private Dictionary<ulong, float> playerRevealExpiry = new Dictionary<ulong, float>();
         private Dictionary<uint, float> structureRevealExpiry = new Dictionary<uint, float>();
+        
+        private float lastUpdateTime = 0f;
 
         private void Awake()
         {
@@ -36,6 +38,12 @@ namespace TacticalCombat.UI
 
         private void Update()
         {
+            // ✅ FIX: Use minimapUpdateInterval for throttling updates
+            if (Time.time - lastUpdateTime < minimapUpdateInterval)
+                return;
+            
+            lastUpdateTime = Time.time;
+            
             // Clean up expired reveals
             CleanupExpiredReveals();
         }

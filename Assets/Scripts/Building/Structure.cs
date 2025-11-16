@@ -94,14 +94,30 @@ namespace TacticalCombat.Building
             }
         }
 
-        private int GetStructureHealth(StructureType type)
+        /// <summary>
+        /// ✅ FIX: Made public static for StructureSO access
+        /// </summary>
+        public static int GetStructureHealth(StructureType type)
         {
             return type switch
             {
+                // Core
                 StructureType.CoreStructure => GameConstants.CORE_HP,
-                StructureType.Wall => GameConstants.WALL_HP,
+                
+                // Walls
+                StructureType.WoodWall => GameConstants.WOOD_WALL_HP,
+                StructureType.MetalWall => GameConstants.METAL_WALL_HP,
+                
+                // Elevation
                 StructureType.Platform => GameConstants.PLATFORM_HP,
                 StructureType.Ramp => GameConstants.RAMP_HP,
+                
+                // Utility
+                StructureType.UtilityGate => GameConstants.GATE_HP,
+                StructureType.MotionSensor => GameConstants.MOTION_SENSOR_HP,
+                StructureType.InfoTower => GameConstants.INFO_TOWER_HP,
+                
+                // Traps (traps don't have health, they trigger once)
                 _ => 100
             };
         }
@@ -200,14 +216,26 @@ namespace TacticalCombat.Building
         {
             return type switch
             {
-                StructureType.Wall => 2,
+                // Walls (GDD: Düşük/Orta maliyet)
+                StructureType.WoodWall => 2,      // Düşük maliyet
+                StructureType.MetalWall => 4,      // Orta maliyet
+                
+                // Elevation
                 StructureType.Platform => 3,
                 StructureType.Ramp => 2,
-                StructureType.TrapSpike => 2,
-                StructureType.TrapGlue => 2,
+                
+                // Traps (GDD: Orta/Yüksek maliyet)
+                StructureType.TrapSpike => 3,      // Orta maliyet
+                StructureType.TrapGlue => 3,      // Orta maliyet
+                StructureType.TrapElectric => 5,  // Yüksek maliyet
                 StructureType.TrapSpringboard => 3,
                 StructureType.TrapDartTurret => 4,
-                StructureType.UtilityGate => 3,
+                
+                // Utility
+                StructureType.UtilityGate => 3,    // Orta maliyet
+                StructureType.MotionSensor => 1,  // Düşük maliyet (çok düşük dayanıklılık)
+                StructureType.InfoTower => 5,
+                
                 _ => 1
             };
         }
@@ -216,16 +244,29 @@ namespace TacticalCombat.Building
         {
             return type switch
             {
-                StructureType.Wall => StructureCategory.Wall,
+                // Walls
+                StructureType.WoodWall => StructureCategory.Wall,
+                StructureType.MetalWall => StructureCategory.Wall,
+                
+                // Elevation
                 StructureType.Platform => StructureCategory.Elevation,
                 StructureType.Ramp => StructureCategory.Elevation,
+                
+                // Traps
                 StructureType.TrapSpike => StructureCategory.Trap,
                 StructureType.TrapGlue => StructureCategory.Trap,
+                StructureType.TrapElectric => StructureCategory.Trap,
                 StructureType.TrapSpringboard => StructureCategory.Trap,
                 StructureType.TrapDartTurret => StructureCategory.Trap,
+                
+                // Utility
                 StructureType.UtilityGate => StructureCategory.Utility,
-                StructureType.CoreStructure => StructureCategory.Core,
+                StructureType.MotionSensor => StructureCategory.Utility,
                 StructureType.InfoTower => StructureCategory.Utility,
+                
+                // Core
+                StructureType.CoreStructure => StructureCategory.Core,
+                
                 _ => StructureCategory.Wall
             };
         }

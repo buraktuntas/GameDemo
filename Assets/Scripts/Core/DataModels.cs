@@ -68,24 +68,7 @@ namespace TacticalCombat.Core
         }
     }
 
-    [System.Serializable]
-    public class RoundState
-    {
-        public Phase phase;
-        public float remainingTime;
-        public int teamAWins;
-        public int teamBWins;
-        public int currentRound;
-
-        public RoundState()
-        {
-            phase = Phase.Lobby;
-            remainingTime = 0f;
-            teamAWins = 0;
-            teamBWins = 0;
-            currentRound = 0;
-        }
-    }
+    // ✅ REMOVED: RoundState - replaced by MatchState (single match, no BO3)
 
     [System.Serializable]
     public struct StructureCost

@@ -38,16 +38,28 @@ namespace TacticalCombat.Core
 
     public enum StructureType
     {
-        Wall,
+        // Walls
+        WoodWall,       // Düşük dayanıklılık, düşük maliyet
+        MetalWall,      // Orta dayanıklılık, orta maliyet
+        
+        // Elevation
         Platform,
         Ramp,
+        
+        // Core
         CoreStructure,
-        TrapSpike,
-        TrapGlue,
-        TrapSpringboard,
-        TrapDartTurret,
-        UtilityGate,
-        InfoTower       // New: Hackable tower for minimap reveals
+        
+        // Traps
+        TrapSpike,      // Hasar tuzağı (tek kullanımlık)
+        TrapGlue,       // Yavaşlatma tuzağı
+        TrapElectric,   // Yavaşlatır + az damage
+        TrapSpringboard,// Fırlatma tuzağı (tekrar kullanılabilir)
+        TrapDartTurret, // Otomatik hedefli kule
+        
+        // Utility
+        UtilityGate,    // Aç/Kapa mekanizması
+        MotionSensor,   // Ses/ışık uyarı (çok düşük dayanıklılık)
+        InfoTower       // Hackable tower for minimap reveals
     }
 
     public enum StructureCategory

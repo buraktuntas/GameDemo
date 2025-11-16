@@ -15,15 +15,27 @@ namespace TacticalCombat.Core
 
         // Removed BO3 - single match structure now
 
-        // Structure Health
+        // Structure Health (Project Bastion GDD)
         public const int CORE_HP = 1200;
-        public const int WALL_HP = 200;
+        
+        // Walls
+        public const int WOOD_WALL_HP = 100;      // Düşük dayanıklılık
+        public const int METAL_WALL_HP = 300;     // Orta dayanıklılık
+        
+        // Elevation
         public const int PLATFORM_HP = 150;
         public const int RAMP_HP = 100;
+        
+        // Utility
+        public const int GATE_HP = 200;           // Orta dayanıklılık
+        public const int MOTION_SENSOR_HP = 10;   // Çok düşük dayanıklılık
+        public const int INFO_TOWER_HP = 400;
 
         // Trap Damage
         public const int SPIKE_TRAP_DAMAGE = 50;
         public const int DART_TRAP_DAMAGE = 25;
+        public const int ELECTRIC_TRAP_DAMAGE = 15;    // Az damage + yavaşlatma
+        public const float ELECTRIC_TRAP_SLOW_PERCENT = 0.5f; // %50 yavaşlatma
 
         // Sabotage
         public const float SABOTAGE_INTERACT_TIME = 2.5f;
@@ -67,10 +79,18 @@ namespace TacticalCombat.Core
         public const float SABOTEUR_SHADOW_STEP_DURATION = 4f;
         public const float SABOTEUR_SHADOW_STEP_COOLDOWN = 40f;
 
-        // Build
+        // Build Zone System (Level Design Spec)
+        public const float BUILD_ZONE_SIZE = 30f; // 30x30m güvenli build zone per player/team
         public const float BUILD_PLACEMENT_RANGE = 5f;
         public const float BUILD_SNAP_DISTANCE = 0.5f;
-        public const float BUILD_MAX_DISTANCE_FROM_SPAWN = 50f; // Max distance from spawn for personal base
+        public const float BUILD_MAX_DISTANCE_FROM_SPAWN = 30f; // Updated: 30m build zone (was 50m)
+        
+        // Structure Limits (Performance Budget)
+        public const int MAX_STRUCTURES_PER_PLAYER = 40; // Per player limit
+        public const int MAX_STRUCTURES_PER_TEAM = 160; // Per team limit (4 players × 40)
+        public const int MAX_TOTAL_STRUCTURES = 400; // Total map limit
+        public const int MAX_TRAPS_PER_PLAYER = 10; // Trap limit per player
+        public const int MAX_TRAP_CHAIN_LENGTH = 4; // Max traps in chain (was 5)
 
         // Core Object
         public const float CORE_CARRY_SPEED_MULTIPLIER = 0.7f; // 70% speed when carrying core
@@ -87,12 +107,18 @@ namespace TacticalCombat.Core
 
         // Info Tower
         public const float INFO_TOWER_HACK_TIME = 5f;
-        public const float INFO_TOWER_REVEAL_DURATION = 30f;
+        public const float INFO_TOWER_REVEAL_DURATION = 10f;  // GDD: 10sn minimap açılır
         public const float INFO_TOWER_REVEAL_RADIUS = 50f;
+        
+        // Blueprint System
+        public const float BLUEPRINT_AUTO_DEPLOY_DELAY = 0.1f; // Delay between structure placements
+        public const int MAX_BLUEPRINTS_PER_PLAYER = 5;
+        
+        // Build Phase Bonus
+        public const float BONUS_OBJECT_SPAWN_TIME = 20f; // Son 20 saniye
 
-        // Trap Linking
-        public const int MAX_TRAP_CHAIN_LENGTH = 5; // Max traps in a chain
-        public const float TRAP_CHAIN_DELAY = 0.2f; // Delay between chain triggers
+        // Trap Linking (Updated per spec)
+        public const float TRAP_CHAIN_DELAY = 0.2f; // Delay between chain triggers (1s per spec, but 0.2s is better)
 
         // Scoring
         public const int SCORE_KILL = 10;
@@ -109,7 +135,7 @@ namespace TacticalCombat.Core
         public const bool USE_GPU_RESIDENT_DRAWER = true; // Unity 6 özelliği
         
         // Network Performance (Unity 6)
-        public const int MAX_STRUCTURES_PER_TEAM = 150; // GPU Resident Drawer ile daha fazla
+        // ✅ REMOVED: MAX_STRUCTURES_PER_TEAM duplicate (already defined above in Structure Limits section)
         public const float NETWORK_SEND_RATE = 30f; // Hz
     }
 }

@@ -157,6 +157,14 @@ namespace TacticalCombat.Building
             }
 
             // Phase check
+            if (MatchManager.Instance == null)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("MatchManager.Instance is null");
+                #endif
+                return false;
+            }
+            
             if (MatchManager.Instance.GetCurrentPhase() != Phase.Build)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -279,7 +287,7 @@ namespace TacticalCombat.Building
 
             // ✅ CRITICAL FIX: Spend budget AFTER all validations pass (prevents resource drain exploit)
             // If budget fails, no resources were wasted on failed spawns
-            if (!MatchManager.Instance.SpendBudget(request.playerId, category, cost))
+            if (MatchManager.Instance == null || !MatchManager.Instance.SpendBudget(request.playerId, category, cost))
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"⚠️ [BuildValidator] Insufficient budget for {request.type} (Cost: {cost}, Category: {category})");
@@ -354,10 +362,12 @@ namespace TacticalCombat.Building
         {
             return type switch
             {
-                StructureType.Wall => wallPrefab,
+                // Walls - default to WoodWall prefab
+                StructureType.WoodWall => wallPrefab,
+                StructureType.MetalWall => wallPrefab, // TODO: Add metalWallPrefab field when available
                 StructureType.Platform => platformPrefab,
                 StructureType.Ramp => rampPrefab,
-                _ => wallPrefab
+                _ => wallPrefab // Default fallback
             };
         }
     }

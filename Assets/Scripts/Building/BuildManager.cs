@@ -20,11 +20,17 @@ namespace TacticalCombat.Building
         [SerializeField] private TrapLinkSystem trapLinkSystem;
 
         [Header("Build Settings")]
-        [SerializeField] private float maxBuildDistanceFromSpawn = GameConstants.BUILD_MAX_DISTANCE_FROM_SPAWN;
+        // ✅ REMOVED: maxBuildDistanceFromSpawn - using buildZoneSize instead (30x30m zone)
+        [SerializeField] private float buildZoneSize = GameConstants.BUILD_ZONE_SIZE; // 30x30m build zone
+
+        [Header("Build Phase State")]
+        [SyncVar] private bool isBuildPhase = false;
 
         // Server-only tracking
         private Dictionary<uint, Structure> placedStructures = new Dictionary<uint, Structure>();
         private Dictionary<ulong, Vector3> playerSpawnPositions = new Dictionary<ulong, Vector3>();
+        private Dictionary<ulong, int> playerStructureCounts = new Dictionary<ulong, int>(); // Track structure count per player
+        private Dictionary<ulong, int> playerTrapCounts = new Dictionary<ulong, int>(); // Track trap count per player
 
         private void Awake()
         {
@@ -65,6 +71,72 @@ namespace TacticalCombat.Building
 
             Debug.Log("[BuildManager] Server started");
         }
+        
+        /// <summary>
+        /// ✅ NEW: Begin build phase (called from MatchManager)
+        /// </summary>
+        [Server]
+        public void BeginBuildPhase()
+        {
+            isBuildPhase = true;
+            
+            // Reset structure counts
+            playerStructureCounts.Clear();
+            playerTrapCounts.Clear();
+            
+            // Initialize counts for all players
+            var matchManager = MatchManager.Instance;
+            if (matchManager != null)
+            {
+                var allStates = matchManager.GetAllPlayerStates();
+                foreach (var kvp in allStates)
+                {
+                    playerStructureCounts[kvp.Key] = 0;
+                    playerTrapCounts[kvp.Key] = 0;
+                }
+            }
+            
+            RpcBuildPhaseChanged(true);
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log("[BuildManager] Build phase started");
+            #endif
+        }
+        
+        /// <summary>
+        /// ✅ NEW: End build phase (called from MatchManager)
+        /// </summary>
+        [Server]
+        public void EndBuildPhase()
+        {
+            isBuildPhase = false;
+            RpcBuildPhaseChanged(false);
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log("[BuildManager] Build phase ended");
+            #endif
+        }
+        
+        [ClientRpc]
+        private void RpcBuildPhaseChanged(bool enabled)
+        {
+            isBuildPhase = enabled;
+            // UI can subscribe to this or check isBuildPhase
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Check if position is within build zone for player
+        /// </summary>
+        [Server]
+        private bool IsInBuildZone(ulong playerId, Vector3 position)
+        {
+            if (!playerSpawnPositions.ContainsKey(playerId))
+                return false;
+            
+            Vector3 spawnPos = playerSpawnPositions[playerId];
+            float distance = Vector3.Distance(position, spawnPos);
+            
+            // Build zone is 30x30m square (or circle with 15m radius)
+            return distance <= buildZoneSize * 0.5f; // 15m radius = 30m diameter
+        }
 
         /// <summary>
         /// Register player spawn position for distance validation
@@ -81,25 +153,60 @@ namespace TacticalCombat.Building
         [Server]
         public bool ValidateAndPlace(BuildRequest request, Team playerTeam)
         {
-            // Check if in build phase
-            var matchManager = MatchManager.Instance;
-            if (matchManager != null && matchManager.GetCurrentPhase() != Phase.Build)
+            // ✅ NEW: Check build phase state
+            if (!isBuildPhase)
             {
                 Debug.LogWarning("[BuildManager] Cannot build - not in build phase");
                 return false;
             }
 
-            // Check distance from spawn (personal base limit)
-            if (playerSpawnPositions.ContainsKey(request.playerId))
+            // ✅ NEW: Check build zone (30x30m safe zone)
+            if (!IsInBuildZone(request.playerId, request.position))
             {
-                Vector3 spawnPos = playerSpawnPositions[request.playerId];
-                float distance = Vector3.Distance(request.position, spawnPos);
-                
-                if (distance > maxBuildDistanceFromSpawn)
+                Debug.LogWarning($"[BuildManager] Build outside build zone (30x30m)");
+                return false;
+            }
+            
+            // ✅ NEW: Check structure limits
+            if (!playerStructureCounts.ContainsKey(request.playerId))
+            {
+                playerStructureCounts[request.playerId] = 0;
+            }
+            
+            // Check if structure is a trap
+            bool isTrap = Structure.GetStructureCategory(request.type) == StructureCategory.Trap;
+            
+            if (isTrap)
+            {
+                if (!playerTrapCounts.ContainsKey(request.playerId))
                 {
-                    Debug.LogWarning($"[BuildManager] Build too far from spawn: {distance}m (max: {maxBuildDistanceFromSpawn}m)");
+                    playerTrapCounts[request.playerId] = 0;
+                }
+                
+                if (playerTrapCounts[request.playerId] >= GameConstants.MAX_TRAPS_PER_PLAYER)
+                {
+                    Debug.LogWarning($"[BuildManager] Trap limit reached: {playerTrapCounts[request.playerId]}/{GameConstants.MAX_TRAPS_PER_PLAYER}");
                     return false;
                 }
+            }
+            
+            if (playerStructureCounts[request.playerId] >= GameConstants.MAX_STRUCTURES_PER_PLAYER)
+            {
+                Debug.LogWarning($"[BuildManager] Structure limit reached: {playerStructureCounts[request.playerId]}/{GameConstants.MAX_STRUCTURES_PER_PLAYER}");
+                return false;
+            }
+            
+            // ✅ NEW: Check total structure count (map-wide limit)
+            int totalStructures = 0;
+            foreach (var count in playerStructureCounts.Values)
+            {
+                totalStructures += count;
+            }
+            
+            if (totalStructures >= GameConstants.MAX_TOTAL_STRUCTURES)
+            {
+                Debug.LogWarning($"[BuildManager] Total structure limit reached: {totalStructures}/{GameConstants.MAX_TOTAL_STRUCTURES}");
+                return false;
             }
 
             // Use BuildValidator for placement validation
@@ -118,6 +225,15 @@ namespace TacticalCombat.Building
                         if (structure != null)
                         {
                             placedStructures[structure.netId] = structure;
+                            
+                            // ✅ NEW: Increment structure count
+                            playerStructureCounts[request.playerId]++;
+                            
+                            // ✅ NEW: Increment trap count if trap
+                            if (isTrap)
+                            {
+                                playerTrapCounts[request.playerId]++;
+                            }
 
                             // Initialize structure health if breakable
                             if (structure.GetComponent<Health>() == null)
@@ -170,6 +286,24 @@ namespace TacticalCombat.Building
         {
             if (placedStructures.ContainsKey(netId))
             {
+                var structure = placedStructures[netId];
+                ulong ownerId = structure.GetOwnerId();
+                
+                // ✅ NEW: Decrement structure count
+                if (playerStructureCounts.ContainsKey(ownerId))
+                {
+                    playerStructureCounts[ownerId]--;
+                }
+                
+                // ✅ NEW: Decrement trap count if trap
+                if (Structure.GetStructureCategory(structure.GetStructureType()) == StructureCategory.Trap)
+                {
+                    if (playerTrapCounts.ContainsKey(ownerId))
+                    {
+                        playerTrapCounts[ownerId]--;
+                    }
+                }
+                
                 placedStructures.Remove(netId);
                 
                 // Remove from trap links if it was a trap
@@ -178,6 +312,24 @@ namespace TacticalCombat.Building
                     trapLinkSystem.RemoveTrap(netId);
                 }
             }
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Get structure count for player (for UI)
+        /// </summary>
+        [Server]
+        public int GetPlayerStructureCount(ulong playerId)
+        {
+            return playerStructureCounts.ContainsKey(playerId) ? playerStructureCounts[playerId] : 0;
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Get trap count for player (for UI)
+        /// </summary>
+        [Server]
+        public int GetPlayerTrapCount(ulong playerId)
+        {
+            return playerTrapCounts.ContainsKey(playerId) ? playerTrapCounts[playerId] : 0;
         }
 
         /// <summary>

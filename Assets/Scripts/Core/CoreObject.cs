@@ -13,7 +13,7 @@ namespace TacticalCombat.Core
     public class CoreObject : NetworkBehaviour
     {
         [Header("Core Settings")]
-        [SerializeField] private float pickupRange = 2f;
+        // ✅ REMOVED: pickupRange - using trigger collider instead (OnTriggerEnter)
         [SerializeField] private GameObject carryIndicatorPrefab;
 
         [SyncVar]
@@ -78,12 +78,13 @@ namespace TacticalCombat.Core
             isCarried = true;
             carrierId = playerId;
             
-            // Attach to player
+            // ✅ IMPROVED: Attach to player with proper offset (per spec: 0.6f up, 0.5f forward)
             var player = GetPlayerById(playerId);
             if (player != null)
             {
                 transform.SetParent(player.transform);
-                transform.localPosition = Vector3.up * 1.5f; // Above player head
+                transform.localPosition = new Vector3(0, 0.6f, 0.5f); // Per spec: above player, slightly forward
+                transform.localRotation = Quaternion.identity;
                 coreCollider.enabled = false;
                 
                 // Notify PlayerController
@@ -95,6 +96,17 @@ namespace TacticalCombat.Core
             }
 
             RpcUpdateCarryState(true, playerId);
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Reset core to origin position (per spec)
+        /// </summary>
+        [Server]
+        public void ResetToOrigin()
+        {
+            OnDropped();
+            // Origin position should be stored and restored here
+            // For now, ObjectiveManager handles respawn
         }
 
         [Server]

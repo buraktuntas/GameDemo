@@ -13,7 +13,7 @@ namespace TacticalCombat.Combat
     {
         [Header("Throwable Settings")]
         [SerializeField] private ThrowableType type;
-        [SerializeField] private float impactForce = 1f;
+        // ✅ REMOVED: impactForce - not currently used (future feature for physics impact)
 
         private ulong throwerId;
         private ThrowableSystem throwableSystem;

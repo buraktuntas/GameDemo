@@ -33,7 +33,7 @@ namespace TacticalCombat.Building
         private SimpleBuildMode buildMode;
         private Camera mainCamera;
         private BuildGhost currentGhost;
-        private StructureType currentStructureType = StructureType.Wall;
+        private StructureType currentStructureType = StructureType.WoodWall; // Default to WoodWall
         private bool isPlacementValid = false;
         private Vector3 ghostPosition;
         private Quaternion ghostRotation;
@@ -114,7 +114,7 @@ namespace TacticalCombat.Building
 
                 placeAction.performed += OnPlace;
                 rotateAction.performed += OnRotate;
-                selectWallHandler = ctx => SelectStructure(StructureType.Wall);
+                selectWallHandler = ctx => SelectStructure(StructureType.WoodWall); // Default to WoodWall
                 selectPlatformHandler = ctx => SelectStructure(StructureType.Platform);
                 selectRampHandler = ctx => SelectStructure(StructureType.Ramp);
 
@@ -258,10 +258,11 @@ namespace TacticalCombat.Building
         {
             return type switch
             {
-                StructureType.Wall => wallGhostPrefab,
+                StructureType.WoodWall => wallGhostPrefab,
+                StructureType.MetalWall => wallGhostPrefab, // TODO: Add metalWallGhostPrefab when available
                 StructureType.Platform => platformGhostPrefab,
                 StructureType.Ramp => rampGhostPrefab,
-                _ => wallGhostPrefab
+                _ => wallGhostPrefab // Default fallback
             };
         }
 
@@ -269,10 +270,11 @@ namespace TacticalCombat.Building
         {
             return type switch
             {
-                StructureType.Wall => wallPrefab,
+                StructureType.WoodWall => wallPrefab,
+                StructureType.MetalWall => wallPrefab, // TODO: Add metalWallPrefab when available
                 StructureType.Platform => platformPrefab,
                 StructureType.Ramp => rampPrefab,
-                _ => wallPrefab
+                _ => wallPrefab // Default fallback
             };
         }
 
