@@ -48,7 +48,7 @@ namespace TacticalCombat.Building
         {
             base.OnStartServer();
             
-            // Find BuildValidator if not assigned
+            // ✅ CORE STABILITY: Find BuildValidator if not assigned (null-safe)
             if (buildValidator == null)
             {
                 buildValidator = BuildValidator.Instance;
@@ -56,16 +56,25 @@ namespace TacticalCombat.Building
                 {
                     buildValidator = FindFirstObjectByType<BuildValidator>();
                 }
+                
+                if (buildValidator == null)
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogWarning("[BuildManager] BuildValidator not found - build validation may not work correctly");
+                    #endif
+                }
             }
 
-            // Find TrapLinkSystem if not assigned
+            // ✅ CORE STABILITY: Find TrapLinkSystem if not assigned (null-safe)
             if (trapLinkSystem == null)
             {
                 trapLinkSystem = FindFirstObjectByType<TrapLinkSystem>();
                 if (trapLinkSystem == null)
                 {
+                    // Auto-create TrapLinkSystem if not found
                     GameObject trapLinkObj = new GameObject("[TrapLinkSystem]");
                     trapLinkSystem = trapLinkObj.AddComponent<TrapLinkSystem>();
+                    Debug.Log("[BuildManager] Auto-created TrapLinkSystem");
                 }
             }
 
@@ -84,16 +93,25 @@ namespace TacticalCombat.Building
             playerStructureCounts.Clear();
             playerTrapCounts.Clear();
             
-            // Initialize counts for all players
+            // ✅ CORE STABILITY: Initialize counts for all players (null-safe)
             var matchManager = MatchManager.Instance;
             if (matchManager != null)
             {
                 var allStates = matchManager.GetAllPlayerStates();
-                foreach (var kvp in allStates)
+                if (allStates != null)
                 {
-                    playerStructureCounts[kvp.Key] = 0;
-                    playerTrapCounts[kvp.Key] = 0;
+                    foreach (var kvp in allStates)
+                    {
+                        playerStructureCounts[kvp.Key] = 0;
+                        playerTrapCounts[kvp.Key] = 0;
+                    }
                 }
+            }
+            else
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("[BuildManager] MatchManager.Instance is null - cannot initialize player structure counts");
+                #endif
             }
             
             RpcBuildPhaseChanged(true);
@@ -156,14 +174,18 @@ namespace TacticalCombat.Building
             // ✅ NEW: Check build phase state
             if (!isBuildPhase)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("[BuildManager] Cannot build - not in build phase");
+                #endif
                 return false;
             }
 
             // ✅ NEW: Check build zone (30x30m safe zone)
             if (!IsInBuildZone(request.playerId, request.position))
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[BuildManager] Build outside build zone (30x30m)");
+                #endif
                 return false;
             }
             
@@ -185,14 +207,18 @@ namespace TacticalCombat.Building
                 
                 if (playerTrapCounts[request.playerId] >= GameConstants.MAX_TRAPS_PER_PLAYER)
                 {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     Debug.LogWarning($"[BuildManager] Trap limit reached: {playerTrapCounts[request.playerId]}/{GameConstants.MAX_TRAPS_PER_PLAYER}");
+                    #endif
                     return false;
                 }
             }
             
             if (playerStructureCounts[request.playerId] >= GameConstants.MAX_STRUCTURES_PER_PLAYER)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[BuildManager] Structure limit reached: {playerStructureCounts[request.playerId]}/{GameConstants.MAX_STRUCTURES_PER_PLAYER}");
+                #endif
                 return false;
             }
             
@@ -205,7 +231,9 @@ namespace TacticalCombat.Building
             
             if (totalStructures >= GameConstants.MAX_TOTAL_STRUCTURES)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"[BuildManager] Total structure limit reached: {totalStructures}/{GameConstants.MAX_TOTAL_STRUCTURES}");
+                #endif
                 return false;
             }
 
@@ -262,7 +290,9 @@ namespace TacticalCombat.Building
         {
             if (trapLinkSystem == null)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("[BuildManager] TrapLinkSystem not found");
+                #endif
                 return false;
             }
 

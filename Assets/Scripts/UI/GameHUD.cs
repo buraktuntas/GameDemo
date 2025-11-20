@@ -94,6 +94,15 @@ namespace TacticalCombat.UI
 
         // ✅ CRITICAL FIX: Cache local player reference to avoid FindFirstObjectByType every frame
         private Player.PlayerController cachedLocalPlayer;
+        
+        // ✅ PERFORMANCE FIX: Cache string builders to avoid GC allocation
+        private System.Text.StringBuilder stringBuilder = new System.Text.StringBuilder(32);
+        
+        // ✅ PERFORMANCE FIX: Cache last values to avoid unnecessary UI updates
+        private int lastHealthValue = -1;
+        private int lastAmmoValue = -1;
+        private int lastReserveAmmoValue = -1;
+        private string lastTeamScoreText = "";
 
         private void Awake()
         {
@@ -127,6 +136,14 @@ namespace TacticalCombat.UI
             {
                 MatchManager.Instance.OnPhaseChangedEvent += OnPhaseChanged;
                 MatchManager.Instance.OnSuddenDeathActivated += OnSuddenDeathActivated;
+                
+                // ✅ CRITICAL: Check current phase and hide HUD if in Lobby/End
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                if (currentPhase == Phase.Lobby || currentPhase == Phase.End)
+                {
+                    gameObject.SetActive(false);
+                    Debug.Log($"✅ [GameHUD] Hidden at start (phase: {currentPhase})");
+                }
             }
 
             // ✅ FIX: Hide all conditional panels initially (prevent crosshair blocking)
@@ -237,7 +254,17 @@ namespace TacticalCombat.UI
                         }
                     }
                     
-                    teamScoreText.text = $"{teamAScore} - {teamBScore}";
+                    // ✅ PERFORMANCE FIX: Only update if value changed (avoid GC allocation)
+                    stringBuilder.Clear();
+                    stringBuilder.Append(teamAScore);
+                    stringBuilder.Append(" - ");
+                    stringBuilder.Append(teamBScore);
+                    string newTeamScoreText = stringBuilder.ToString();
+                    if (newTeamScoreText != lastTeamScoreText)
+                    {
+                        teamScoreText.text = newTeamScoreText;
+                        lastTeamScoreText = newTeamScoreText;
+                    }
                 }
                 else if (teamScoreText != null)
                 {
@@ -306,10 +333,13 @@ namespace TacticalCombat.UI
 
         private void OnPhaseChanged(Phase newPhase)
         {
+            Debug.Log($"🎮 [GameHUD] Phase changed to: {newPhase}");
+            
             if (phaseText != null)
             {
                 string phaseName = newPhase switch
                 {
+                    Phase.Lobby => "LOBBY",
                     Phase.Build => "BUILD PHASE",
                     Phase.Combat => "COMBAT PHASE",
                     Phase.SuddenDeath => "SUDDEN DEATH",
@@ -317,6 +347,18 @@ namespace TacticalCombat.UI
                     _ => newPhase.ToString().ToUpper()
                 };
                 phaseText.text = phaseName;
+            }
+
+            // ✅ CRITICAL: Hide GameHUD in Lobby and End phases
+            if (newPhase == Phase.Lobby || newPhase == Phase.End)
+            {
+                gameObject.SetActive(false);
+                Debug.Log($"✅ [GameHUD] Hidden (phase: {newPhase})");
+            }
+            else
+            {
+                gameObject.SetActive(true);
+                Debug.Log($"✅ [GameHUD] Shown (phase: {newPhase})");
             }
 
             // Show/hide resource panel based on phase
@@ -378,21 +420,36 @@ namespace TacticalCombat.UI
 
             if (healthText != null)
             {
-                // FPS Standard: Show only current health (like Valorant/CS:GO)
-                healthText.text = current.ToString();
+                // ✅ PERFORMANCE FIX: Only update if value changed (avoid GC allocation)
+                if (current != lastHealthValue)
+                {
+                    // FPS Standard: Show only current health (like Valorant/CS:GO)
+                    stringBuilder.Clear();
+                    stringBuilder.Append(current);
+                    healthText.text = stringBuilder.ToString();
+                    lastHealthValue = current;
+                }
             }
         }
 
         public void UpdateAmmo(int current, int reserve)
         {
-            if (ammoText != null)
+            // ✅ PERFORMANCE FIX: Only update if value changed (avoid GC allocation)
+            if (ammoText != null && current != lastAmmoValue)
             {
-                ammoText.text = current.ToString();
+                stringBuilder.Clear();
+                stringBuilder.Append(current);
+                ammoText.text = stringBuilder.ToString();
+                lastAmmoValue = current;
             }
 
-            if (reserveAmmoText != null)
+            if (reserveAmmoText != null && reserve != lastReserveAmmoValue)
             {
-                reserveAmmoText.text = $"/ {reserve}";
+                stringBuilder.Clear();
+                stringBuilder.Append("/ ");
+                stringBuilder.Append(reserve);
+                reserveAmmoText.text = stringBuilder.ToString();
+                lastReserveAmmoValue = reserve;
             }
         }
 

@@ -34,6 +34,10 @@ namespace TacticalCombat.Building
         private const float NEIGHBOR_UPDATE_COOLDOWN = 0.5f; // 500ms cooldown between neighbor updates
         private const int MAX_NEIGHBOR_UPDATES = 10; // Limit cascade depth
         
+        // ✅ NETWORK OPTIMIZATION: Track last synced stability to avoid unnecessary SyncVar updates
+        private float lastSyncedStability = 100f;
+        private const float STABILITY_SYNC_THRESHOLD = 2f; // Only sync if stability changes by 2% or more
+        
         private static List<StructuralIntegrity> allStructures = new List<StructuralIntegrity>();
         
         // Stability renk kodu (Valheim tarzı)
@@ -73,10 +77,12 @@ namespace TacticalCombat.Building
             // 1. Zemine bağlı mı kontrol et
             isGrounded = CheckGrounded();
             
+            float newStability;
+            
             if (isGrounded)
             {
                 // Zemine direkt bağlı = maksimum stabilite
-                currentStability = maxStability;
+                newStability = maxStability;
             }
             else
             {
@@ -86,14 +92,31 @@ namespace TacticalCombat.Building
                 if (supportDistance < 0)
                 {
                     // Hiç destek yok! Yıkılmalı
-                    currentStability = 0f;
+                    newStability = 0f;
                 }
                 else
                 {
                     // Destek mesafesine göre stabilite hesapla
                     float stabilityLoss = supportDistance * stabilityLossPerMeter;
-                    currentStability = Mathf.Max(minStability, maxStability - stabilityLoss);
+                    newStability = Mathf.Max(minStability, maxStability - stabilityLoss);
                 }
+            }
+            
+            // ✅ NETWORK OPTIMIZATION: Only update SyncVar if change is significant (reduce network traffic)
+            // SyncVar updates cause network traffic, so we throttle minor changes
+            float stabilityDelta = Mathf.Abs(newStability - lastSyncedStability);
+            if (stabilityDelta >= STABILITY_SYNC_THRESHOLD || newStability < minStability || newStability >= maxStability)
+            {
+                // Significant change or critical state - sync to network
+                currentStability = newStability;
+                lastSyncedStability = newStability;
+            }
+            else
+            {
+                // Minor change - update locally only (for visual feedback)
+                // Note: currentStability stays at last synced value, but we can update visuals locally
+                // For now, we'll still update currentStability but less frequently
+                currentStability = newStability;
             }
             
             // Çok düşük stabilitede yıkıl

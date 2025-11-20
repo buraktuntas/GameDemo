@@ -1,6 +1,7 @@
 using UnityEngine;
 using Mirror;
 using TacticalCombat.Core;
+using static TacticalCombat.Core.GameLogger;
 
 namespace TacticalCombat.Network
 {
@@ -14,6 +15,11 @@ namespace TacticalCombat.Network
         [SerializeField] private Transform[] teamASpawnPoints;
         [SerializeField] private Transform[] teamBSpawnPoints;
 
+        [Header("Lobby Settings")]
+        [SerializeField] private GameObject lobbyManagerPrefab;
+        
+        private LobbyManager activeLobbyManager;
+
         private int teamACount = 0;
         private int teamBCount = 0;
 
@@ -23,39 +29,40 @@ namespace TacticalCombat.Network
             teamACount = 0;
             teamBCount = 0;
             
-            Debug.Log("═══════════════════════════════════════");
-            Debug.Log("✅ [NetworkGameManager SERVER] Server started!");
+            // ✅ NEW: Instantiate lobby manager on server
+            if (lobbyManagerPrefab != null)
+            {
+                var lobbyGO = Instantiate(lobbyManagerPrefab);
+                NetworkServer.Spawn(lobbyGO);
+                activeLobbyManager = lobbyGO.GetComponent<LobbyManager>();
+                LogNetwork("Lobby Manager spawned on server");
+            }
+            else
+            {
+                LogWarning("lobbyManagerPrefab is NULL! Auto-start will be enabled.");
+            }
+            
+            LogNetwork("Server started!");
 
             // ✅ FIX: Force networkAddress to empty for server (never bind to specific IP)
             if (!string.IsNullOrEmpty(networkAddress) && networkAddress != "0.0.0.0")
             {
-                Debug.LogWarning($"⚠️ [NetworkGameManager] Server networkAddress was '{networkAddress}' - forcing to empty (all interfaces)");
+                LogWarning($"Server networkAddress was '{networkAddress}' - forcing to empty (all interfaces)");
                 networkAddress = ""; // Force bind to all interfaces
             }
 
-            Debug.Log($"   Network Address: {(string.IsNullOrEmpty(networkAddress) ? "ALL INTERFACES (0.0.0.0)" : networkAddress)}");
-            
             var kcpTransport = transport as kcp2k.KcpTransport;
             if (kcpTransport != null)
             {
-                Debug.Log($"   Port: {kcpTransport.port}");
-                Debug.Log($"   DualMode: {kcpTransport.DualMode} (IPv4/IPv6 support)");
-                Debug.Log($"   ✅ Server is listening on ALL network interfaces (0.0.0.0:{kcpTransport.port})");
+                LogNetwork($"Server listening on 0.0.0.0:{kcpTransport.port} (Max: {maxConnections} connections)");
             }
             else
             {
-                Debug.Log($"   Port: {(transport != null ? "Unknown" : "No Transport")}");
+                LogNetwork($"Port: {(transport != null ? "Unknown" : "No Transport")}, Max Connections: {maxConnections}");
             }
-            
-            Debug.Log($"   Max Connections: {maxConnections}");
 
-            // ✅ CRITICAL FIX: Help message for LAN play
-            Debug.Log("");
-            Debug.Log("🌐 [NetworkGameManager] LAN MULTIPLAYER SETUP:");
-            Debug.Log($"   HOST PC (this machine): Keep networkAddress EMPTY");
-            Debug.Log($"   CLIENT PC: Set networkAddress to this PC's IP");
-
-            // Show local IP addresses
+            // ✅ CRITICAL FIX: Help message for LAN play (only in development)
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
             try
             {
                 string localIPs = "";
@@ -69,12 +76,11 @@ namespace TacticalCombat.Network
                 }
                 if (!string.IsNullOrEmpty(localIPs))
                 {
-                    Debug.Log($"   📍 This PC's LAN IP addresses:\n{localIPs}");
+                    LogNetwork($"LAN IP addresses:\n{localIPs}");
                 }
             }
             catch { }
-
-            Debug.Log("═══════════════════════════════════════");
+            #endif
         }
 
         public override void OnStopServer()
@@ -86,12 +92,22 @@ namespace TacticalCombat.Network
 
         public override void OnServerAddPlayer(NetworkConnectionToClient conn)
         {
-            Debug.Log("═══════════════════════════════════════");
-            Debug.Log($"🎮 OnServerAddPlayer ÇAĞRILDI - ConnectionID: {conn.connectionId}");
+            LogNetwork($"OnServerAddPlayer - ConnectionID: {conn.connectionId}");
+
+            // ✅ NEW: Register player in lobby
+            if (activeLobbyManager != null)
+            {
+                // Generate a default player name (you can customize this)
+                string playerName = $"Player{conn.connectionId}";
+                
+                // You can also get player name from connection data if you set it up
+                // For example, using NetworkAuthenticator or custom data
+                
+                activeLobbyManager.RegisterPlayer(conn, playerName);
+            }
 
             // Determine team (balance teams)
             Team assignedTeam = teamACount <= teamBCount ? Team.TeamA : Team.TeamB;
-            Debug.Log($"   Atanan Team: {assignedTeam}");
 
             // Get spawn point
             Transform spawnPoint = GetSpawnPoint(assignedTeam);
@@ -99,22 +115,19 @@ namespace TacticalCombat.Network
             // ✅ CRITICAL FIX: Check spawn point before using it
             if (spawnPoint == null)
             {
-                Debug.LogError("❌ Spawn point is null! Cannot spawn player.");
+                LogError("Spawn point is null! Cannot spawn player.");
                 return;
             }
-            
-            Debug.Log($"   Spawn Point: {spawnPoint.position}");
 
             // ✅ FIX: Ensure playerPrefab is valid
             if (playerPrefab == null)
             {
-                Debug.LogError("❌ Player prefab is null! Cannot spawn player.");
+                LogError("Player prefab is null! Cannot spawn player.");
                 return;
             }
 
             // Spawn player
             GameObject player = Instantiate(playerPrefab, spawnPoint.position, spawnPoint.rotation);
-            Debug.Log($"   Player GameObject oluşturuldu: {player.name}");
 
             // Assign team (role will be selected by player)
             var playerController = player.GetComponent<Player.PlayerController>();
@@ -122,23 +135,18 @@ namespace TacticalCombat.Network
             {
                 playerController.team = assignedTeam;
                 playerController.role = RoleId.Builder; // Default, can be changed in lobby
-                Debug.Log($"   PlayerController team/role atandı");
             }
 
-            // KRITIK: NetworkIdentity kontrolü
+            // ✅ CRITICAL: NetworkIdentity kontrolü
             var netIdentity = player.GetComponent<NetworkIdentity>();
             if (netIdentity == null)
             {
-                Debug.LogError("   ❌ NetworkIdentity YOK! Player spawn edilemez!");
-                Debug.LogError("   Player prefab'a NetworkIdentity component eklemelisiniz!");
+                LogError("NetworkIdentity YOK! Player spawn edilemez! Player prefab'a NetworkIdentity component eklemelisiniz!");
                 Destroy(player); // Cleanup
                 return; // ✅ FIX: STOP execution if no NetworkIdentity!
             }
 
-            Debug.Log($"   NetworkIdentity VAR - NetID: {netIdentity.netId}");
-
             NetworkServer.AddPlayerForConnection(conn, player);
-            Debug.Log($"   ✅ NetworkServer.AddPlayerForConnection çağrıldı");
 
             // Update team counts
             if (assignedTeam == Team.TeamA)
@@ -146,13 +154,61 @@ namespace TacticalCombat.Network
             else
                 teamBCount++;
 
-            Debug.Log($"   📊 SONUÇ: Team A: {teamACount}, Team B: {teamBCount}");
-            Debug.Log("═══════════════════════════════════════\n");
+            LogNetwork($"Player spawned - Team: {assignedTeam}, Team A: {teamACount}, Team B: {teamBCount}");
 
             // ✅ FIX: Sync existing scene state to newly joined player
             SyncSceneStateToPlayer(conn);
 
-            // If enough players, could auto-start match
+            // ✅ CRITICAL FIX: Do NOT auto-start match if LobbyManager exists
+            // Lobby system will handle game start when host clicks "Start Game"
+            // Check both activeLobbyManager and LobbyManager.Instance (in case prefab wasn't assigned)
+            // ✅ CRITICAL: Also check if MatchManager is in Lobby phase (prevents auto-start if match already started)
+            bool lobbySystemActive = (activeLobbyManager != null) || (LobbyManager.Instance != null);
+            bool isInLobbyPhase = false;
+            
+            if (MatchManager.Instance != null)
+            {
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                isInLobbyPhase = (currentPhase == Phase.Lobby);
+            }
+            
+            // ✅ CRITICAL FIX: Hide player visuals immediately when spawned in lobby phase
+            // This prevents the game world from being visible when lobby UI is shown
+            if (lobbySystemActive || isInLobbyPhase)
+            {
+                var playerVisuals = player.GetComponent<Player.PlayerVisuals>();
+                if (playerVisuals != null)
+                {
+                    Renderer[] renderers = player.GetComponentsInChildren<Renderer>();
+                    foreach (Renderer renderer in renderers)
+                    {
+                        if (renderer.GetComponent<Camera>() == null && 
+                            renderer.GetComponent<Canvas>() == null)
+                        {
+                            renderer.enabled = false;
+                        }
+                    }
+                    LogNetwork("Player visuals hidden - in lobby phase");
+                }
+            }
+            
+            // ✅ CRITICAL FIX: NEVER auto-start when LobbyManager exists
+            // GDD-compliant: Host must click "Start Game" in lobby
+            if (lobbySystemActive)
+            {
+                LogNetwork("LobbyManager is active - auto-start DISABLED (GDD-compliant: Host must click 'Start Game')");
+                return; // Exit early - no auto-start
+            }
+            
+            // ✅ CRITICAL: Also check if match already started
+            if (!isInLobbyPhase)
+            {
+                LogNetwork($"Match already started (phase: {MatchManager.Instance?.GetCurrentPhase()}) - skipping auto-start");
+                return; // Exit early - match already running
+            }
+            
+            // ✅ LEGACY MODE: Only auto-start if NO LobbyManager (backward compatibility)
+            LogWarning("No LobbyManager found - using legacy auto-start mode");
             CheckAutoStart();
         }
 
@@ -166,10 +222,8 @@ namespace TacticalCombat.Network
             // Find all structures (BuildableStructure components)
             var structures = FindObjectsByType<Building.Structure>(FindObjectsSortMode.None);
 
-            Debug.Log($"📡 [NetworkGameManager] Syncing {structures.Length} structures to new player (Conn: {conn.connectionId})");
-
+            LogNetwork($"Syncing {structures.Length} structures to new player (Conn: {conn.connectionId})");
             // Note: Structures with NetworkIdentity are automatically synced by Mirror
-            // This log helps verify the sync is happening
         }
 
         /// <summary>
@@ -189,6 +243,12 @@ namespace TacticalCombat.Network
         {
             Debug.Log($"⚠️ [NetworkGameManager SERVER] Client disconnecting! ConnectionID: {conn.connectionId}");
 
+            // ✅ NEW: Unregister player from lobby
+            if (activeLobbyManager != null)
+            {
+                activeLobbyManager.UnregisterPlayer((uint)conn.connectionId); // ✅ FIX: Cast to uint
+            }
+
             // ✅ FIX: Cleanup player state before disconnect
             if (conn.identity != null)
             {
@@ -206,13 +266,6 @@ namespace TacticalCombat.Network
                     {
                         MatchManager.Instance.UnregisterPlayer(player.netId);
                         Debug.Log($"✅ [NetworkGameManager] Player {player.netId} unregistered from MatchManager");
-                    }
-
-                    // ✅ FIX: Remove from LobbyManager if in lobby
-                    if (Network.LobbyManager.Instance != null)
-                    {
-                        // LobbyManager will handle room cleanup
-                        Debug.Log($"✅ [NetworkGameManager] Player {player.netId} will be cleaned from lobby");
                     }
                 }
             }
@@ -237,6 +290,89 @@ namespace TacticalCombat.Network
             Debug.Log($"   Is Client: {NetworkClient.isConnected}");
             Debug.Log($"   Is Server: {NetworkServer.active}");
             Debug.Log("═══════════════════════════════════════");
+            
+            // ✅ NEW: If we're the host, ensure we're registered in the lobby
+            // This handles the case where StartHost() doesn't automatically call OnServerAddPlayer
+            if (NetworkServer.active && NetworkClient.isConnected)
+            {
+                StartCoroutine(RegisterHostInLobby());
+            }
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Register host in lobby after a short delay (wait for LobbyManager to be ready)
+        /// </summary>
+        private System.Collections.IEnumerator RegisterHostInLobby()
+        {
+            // Wait for LobbyManager to be ready
+            yield return new WaitForSeconds(0.5f);
+            
+            // Try to find LobbyManager
+            LobbyManager lobbyManager = activeLobbyManager ?? LobbyManager.Instance;
+            if (lobbyManager == null)
+            {
+                LogWarning("LobbyManager not found - cannot register host");
+                yield break;
+            }
+            
+            // Find host connection (connection with ID 0 or the first connection)
+            NetworkConnectionToClient hostConnection = null;
+            if (NetworkServer.connections.Count > 0)
+            {
+                // Host is typically the first connection (or connection with ID 0)
+                foreach (var conn in NetworkServer.connections.Values)
+                {
+                    if (conn != null && conn.connectionId == 0)
+                    {
+                        hostConnection = conn;
+                        break;
+                    }
+                }
+                
+                // If no connection with ID 0, use the first connection
+                if (hostConnection == null)
+                {
+                    foreach (var conn in NetworkServer.connections.Values)
+                    {
+                        if (conn != null)
+                        {
+                            hostConnection = conn;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (hostConnection != null)
+            {
+                // Check if host is already registered
+                var allPlayers = lobbyManager.GetAllPlayers();
+                bool alreadyRegistered = false;
+                foreach (var player in allPlayers)
+                {
+                    if (player.connectionId == (uint)hostConnection.connectionId)
+                    {
+                        alreadyRegistered = true;
+                        break;
+                    }
+                }
+                
+                if (!alreadyRegistered)
+                {
+                    // Register host with a default name
+                    string hostName = System.Environment.UserName ?? "Host";
+                    lobbyManager.RegisterPlayer(hostConnection, hostName);
+                    LogNetwork($"✅ Host registered in lobby: {hostName} (ConnectionID: {hostConnection.connectionId})");
+                }
+                else
+                {
+                    LogNetwork("Host already registered in lobby");
+                }
+            }
+            else
+            {
+                LogWarning("Could not find host connection - cannot register host in lobby");
+            }
         }
 
         /// <summary>
@@ -318,8 +454,36 @@ namespace TacticalCombat.Network
 
         private void CheckAutoStart()
         {
-            Debug.Log($"🎮 CheckAutoStart: TeamA={teamACount}, TeamB={teamBCount}");
+            Debug.Log($"🎮 [LEGACY] CheckAutoStart: TeamA={teamACount}, TeamB={teamBCount}");
 
+            // ✅ CRITICAL FIX: This method should NEVER run when LobbyManager exists
+            // Double-check to prevent accidental auto-start
+            bool lobbySystemActive = (activeLobbyManager != null) || (LobbyManager.Instance != null);
+            
+            if (lobbySystemActive)
+            {
+                Debug.LogError("❌ [NetworkGameManager] CheckAutoStart() called but LobbyManager exists! This should never happen!");
+                Debug.LogError("   Aborting auto-start - lobby system should handle game start");
+                return; // ABORT - lobby system should handle this
+            }
+            
+            // ✅ CRITICAL: Check if MatchManager is in Lobby phase
+            bool isInLobbyPhase = false;
+            if (MatchManager.Instance != null)
+            {
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                isInLobbyPhase = (currentPhase == Phase.Lobby);
+            }
+            
+            if (!isInLobbyPhase)
+            {
+                Debug.Log($"✅ [NetworkGameManager] Match already started (phase: {MatchManager.Instance?.GetCurrentPhase()}) - auto-start disabled");
+                return; // Match already started, don't auto-start again
+            }
+
+            // ✅ LEGACY MODE: Only runs when NO LobbyManager exists (backward compatibility)
+            Debug.LogWarning("⚠️ [LEGACY MODE] Auto-starting match (no lobby system detected)");
+            
             // ✅ FIX: In editor/development, allow single-player testing
             // Production: Require at least 1 player per team
             bool canStart = false;
@@ -349,7 +513,7 @@ namespace TacticalCombat.Network
 
                 if (currentPhase == Phase.Lobby)
                 {
-                    Debug.Log($"🎮 Starting match in 3 seconds...");
+                    Debug.Log($"🎮 [LEGACY] Starting match in 3 seconds...");
                     Invoke(nameof(StartMatch), 3f);
                 }
                 else

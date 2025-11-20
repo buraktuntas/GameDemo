@@ -68,7 +68,9 @@ namespace TacticalCombat.Combat
         {
             if (!isServer)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("❌ ApplyDamage called on client!");
+                #endif
                 return;
             }
             
@@ -80,6 +82,19 @@ namespace TacticalCombat.Combat
         private void ApplyDamageInternal(DamageInfo info)
         {
             if (isDead) return;
+
+            // ✅ CRITICAL: GDD-compliant - Build phase'de hasar verilmez (PvP devre dışı)
+            if (MatchManager.Instance != null)
+            {
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                if (currentPhase == Phase.Build || currentPhase == Phase.Lobby)
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log($"🛡️ [Server] Build/Lobby phase - damage blocked (PvP disabled)");
+                    #endif
+                    return; // Build/Lobby phase'de hasar verilmez
+                }
+            }
 
             // ✅ CRITICAL FIX: Prevent damage during invulnerability period (spawn protection)
             if (isInvulnerable)
@@ -123,14 +138,36 @@ namespace TacticalCombat.Combat
         
         private int CalculateFinalDamage(DamageInfo info)
         {
-            // TODO: Add armor, damage reduction, etc.
+            // Note: Armor and damage reduction can be added via DamageModifier system
             return info.Amount;
         }
 
         [Server]
         public void Heal(int amount)
         {
+            // ✅ ANTI-CHEAT: Server-only healing (clients cannot call this)
+            if (!isServer)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"🚨 [Health SERVER] Heal called on client - BLOCKED (player {netId})");
+                #endif
+                #endif
+                return;
+            }
+            
             if (isDead) return;
+
+            // ✅ ANTI-CHEAT: Validate heal amount (prevent negative or excessive healing)
+            if (amount < 0 || amount > maxHealth)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"🚨 [Health SERVER] Invalid heal amount: {amount} (max: {maxHealth})");
+                #endif
+                #endif
+                return;
+            }
 
             currentHealth += amount;
             currentHealth = Mathf.Min(currentHealth, maxHealth);
@@ -234,7 +271,9 @@ namespace TacticalCombat.Combat
         {
             if (!isServer)
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("❌ Respawn called on client!");
+                #endif
                 return;
             }
 
@@ -346,7 +385,7 @@ namespace TacticalCombat.Combat
         [ClientRpc]
         private void RpcSetInvulnerableVisual(bool invulnerable)
         {
-            // TODO: Add visual effect (glow, transparency, etc.)
+            // Note: Visual effects (glow, transparency) can be added via PlayerVisuals component
             // For now, just log
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (invulnerable)

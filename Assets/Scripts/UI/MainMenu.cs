@@ -5,6 +5,7 @@ using UnityEngine.EventSystems;
 using Mirror;
 using UnityEngine.SceneManagement;
 using System.Linq;
+using TacticalCombat.Core;
 
 namespace TacticalCombat.UI
 {
@@ -28,7 +29,8 @@ namespace TacticalCombat.UI
         [SerializeField] private Button backButton;
 
         [Header("Settings")]
-        [SerializeField] private string gameSceneName = "GameScene";
+        // ✅ REMOVED: gameSceneName - not currently used (lobby system handles scene transitions)
+        // ✅ REMOVED: lobbySceneName - not currently used (future feature for lobby scene transition)
 
         private NetworkManager networkManager;
         
@@ -43,101 +45,8 @@ namespace TacticalCombat.UI
                     Cursor.visible = true;
                 }
                 
-                // ✅ DEBUG: Log mouse click to see if clicks are being registered
-                if (Input.GetMouseButtonDown(0))
-                {
-                    Debug.Log($"🖱️ MOUSE CLICK DETECTED at position: {Input.mousePosition}");
-                    Debug.Log($"   EventSystem.current: {EventSystem.current?.name ?? "NULL"}");
-                    Debug.Log($"   Cursor lock: {Cursor.lockState}, visible: {Cursor.visible}");
-                    
-                    // ✅ CRITICAL: Test raycast manually
-                    if (EventSystem.current != null)
-                    {
-                        PointerEventData pointerData = new PointerEventData(EventSystem.current);
-                        pointerData.position = Input.mousePosition;
-                        
-                        var results = new System.Collections.Generic.List<RaycastResult>();
-                        EventSystem.current.RaycastAll(pointerData, results);
-                        
-                        Debug.Log($"   Raycast results: {results.Count}");
-                        foreach (var result in results)
-                        {
-                            Debug.Log($"     - {result.gameObject.name} (Button: {result.gameObject.GetComponent<Button>() != null})");
-                        }
-                        
-                        if (results.Count == 0)
-                        {
-                            Debug.LogError("   ❌ NO UI ELEMENTS HIT BY RAYCAST! This means clicks won't work!");
-                        }
-                        else
-                        {
-                            // ✅ CRITICAL: Check if blocker is blocking the click
-                            var firstResult = results[0];
-                            if (firstResult.gameObject.name.Contains("Blocker") || 
-                                firstResult.gameObject.name == "Blocker")
-                            {
-                                Debug.LogError($"   ❌ BLOCKER IS BLOCKING CLICKS! First hit: {firstResult.gameObject.name}");
-                                Debug.LogError($"   Solution: Disabling blocker GameObject...");
-                                
-                                // Find and disable all blockers
-                                var blockers = FindObjectsByType<GameObject>(FindObjectsSortMode.None)
-                                    .Where(g => g.name == "Blocker" && g.activeSelf)
-                                    .ToArray();
-                                
-                                foreach (var blocker in blockers)
-                                {
-                                    // Only disable if it's not part of MainMenu
-                                    if (!blocker.transform.IsChildOf(transform))
-                                    {
-                                        blocker.SetActive(false);
-                                        Debug.Log($"   ✅ Disabled blocker: {blocker.name} at {GetFullPath(blocker.transform)}");
-                                    }
-                                }
-                                
-                                // Note: Cannot retry raycast in Update (not a coroutine)
-                                // Blocker will be disabled on next click
-                            }
-                            
-                            if (hostButton != null)
-                            {
-                                bool hostButtonHit = false;
-                                foreach (var result in results)
-                                {
-                                    if (result.gameObject == hostButton.gameObject || 
-                                        result.gameObject.transform.IsChildOf(hostButton.transform))
-                                    {
-                                        hostButtonHit = true;
-                                        break;
-                                    }
-                                }
-                                
-                                if (hostButtonHit)
-                                {
-                                    Debug.Log($"   ✅ Host button WAS HIT by raycast!");
-                                    
-                                    // ✅ CRITICAL: If host button is hit but not first, manually trigger click
-                                    if (results[0].gameObject != hostButton.gameObject && 
-                                        !results[0].gameObject.transform.IsChildOf(hostButton.transform))
-                                    {
-                                        Debug.LogWarning($"   ⚠️ Host button hit but blocked by: {results[0].gameObject.name}");
-                                        Debug.LogWarning($"   Manually triggering Host button click...");
-                                        OnHostButtonClicked();
-                                    }
-                                }
-                                else
-                                {
-                                    Debug.LogWarning($"   ⚠️ Host button was NOT hit - something else is blocking it!");
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Manually test if button would receive click
-                    if (hostButton != null && hostButton.interactable)
-                    {
-                        Debug.Log($"   Host button is interactable and should receive click");
-                    }
-                }
+                // ✅ PRODUCTION: Removed verbose debug logging from Update() (performance)
+                // Debug logging moved to GameLogger.LogUI() with #if UNITY_EDITOR guards
             }
             
             if (joinPanel != null && joinPanel.activeSelf)
@@ -170,7 +79,7 @@ namespace TacticalCombat.UI
             var currentModule = EventSystem.current.currentInputModule;
             if (currentModule == null)
             {
-                Debug.LogWarning("⚠️ [MainMenu] InputModule still null after frame wait, trying manual activation...");
+                GameLogger.LogWarning("⚠️ [MainMenu] InputModule still null after frame wait, trying manual activation...");
                 // Try to manually set the input module
                 if (standaloneModule != null)
                 {
@@ -199,15 +108,15 @@ namespace TacticalCombat.UI
             // Check if EventSystem is processing
             if (EventSystem.current == null)
             {
-                Debug.LogError("❌ EventSystem.current is NULL!");
+                GameLogger.LogError("❌ EventSystem.current is NULL!");
                 yield break;
             }
             
             var inputModule = EventSystem.current.currentInputModule;
             if (inputModule == null)
             {
-                Debug.LogError("❌ EventSystem has NO InputModule! This will prevent clicks!");
-                Debug.LogError("   Trying to fix...");
+                GameLogger.LogError("❌ EventSystem has NO InputModule! This will prevent clicks!");
+                GameLogger.LogError("   Trying to fix...");
                 
                 var standaloneModule = EventSystem.current.GetComponent<StandaloneInputModule>();
                 if (standaloneModule != null)
@@ -234,7 +143,7 @@ namespace TacticalCombat.UI
                 
                 if (raycasters.Length == 0)
                 {
-                    Debug.LogError("❌ NO GraphicRaycaster found! Buttons won't receive clicks!");
+                    GameLogger.LogError("❌ NO GraphicRaycaster found! Buttons won't receive clicks!");
                 }
             }
         }
@@ -248,7 +157,7 @@ namespace TacticalCombat.UI
             networkManager = NetworkManager.singleton;
             if (networkManager == null)
             {
-                Debug.LogError("❌ NetworkManager not found!");
+                GameLogger.LogError("❌ NetworkManager not found!");
                 return;
             }
 
@@ -273,18 +182,18 @@ namespace TacticalCombat.UI
             }
             else
             {
-                Debug.LogError("❌ Host button is NULL! Assign in Inspector.");
+                GameLogger.LogError("❌ Host button is NULL! Assign in Inspector.");
             }
 
             if (joinButton != null)
             {
                 joinButton.onClick.RemoveAllListeners();
                 joinButton.onClick.AddListener(OnJoinButtonClicked);
-                Debug.Log($"✅ Join button listener added (listeners now: {joinButton.onClick.GetPersistentEventCount()})");
+                GameLogger.LogUI($"✅ Join button listener added (listeners now: {joinButton.onClick.GetPersistentEventCount()})");
             }
             else
             {
-                Debug.LogError("❌ Join button is NULL! Assign in Inspector.");
+                GameLogger.LogError("❌ Join button is NULL! Assign in Inspector.");
             }
 
             if (quitButton != null)
@@ -314,15 +223,38 @@ namespace TacticalCombat.UI
             // ✅ CRITICAL FIX: Verify buttons are properly configured
             VerifyButtonConfiguration();
             
+            // ✅ CRITICAL: Hide LobbyUI at start (MainMenu should be visible)
+            HideLobbyUIAtStart();
+
             // Show main menu by default
             ShowMainMenu();
+        }
+
+        /// <summary>
+        /// ✅ NEW: Hide LobbyUI at start to prevent overlap
+        /// </summary>
+        private void HideLobbyUIAtStart()
+        {
+            var lobbyUI = FindFirstObjectByType<LobbyUI>();
+            if (lobbyUI != null)
+            {
+                lobbyUI.HidePanel();
+                Debug.Log("✅ [MainMenu] LobbyUI hidden at start");
+            }
+
+            // Also hide GameModeSelection
+            var gameModeSelection = FindFirstObjectByType<GameModeSelectionUI>();
+            if (gameModeSelection != null)
+            {
+                gameModeSelection.HidePanel();
+            }
         }
         
         private void VerifyButtonConfiguration()
         {
-            Debug.Log("═══════════════════════════════════════");
-            Debug.Log("🔍 VERIFYING BUTTON CONFIGURATION");
-            Debug.Log("═══════════════════════════════════════");
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            GameLogger.LogUI("Verifying button configuration");
+            #endif
             
             Button[] buttons = { hostButton, joinButton, quitButton, connectButton, backButton };
             string[] names = { "Host", "Join", "Quit", "Connect", "Back" };
@@ -331,36 +263,23 @@ namespace TacticalCombat.UI
             {
                 if (buttons[i] == null)
                 {
-                    Debug.LogError($"❌ {names[i]} button is NULL!");
+                    GameLogger.LogError($"{names[i]} button is NULL!");
                     continue;
                 }
                 
-                Debug.Log($"\n✅ {names[i]} Button:");
-                Debug.Log($"   - Active: {buttons[i].gameObject.activeInHierarchy}");
-                Debug.Log($"   - Interactable: {buttons[i].interactable}");
-                Debug.Log($"   - Enabled: {buttons[i].enabled}");
-                Debug.Log($"   - Listeners: {buttons[i].onClick.GetPersistentEventCount()}");
-                
                 Image img = buttons[i].GetComponent<Image>();
-                if (img != null)
+                if (img != null && !img.raycastTarget)
                 {
-                    Debug.Log($"   - Image RaycastTarget: {img.raycastTarget}");
-                    if (!img.raycastTarget)
-                    {
-                        Debug.LogError($"      ⚠️ RAYCAST TARGET IS FALSE! Button won't receive clicks!");
-                        img.raycastTarget = true; // Fix it
-                        Debug.Log($"      ✅ Fixed: raycastTarget set to true");
-                    }
+                    GameLogger.LogError($"RAYCAST TARGET IS FALSE! Button won't receive clicks!");
+                    img.raycastTarget = true; // Fix it
                 }
                 
                 // Check if button is blocked by parent
                 if (!buttons[i].gameObject.activeInHierarchy)
                 {
-                    Debug.LogWarning($"   ⚠️ Button GameObject is INACTIVE!");
+                    GameLogger.LogWarning($"Button GameObject is INACTIVE!");
                 }
             }
-            
-            Debug.Log("═══════════════════════════════════════\n");
         }
         
         private void EnsureEventSystem()
@@ -370,12 +289,10 @@ namespace TacticalCombat.UI
                 GameObject esObj = new GameObject("EventSystem");
                 esObj.AddComponent<EventSystem>();
                 esObj.AddComponent<StandaloneInputModule>();
-                Debug.Log("✅ [MainMenu] EventSystem created");
+                GameLogger.LogUI("EventSystem created");
             }
             else
             {
-                Debug.Log($"✅ [MainMenu] EventSystem exists: {EventSystem.current.name}");
-                
                 // ✅ CRITICAL FIX: Check and fix InputModule
                 var standaloneModule = EventSystem.current.GetComponent<StandaloneInputModule>();
                 var inputSystemModule = EventSystem.current.GetComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
@@ -384,49 +301,25 @@ namespace TacticalCombat.UI
                 {
                     // NO input module - add StandaloneInputModule
                     EventSystem.current.gameObject.AddComponent<StandaloneInputModule>();
-                    Debug.Log("✅ [MainMenu] StandaloneInputModule added to EventSystem");
+                    GameLogger.LogUI("StandaloneInputModule added to EventSystem");
                 }
                 else if (inputSystemModule != null && standaloneModule == null)
                 {
                     // Only InputSystemUIInputModule exists - that's fine but log it
-                    Debug.Log($"⚠️ [MainMenu] EventSystem has InputSystemUIInputModule (no StandaloneInputModule)");
-                    Debug.Log($"   If clicks don't work, try disabling InputSystemUIInputModule or configure it properly");
+                    GameLogger.LogWarning("EventSystem has InputSystemUIInputModule (no StandaloneInputModule). If clicks don't work, try disabling InputSystemUIInputModule or configure it properly");
                 }
-                else if (standaloneModule != null)
+                else if (standaloneModule != null && !standaloneModule.enabled)
                 {
-                    // StandaloneInputModule exists - ensure it's enabled
-                    if (!standaloneModule.enabled)
-                    {
-                        standaloneModule.enabled = true;
-                        Debug.Log("✅ [MainMenu] StandaloneInputModule was disabled - now enabled");
-                    }
-                    else
-                    {
-                        Debug.Log($"✅ [MainMenu] StandaloneInputModule is enabled and active");
-                    }
+                    standaloneModule.enabled = true;
+                    GameLogger.LogUI("StandaloneInputModule was disabled - now enabled");
                 }
                 
                 // ✅ CRITICAL FIX: Force EventSystem to initialize InputModule
-                // Unity needs to call Update() on EventSystem before currentInputModule is set
                 if (standaloneModule != null)
                 {
-                    // Force StandaloneInputModule to activate
                     EventSystem.current.UpdateModules();
                     EventSystem.current.SetSelectedGameObject(null); // Force refresh
-                    
-                    // Wait one frame for EventSystem to initialize (do it in coroutine)
                     StartCoroutine(EnsureInputModuleActive());
-                }
-                
-                // Check current input module (may still be null until next frame)
-                var currentModule = EventSystem.current.currentInputModule;
-                if (currentModule == null)
-                {
-                    Debug.LogWarning("⚠️ [MainMenu] EventSystem.currentInputModule is NULL (will initialize next frame)");
-                }
-                else
-                {
-                    Debug.Log($"✅ [MainMenu] Current InputModule: {currentModule.GetType().Name}");
                 }
             }
             
@@ -437,11 +330,6 @@ namespace TacticalCombat.UI
                 if (canvas.GetComponent<GraphicRaycaster>() == null)
                 {
                     canvas.gameObject.AddComponent<GraphicRaycaster>();
-                    Debug.Log("✅ [MainMenu] GraphicRaycaster added to Canvas");
-                }
-                else
-                {
-                    Debug.Log("✅ [MainMenu] GraphicRaycaster exists");
                 }
                 
                 // ✅ CRITICAL: Check Canvas sorting order - menu should be on top
@@ -455,67 +343,175 @@ namespace TacticalCombat.UI
                 
                 if (canvas.sortingOrder < highestOrder)
                 {
-                    Debug.LogWarning($"⚠️ [MainMenu] Canvas sorting order ({canvas.sortingOrder}) is lower than another canvas ({highestOrder})!");
-                    Debug.LogWarning("   Menu might be blocked by another UI!");
+                    GameLogger.LogWarning($"Canvas sorting order ({canvas.sortingOrder}) is lower than another canvas ({highestOrder})! Menu might be blocked.");
                     canvas.sortingOrder = highestOrder + 1;
-                    Debug.Log($"✅ [MainMenu] Canvas sorting order increased to {canvas.sortingOrder}");
                 }
             }
             else
             {
-                Debug.LogWarning("⚠️ [MainMenu] No Canvas found in parent hierarchy!");
+                GameLogger.LogWarning("No Canvas found in parent hierarchy!");
             }
         }
 
         private void OnHostButtonClicked()
         {
-            Debug.Log("═══════════════════════════════════════");
-            Debug.Log("🎮🎮🎮 HOST BUTTON CLICKED! 🎮🎮🎮");
-            Debug.Log("═══════════════════════════════════════");
-
-            if (networkManager != null)
+            // ✅ NEW: Play UI sound
+            if (Audio.AudioManager.Instance != null)
             {
-                // ✅ CRITICAL FIX: Host başlatılırken networkAddress'i boş bırak veya local IP kullan
-                // Server tüm interface'lerde dinlemeli, sadece localhost'ta değil
-                string currentAddress = networkManager.networkAddress;
-                
-                // Eğer localhost veya 127.0.0.1 ise, boş bırak (server tüm interface'lerde dinler)
-                if (currentAddress == "localhost" || currentAddress == "127.0.0.1")
-                {
-                    // Boş bırak - Mirror server tüm interface'lerde dinleyecek
-                    networkManager.networkAddress = "";
-                    Debug.Log("✅ [MainMenu] Host: networkAddress cleared (server will listen on all interfaces)");
-                }
-                else
-                {
-                    Debug.Log($"✅ [MainMenu] Host: Using networkAddress: {currentAddress}");
-                }
+                Audio.AudioManager.Instance.PlaySFX("button_click", 0.8f);
+            }
+            
+            GameLogger.LogUI("Host button clicked - showing lobby");
 
-                // ✅ CRITICAL FIX: Transport port kontrolü
-                var transport = networkManager.transport as kcp2k.KcpTransport;
-                if (transport != null)
-                {
-                    Debug.Log($"✅ [MainMenu] Host: Transport type: KcpTransport, Port: {transport.port}");
-                    Debug.Log($"   DualMode: {transport.DualMode} (should be true for IPv4/IPv6 support)");
-                }
-                else
-                {
-                    Debug.LogWarning("⚠️ [MainMenu] Host: Transport is not KcpTransport!");
-                }
+            // Hide Main Menu
+            if (mainMenuPanel != null)
+            {
+                mainMenuPanel.SetActive(false);
+            }
+            if (joinPanel != null)
+            {
+                joinPanel.SetActive(false);
+            }
 
-                networkManager.StartHost();
+            // ✅ SIMPLE FLOW: Direct to Lobby (game mode selection is in LobbyUI)
+            ShowLobby();
+        }
 
-                // Hide Main Menu
-                if (mainMenuPanel != null)
-                {
-                    mainMenuPanel.SetActive(false);
-                }
-
-                // Show Team Selection first (Correct flow: Team → Role)
-                ShowTeamSelection();
+        private System.Collections.IEnumerator ShowGameModeSelectionDelayed()
+        {
+            // Wait a frame to ensure network is initialized
+            yield return null;
+            
+            // ✅ CRITICAL: Use UIFlowManager for clean flow
+            if (UIFlowManager.Instance != null)
+            {
+                UIFlowManager.Instance.ShowGameModeSelection();
+            }
+            else
+            {
+                // Fallback: Direct show
+                ShowGameModeSelection();
             }
         }
 
+        /// <summary>
+        /// ✅ NEW: Show Game Mode Selection (Host only)
+        /// </summary>
+        private void ShowGameModeSelection()
+        {
+            GameLogger.LogUI("Looking for GameModeSelectionUI");
+            
+            // ✅ STEP 1: Hide MainMenu panels COMPLETELY
+            if (mainMenuPanel != null)
+            {
+                mainMenuPanel.SetActive(false);
+            }
+            if (joinPanel != null)
+            {
+                joinPanel.SetActive(false);
+            }
+            
+            // ✅ STEP 2: Hide MainMenu root GameObject if it exists
+            var mainMenuRoot = transform.Find("MainMenu");
+            if (mainMenuRoot != null)
+            {
+                mainMenuRoot.gameObject.SetActive(false);
+            }
+            
+            // ✅ STEP 3: Hide this GameObject's Canvas if it exists
+            Canvas mainMenuCanvas = GetComponentInParent<Canvas>();
+            if (mainMenuCanvas != null && mainMenuCanvas.gameObject.name.Contains("MainMenu"))
+            {
+                mainMenuCanvas.gameObject.SetActive(false);
+            }
+            
+            // ✅ STEP 4: Try multiple methods to find GameModeSelectionUI
+            GameModeSelectionUI gameModeSelection = null;
+            
+            // Method 1: FindFirstObjectByType (finds active components)
+            gameModeSelection = FindFirstObjectByType<GameModeSelectionUI>();
+            
+            // Method 2: If not found, search by GameObject name (even if inactive)
+            if (gameModeSelection == null)
+            {
+                GameObject gameModePanel = GameObject.Find("GameModeSelectionPanel");
+                if (gameModePanel != null)
+                {
+                    Debug.Log($"✅ Found GameModeSelectionPanel GameObject");
+                    gameModeSelection = gameModePanel.GetComponent<GameModeSelectionUI>();
+                    if (gameModeSelection == null)
+                    {
+                        Debug.Log("   Adding GameModeSelectionUI component...");
+                        gameModeSelection = gameModePanel.AddComponent<GameModeSelectionUI>();
+                    }
+                }
+            }
+            
+            // Method 3: Search in Canvas hierarchy
+            if (gameModeSelection == null)
+            {
+                Canvas canvas = FindFirstObjectByType<Canvas>();
+                if (canvas != null)
+                {
+                    gameModeSelection = canvas.GetComponentInChildren<GameModeSelectionUI>(true); // true = include inactive
+                }
+            }
+            
+            if (gameModeSelection != null)
+            {
+                GameLogger.LogUI($"Found GameModeSelectionUI at: {gameModeSelection.gameObject.name}");
+                gameModeSelection.ShowPanel();
+            }
+            else
+            {
+                GameLogger.LogWarning("GameModeSelectionUI not found! Going directly to Lobby...");
+                ShowLobby();
+            }
+        }
+
+        /// <summary>
+        /// ✅ NEW: Show Lobby UI
+        /// </summary>
+        private void ShowLobby()
+        {
+            GameLogger.LogUI("Looking for LobbyUI");
+            
+            // Try multiple methods to find LobbyUI
+            LobbyUI lobbyUI = FindFirstObjectByType<LobbyUI>();
+            
+            // Method 2: Search by GameObject name (even if inactive)
+            if (lobbyUI == null)
+            {
+                GameObject lobbyPanel = GameObject.Find("LobbyPanel");
+                if (lobbyPanel != null)
+                {
+                    lobbyUI = lobbyPanel.GetComponent<LobbyUI>();
+                }
+            }
+            
+            // Method 3: Search in Canvas hierarchy
+            if (lobbyUI == null)
+            {
+                Canvas canvas = FindFirstObjectByType<Canvas>();
+                if (canvas != null)
+                {
+                    lobbyUI = canvas.GetComponentInChildren<LobbyUI>(true); // true = include inactive
+                }
+            }
+            
+            if (lobbyUI != null)
+            {
+                GameLogger.LogUI($"Found LobbyUI at: {lobbyUI.gameObject.name}");
+                lobbyUI.ShowPanel();
+            }
+            else
+            {
+                GameLogger.LogError("LobbyUI not found! Cannot proceed to lobby. Please ensure LobbyPanel exists in the scene with LobbyUI component.");
+                // Don't load game scene - stay in menu
+            }
+        }
+
+        // ✅ OLD METHODS - Kept for compatibility but not used in new flow
         private void ShowRoleSelection()
         {
             // Role Selection UI'ını göster
@@ -527,8 +523,7 @@ namespace TacticalCombat.UI
             }
             else
             {
-                Debug.LogWarning("⚠️ RoleSelectionUI not found! Trying Team Selection...");
-                ShowTeamSelection();
+                GameLogger.LogWarning("⚠️ RoleSelectionUI not found!");
             }
         }
 
@@ -543,18 +538,18 @@ namespace TacticalCombat.UI
             }
             else
             {
-                Debug.LogWarning("⚠️ TeamSelectionUI not found! Loading game scene...");
-
-                // Load game scene as fallback
-                if (!string.IsNullOrEmpty(gameSceneName))
-                {
-                    SceneManager.LoadScene(gameSceneName);
-                }
+                GameLogger.LogWarning("⚠️ TeamSelectionUI not found!");
             }
         }
 
         private void OnJoinButtonClicked()
         {
+            // ✅ NEW: Play UI sound
+            if (Audio.AudioManager.Instance != null)
+            {
+                Audio.AudioManager.Instance.PlaySFX("button_click", 0.8f);
+            }
+            
             Debug.Log("═══════════════════════════════════════");
             Debug.Log("🎮🎮🎮 JOIN BUTTON CLICKED! 🎮🎮🎮");
             Debug.Log("═══════════════════════════════════════");
@@ -563,6 +558,12 @@ namespace TacticalCombat.UI
 
         private void OnConnectButtonClicked()
         {
+            // ✅ NEW: Play UI sound
+            if (Audio.AudioManager.Instance != null)
+            {
+                Audio.AudioManager.Instance.PlaySFX("button_click", 0.8f);
+            }
+            
             string ipAddress = ipAddressInput != null ? ipAddressInput.text : "localhost";
 
             if (string.IsNullOrEmpty(ipAddress))
@@ -582,20 +583,20 @@ namespace TacticalCombat.UI
                 // ✅ CRITICAL FIX: Check NetworkManager state before connecting
                 if (NetworkClient.isConnected)
                 {
-                    Debug.LogWarning("⚠️ [MainMenu] Already connected to server!");
+                    GameLogger.LogWarning("⚠️ [MainMenu] Already connected to server!");
                     return;
                 }
 
                 if (NetworkServer.active)
                 {
-                    Debug.LogWarning("⚠️ [MainMenu] Server is active, cannot start client!");
+                    GameLogger.LogWarning("⚠️ [MainMenu] Server is active, cannot start client!");
                     return;
                 }
 
                 // ✅ CRITICAL FIX: Check transport before connecting
                 if (networkManager.transport == null)
                 {
-                    Debug.LogError("❌ [MainMenu] NetworkManager has no transport! Cannot connect.");
+                    GameLogger.LogError("❌ [MainMenu] NetworkManager has no transport! Cannot connect.");
                     return;
                 }
 
@@ -608,7 +609,7 @@ namespace TacticalCombat.UI
                 }
                 else
                 {
-                    Debug.LogWarning($"⚠️ [MainMenu] Transport type: {networkManager.transport.GetType().Name}");
+                    GameLogger.LogWarning($"⚠️ [MainMenu] Transport type: {networkManager.transport.GetType().Name}");
                 }
 
                 Debug.Log($"✅ [MainMenu] Setting network address to: {ipAddress}");
@@ -629,12 +630,12 @@ namespace TacticalCombat.UI
                     joinPanel.SetActive(false);
                 }
 
-                // Show Team Selection first (Correct flow: Team → Role)
-                ShowTeamSelection();
+                // ✅ NEW FLOW: Client → Direct to Lobby
+                ShowLobby();
             }
             else
             {
-                Debug.LogError("❌ [MainMenu] NetworkManager is NULL! Cannot connect.");
+                GameLogger.LogError("❌ [MainMenu] NetworkManager is NULL! Cannot connect.");
             }
         }
 
@@ -666,6 +667,9 @@ namespace TacticalCombat.UI
                 joinPanel.SetActive(false);
             }
 
+            // ✅ NEW: Hide other UIs when showing main menu
+            HideOtherUIs();
+
             // ✅ CRITICAL FIX: Disable any blockers that might be blocking clicks
             DisableOtherUIBlockers();
 
@@ -680,6 +684,39 @@ namespace TacticalCombat.UI
             
             Debug.Log("✅ [MainMenu] Menu shown, cursor unlocked");
         }
+
+        /// <summary>
+        /// ✅ NEW: Hide other UIs when showing main menu
+        /// </summary>
+        private void HideOtherUIs()
+        {
+            // Hide LobbyUI
+            var lobbyUI = FindFirstObjectByType<LobbyUI>();
+            if (lobbyUI != null)
+            {
+                lobbyUI.HidePanel();
+            }
+
+            // Hide GameModeSelection
+            var gameModeSelection = FindFirstObjectByType<GameModeSelectionUI>();
+            if (gameModeSelection != null)
+            {
+                gameModeSelection.HidePanel();
+            }
+
+            // Hide TeamSelectionUI and RoleSelectionUI
+            var teamSelection = FindFirstObjectByType<TeamSelectionUI>();
+            if (teamSelection != null)
+            {
+                teamSelection.HidePanel();
+            }
+
+            var roleSelection = FindFirstObjectByType<RoleSelectionUI>();
+            if (roleSelection != null)
+            {
+                roleSelection.HidePanel();
+            }
+        }
         
         private void DisableOtherUIBlockers()
         {
@@ -692,9 +729,9 @@ namespace TacticalCombat.UI
             
             foreach (var blocker in blockers)
             {
-                Debug.LogWarning($"⚠️ [MainMenu] Found blocking UI: {GetFullPath(blocker.transform)}");
+                GameLogger.LogWarning($"⚠️ [MainMenu] Found blocking UI: {GetFullPath(blocker.transform)}");
                 blocker.SetActive(false);
-                Debug.Log($"✅ [MainMenu] Disabled blocker: {blocker.name}");
+                GameLogger.LogUI($"✅ [MainMenu] Disabled blocker: {blocker.name}");
             }
             
             // Also check for TeamSelectionUI and RoleSelectionUI blockers
@@ -745,7 +782,7 @@ namespace TacticalCombat.UI
             // Final check
             if (Cursor.lockState != CursorLockMode.None)
             {
-                Debug.LogWarning($"⚠️ [MainMenu] Cursor still locked after force unlock! State: {Cursor.lockState}");
+                GameLogger.LogWarning($"⚠️ [MainMenu] Cursor still locked after force unlock! State: {Cursor.lockState}");
             }
         }
 

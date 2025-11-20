@@ -1,756 +1,654 @@
-using UnityEngine;
-using Mirror;
 using System.Collections.Generic;
-using System.Linq;
+using Mirror;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using TacticalCombat.UI;
 using TacticalCombat.Core;
 
 namespace TacticalCombat.Network
 {
     /// <summary>
-    /// ✅ CLAN SYSTEM: Lobby manager for room-based matchmaking
-    /// Extends Mirror NetworkManager with room system
+    /// P2P Lobby Manager - Host manages all lobby state
+    /// Handles player join/leave, ready checks, and game start
     /// </summary>
     public class LobbyManager : NetworkBehaviour
     {
+        [Header("Lobby Settings")]
+        [SerializeField] private int maxPlayers = 8;
+        [SerializeField] private int minPlayersToStart = 2;
+        // ✅ REMOVED: gameSceneName - no longer used (we stay in the same scene)
+        [SerializeField] private bool requireAllReady = true;
+
+        [Header("References")]
+        [SerializeField] private TacticalCombat.UI.LobbyUI lobbyUI;
+
+        // ✅ NEW: Game mode (Individual = true, Team = false)
+        [SyncVar(hook = nameof(OnGameModeChanged))]
+        private bool isIndividualMode = true;
+
+        // Synchronized player list - only host can modify, all clients see
+        private readonly SyncList<LobbyPlayerData> players = new SyncList<LobbyPlayerData>();
+
+        // ✅ NEW: Cache local connection ID (set by server via RPC)
+        [SyncVar(hook = nameof(OnLocalConnectionIdChanged))]
+        private uint localConnectionId = 0;
+
+        // Events
+        public System.Action<LobbyPlayerData> OnPlayerJoined;
+        public System.Action<LobbyPlayerData> OnPlayerLeft;
+        public System.Action<LobbyPlayerData> OnPlayerUpdated;
+        public System.Action OnGameStarting;
+
+        // Singleton instance
         public static LobbyManager Instance { get; private set; }
         
-        [Header("Room Settings")]
-        [SerializeField] private int maxRooms = 50;
-        [SerializeField] private float roomTimeout = 300f; // 5 minutes
-        
-        // ✅ CRITICAL: SyncList for room list (syncs to all clients)
-        public readonly SyncList<RoomData> roomList = new SyncList<RoomData>();
-        
-        // Server-only: Room management
-        private Dictionary<uint, RoomData> rooms = new Dictionary<uint, RoomData>();
-        private Dictionary<ulong, uint> playerToRoom = new Dictionary<ulong, uint>(); // Player ID -> Room ID
-        private uint nextRoomId = 1;
-        
-        // Events
-        public System.Action<RoomData> OnRoomCreated;
-        public System.Action<uint> OnRoomDeleted;
-        public System.Action<uint, ulong> OnPlayerJoinedRoom;
-        public System.Action<uint, ulong> OnPlayerLeftRoom;
-        public System.Action<uint> OnMatchStarted;
-        
+        private void OnLocalConnectionIdChanged(uint oldId, uint newId)
+        {
+            // Connection ID changed, update local cache
+        }
+
+        #region Unity & Network Lifecycle
+
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-            }
-            else
+            if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
+                return;
             }
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
         }
-        
+
         public override void OnStartServer()
         {
             base.OnStartServer();
-            rooms.Clear();
-            playerToRoom.Clear();
-            roomList.Clear();
-            nextRoomId = 1;
             
-            // ✅ FIX: Start room cleanup coroutine
-            StartCoroutine(RoomCleanupCoroutine());
+            // Subscribe to SyncList callbacks (server-side)
+            players.Callback += OnPlayersListChanged;
             
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log("✅ [LobbyManager] Server started - Lobby system initialized");
-            #endif
+            Debug.Log("[LobbyManager] Server started - Lobby ready");
         }
-        
+
+        public override void OnStartClient()
+        {
+            base.OnStartClient();
+            
+            // Subscribe to SyncList callbacks (client-side)
+            players.Callback += OnPlayersListChanged;
+            
+            Debug.Log("[LobbyManager] Client connected to lobby");
+            
+            // Update UI with current player list
+            if (lobbyUI != null)
+            {
+                lobbyUI.RefreshPlayerList(GetAllPlayers());
+            }
+        }
+
+        public override void OnStopServer()
+        {
+            base.OnStopServer();
+            players.Callback -= OnPlayersListChanged;
+        }
+
+        public override void OnStopClient()
+        {
+            base.OnStopClient();
+            players.Callback -= OnPlayersListChanged;
+        }
+
+        #endregion
+
+        #region Player Management (Server Only)
+
         /// <summary>
-        /// ✅ FIX: Cleanup empty/inactive rooms periodically
+        /// Called when a player connects to the server
         /// </summary>
         [Server]
-        private System.Collections.IEnumerator RoomCleanupCoroutine()
+        public void RegisterPlayer(NetworkConnectionToClient conn, string playerName)
         {
-            while (true)
+            if (players.Count >= maxPlayers)
             {
-                yield return new WaitForSeconds(30f); // Check every 30 seconds
-                CleanupInactiveRooms();
-            }
-        }
-        
-        /// <summary>
-        /// ✅ FIX: Remove rooms that are empty or inactive for too long
-        /// </summary>
-        [Server]
-        private void CleanupInactiveRooms()
-        {
-            if (!isServer) return;
-            
-            List<uint> roomsToDelete = new List<uint>();
-            float currentTime = Time.time;
-            
-            foreach (var kvp in rooms)
-            {
-                RoomData room = kvp.Value;
-                
-                // Delete empty rooms
-                if (room.GetPlayerCount() == 0)
-                {
-                    roomsToDelete.Add(kvp.Key);
-                    continue;
-                }
-                
-                // Delete inactive rooms (no activity for roomTimeout seconds)
-                if (currentTime - room.lastActivity > roomTimeout && !room.isMatchStarted)
-                {
-                    roomsToDelete.Add(kvp.Key);
-                    continue;
-                }
-            }
-            
-            // Delete rooms
-            foreach (uint roomId in roomsToDelete)
-            {
-                if (rooms.TryGetValue(roomId, out RoomData room))
-                {
-                    // Remove all players from mapping
-                    foreach (var player in room.players)
-                    {
-                        playerToRoom.Remove(player.playerId);
-                    }
-                    
-                    // Remove room
-                    rooms.Remove(roomId);
-                    roomList.Remove(room);
-                    
-                    // Sync to all clients
-                    RpcRoomDeleted(roomId);
-                    
-                    OnRoomDeleted?.Invoke(roomId);
-                    
-                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    Debug.Log($"🧹 [LobbyManager] Cleaned up inactive room: {room.roomName} (ID: {roomId})");
-                    #endif
-                }
-            }
-        }
-        
-        // ═══════════════════════════════════════════════════════════
-        // ROOM CREATION & DELETION
-        // ═══════════════════════════════════════════════════════════
-        
-        /// <summary>
-        /// ✅ SERVER-ONLY: Create a new room
-        /// </summary>
-        [Command(requiresAuthority = false)]
-        public void CmdCreateRoom(string roomName, bool isPrivate, string password, NetworkConnectionToClient sender = null)
-        {
-            if (!isServer) return;
-            
-            // Validate input
-            if (string.IsNullOrEmpty(roomName))
-            {
-                TargetRoomOperationFailed(sender, "Room name cannot be empty");
+                Debug.LogWarning($"[LobbyManager] Lobby full! Cannot add player: {playerName}");
+                // Optionally disconnect the player
+                conn.Disconnect();
                 return;
             }
-            
-            if (roomName.Length < 3 || roomName.Length > 30)
-            {
-                TargetRoomOperationFailed(sender, "Room name must be 3-30 characters");
-                return;
-            }
-            
-            // Check server limit
-            if (rooms.Count >= maxRooms)
-            {
-                TargetRoomOperationFailed(sender, "Server room limit reached");
-                return;
-            }
-            
-            // Get player ID
-            ulong playerId = sender.identity.netId;
-            
-            // Check if player is already in a room
-            if (playerToRoom.ContainsKey(playerId))
-            {
-                TargetRoomOperationFailed(sender, "You are already in a room");
-                return;
-            }
-            
-            // ✅ REMOVED: Clan system (clanAId, clanBId parameters removed)
-            
-            // Create room
-            RoomData newRoom = new RoomData
-            {
-                roomId = nextRoomId++,
-                roomName = roomName,
-                hostPlayerId = playerId,
-                isPrivate = isPrivate,
-                password = password
-            };
-            
-            // Add host to room (auto-assign to Team A)
-            RoomPlayer host = new RoomPlayer(playerId, GetPlayerUsername(playerId))
-            {
-                assignedTeam = Team.TeamA
-            };
-            newRoom.players.Add(host);
-            
-            // Store room
-            rooms[newRoom.roomId] = newRoom;
-            playerToRoom[playerId] = newRoom.roomId;
-            
-            // Add to sync list
-            roomList.Add(newRoom);
-            
-            // Sync to all clients
-            RpcRoomCreated(newRoom);
-            
-            OnRoomCreated?.Invoke(newRoom);
-            
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"✅ [LobbyManager] Room created: {roomName} (ID: {newRoom.roomId}) by player {playerId}");
-            #endif
-            
-            TargetRoomCreated(sender, newRoom);
-        }
-        
-        /// <summary>
-        /// ✅ SERVER-ONLY: Delete a room (host only)
-        /// </summary>
-        [Command(requiresAuthority = false)]
-        public void CmdDeleteRoom(uint roomId, ulong playerId, NetworkConnectionToClient sender = null)
-        {
-            if (!isServer) return;
-            
-            if (!rooms.TryGetValue(roomId, out RoomData room))
-            {
-                TargetRoomOperationFailed(sender, "Room not found");
-                return;
-            }
-            
-            // Only host can delete
-            if (room.hostPlayerId != playerId)
-            {
-                TargetRoomOperationFailed(sender, "Only room host can delete the room");
-                return;
-            }
-            
-            // Remove all players from mapping
-            foreach (var player in room.players)
-            {
-                playerToRoom.Remove(player.playerId);
-            }
-            
-            // Remove room
-            rooms.Remove(roomId);
-            roomList.Remove(room);
-            
-            // Sync to all clients
-            RpcRoomDeleted(roomId);
-            
-            OnRoomDeleted?.Invoke(roomId);
-            
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"🗑️ [LobbyManager] Room deleted: {room.roomName} (ID: {roomId})");
-            #endif
-        }
-        
-        // ═══════════════════════════════════════════════════════════
-        // ROOM JOINING & LEAVING
-        // ═══════════════════════════════════════════════════════════
-        
-        /// <summary>
-        /// ✅ SERVER-ONLY: Join a room
-        /// </summary>
-        [Command(requiresAuthority = false)]
-        public void CmdJoinRoom(uint roomId, string password, ulong playerId, NetworkConnectionToClient sender = null)
-        {
-            if (!isServer) return;
-            
-            if (!rooms.TryGetValue(roomId, out RoomData room))
-            {
-                TargetRoomOperationFailed(sender, "Room not found");
-                return;
-            }
-            
-            // Check if already in a room
-            if (playerToRoom.ContainsKey(playerId))
-            {
-                TargetRoomOperationFailed(sender, "You are already in a room");
-                return;
-            }
-            
-            // Check if room is full
-            if (room.IsFull())
-            {
-                TargetRoomOperationFailed(sender, "Room is full");
-                return;
-            }
-            
-            // Check if match already started
-            if (room.isMatchStarted)
-            {
-                TargetRoomOperationFailed(sender, "Match has already started");
-                return;
-            }
-            
-            // Check password if private
-            if (room.isPrivate && room.password != password)
-            {
-                TargetRoomOperationFailed(sender, "Incorrect password");
-                return;
-            }
-            
-            // ✅ REMOVED: Clan system - simple team balancing
-            // Determine team assignment (auto-balance)
-            int teamACount = room.GetClanAPlayers().Count; // Team A
-            int teamBCount = room.GetClanBPlayers().Count; // Team B
-            Team assignedTeam = teamACount <= teamBCount ? Team.TeamA : Team.TeamB;
-            
-            // Add player to room
-            RoomPlayer newPlayer = new RoomPlayer(playerId, GetPlayerUsername(playerId))
-            {
-                assignedTeam = assignedTeam
-            };
-            room.players.Add(newPlayer);
-            playerToRoom[playerId] = roomId;
-            
-            // ✅ FIX: Update last activity timestamp
-            room.lastActivity = Time.time;
 
-            // ✅ CRITICAL FIX: SyncList update requires Remove + Insert (not direct assignment)
-            int index = roomList.IndexOf(room);
-            if (index >= 0)
+            // Check if player already exists (reconnection case)
+            for (int i = 0; i < players.Count; i++)
             {
-                roomList.RemoveAt(index); // Remove old
-                roomList.Insert(index, room); // Insert new = triggers sync to clients
-            }
-            
-            // Sync to all clients
-            RpcPlayerJoinedRoom(roomId, playerId, GetPlayerUsername(playerId));
-            
-            OnPlayerJoinedRoom?.Invoke(roomId, playerId);
-            
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"✅ [LobbyManager] Player {playerId} joined room {room.roomName} (Team: {assignedTeam})");
-            #endif
-            
-            TargetRoomJoined(sender, room);
-        }
-        
-        /// <summary>
-        /// ✅ SERVER-ONLY: Leave a room
-        /// </summary>
-        [Command(requiresAuthority = false)]
-        public void CmdLeaveRoom(ulong playerId, NetworkConnectionToClient sender = null)
-        {
-            if (!isServer) return;
-            
-            if (!playerToRoom.TryGetValue(playerId, out uint roomId))
-            {
-                TargetRoomOperationFailed(sender, "You are not in a room");
-                return;
-            }
-            
-            if (!rooms.TryGetValue(roomId, out RoomData room))
-            {
-                TargetRoomOperationFailed(sender, "Room not found");
-                return;
-            }
-            
-            // Host leaving - delete room or transfer host
-            if (room.hostPlayerId == playerId)
-            {
-                // Transfer host to next player or delete room
-                if (room.players.Count > 1)
+                if (players[i].connectionId == conn.connectionId)
                 {
-                    var nextHost = room.players.FirstOrDefault(p => p.playerId != playerId);
-                    if (nextHost != null)
-                    {
-                        room.hostPlayerId = nextHost.playerId;
-
-                        // ✅ CRITICAL FIX: Update SyncList after host transfer (prevents desync)
-                        int hostTransferIndex = roomList.IndexOf(room);
-                        if (hostTransferIndex >= 0)
-                        {
-                            roomList.RemoveAt(hostTransferIndex);
-                            roomList.Insert(hostTransferIndex, room); // Triggers sync
-                        }
-
-                        RpcHostTransferred(roomId, nextHost.playerId);
-                    }
-                    else
-                    {
-                        // No other players - delete room
-                        CmdDeleteRoom(roomId, playerId, sender);
-                        return;
-                    }
-                }
-                else
-                {
-                    // Only host in room - delete room
-                    CmdDeleteRoom(roomId, playerId, sender);
+                    Debug.LogWarning($"[LobbyManager] Player {playerName} already registered");
                     return;
                 }
             }
-            
-            // Remove player
-            room.players.RemoveAll(p => p.playerId == playerId);
-            playerToRoom.Remove(playerId);
-            
-            // ✅ FIX: Update last activity timestamp
-            room.lastActivity = Time.time;
 
-            // ✅ CRITICAL FIX: SyncList update requires Remove + Insert
-            int index = roomList.IndexOf(room);
-            if (index >= 0)
-            {
-                roomList.RemoveAt(index);
-                roomList.Insert(index, room); // Triggers sync
-            }
-            
-            // Sync to all clients
-            RpcPlayerLeftRoom(roomId, playerId);
-            
-            OnPlayerLeftRoom?.Invoke(roomId, playerId);
-            
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"👋 [LobbyManager] Player {playerId} left room {room.roomName}");
-            #endif
-        }
-        
-        // ═══════════════════════════════════════════════════════════
-        // MATCH STARTING
-        // ═══════════════════════════════════════════════════════════
-        
-        /// <summary>
-        /// ✅ SERVER-ONLY: Start match (host only, when ready)
-        /// </summary>
-        [Command(requiresAuthority = false)]
-        public void CmdStartMatch(uint roomId, ulong playerId, NetworkConnectionToClient sender = null)
-        {
-            if (!isServer) return;
-            
-            if (!rooms.TryGetValue(roomId, out RoomData room))
-            {
-                TargetRoomOperationFailed(sender, "Room not found");
-                return;
-            }
-            
-            // Only host can start
-            if (room.hostPlayerId != playerId)
-            {
-                TargetRoomOperationFailed(sender, "Only room host can start the match");
-                return;
-            }
-            
-            // Check if can start
-            if (!room.CanStartMatch())
-            {
-                TargetRoomOperationFailed(sender, "Not enough players to start match");
-                return;
-            }
-            
-            // Mark room as started
-            room.isMatchStarted = true;
+            // Create player data
+            bool isHost = players.Count == 0; // First player is host
+            // ✅ NEW: Host is automatically ready (no need to click ready)
+            bool autoReady = isHost;
+            LobbyPlayerData newPlayer = new LobbyPlayerData(
+                (uint)conn.connectionId, // ✅ FIX: Cast to uint
+                playerName,
+                -1, // No team assigned yet
+                autoReady, // ✅ Host is automatically ready
+                isHost
+            );
 
-            // ✅ CRITICAL FIX: SyncList update requires Remove + Insert
-            int index = roomList.IndexOf(room);
-            if (index >= 0)
-            {
-                roomList.RemoveAt(index);
-                roomList.Insert(index, room); // Triggers sync
-            }
+            // Add to sync list (automatically syncs to all clients)
+            players.Add(newPlayer);
+
+            Debug.Log($"[LobbyManager] Player registered: {playerName} (ID: {conn.connectionId}, Host: {isHost})");
+            Debug.Log($"[LobbyManager] Total players: {players.Count}/{maxPlayers}");
+
+            // Notify this specific client of their join
+            RpcNotifyPlayerJoined(conn, newPlayer);
             
-            // Sync to all clients
-            RpcMatchStarted(roomId);
+            // ✅ NEW: Send connection ID to client
+            RpcSetLocalConnectionId(conn, (uint)conn.connectionId);
             
-            OnMatchStarted?.Invoke(roomId);
-            
-            // ✅ INTEGRATION: Notify MatchManager to start match
-            if (MatchManager.Instance != null)
-            {
-                // Register all players with MatchManager
-                foreach (var player in room.players)
-                {
-                    Team team = player.assignedTeam;
-                    if (team == Team.None)
-                    {
-                        // Auto-assign team
-                        team = room.GetClanAPlayers().Contains(player) ? Team.TeamA : Team.TeamB;
-                    }
-                    
-                    MatchManager.Instance.RegisterPlayer(player.playerId, team, player.selectedRole);
-                }
-                
-                // Start match
-                MatchManager.Instance.StartMatch();
-            }
-            
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"🎮 [LobbyManager] Match started in room {room.roomName} (ID: {roomId})");
-            #endif
-        }
-        
-        // ═══════════════════════════════════════════════════════════
-        // PLAYER STATE UPDATES (Ready, Role Selection)
-        // ═══════════════════════════════════════════════════════════
-
-        /// <summary>
-        /// ✅ CRITICAL FIX: Update player ready status (example for future use)
-        /// NOTE: Any modification to RoomPlayer properties requires SyncList update!
-        /// </summary>
-        [Command(requiresAuthority = false)]
-        public void CmdSetPlayerReady(ulong playerId, bool ready, NetworkConnectionToClient sender = null)
-        {
-            if (!isServer) return;
-
-            if (!playerToRoom.TryGetValue(playerId, out uint roomId))
-            {
-                TargetRoomOperationFailed(sender, "You are not in a room");
-                return;
-            }
-
-            if (!rooms.TryGetValue(roomId, out RoomData room))
-            {
-                TargetRoomOperationFailed(sender, "Room not found");
-                return;
-            }
-
-            // Find player in room
-            var player = room.GetPlayer(playerId);
-            if (player == null)
-            {
-                TargetRoomOperationFailed(sender, "Player not found in room");
-                return;
-            }
-
-            // Update ready status
-            player.isReady = ready;
-
-            // ✅ CRITICAL FIX: SyncList update required after modifying RoomPlayer properties
-            int index = roomList.IndexOf(room);
-            if (index >= 0)
-            {
-                roomList.RemoveAt(index);
-                roomList.Insert(index, room); // Triggers sync
-            }
-
-            // Notify clients
-            RpcPlayerReadyChanged(roomId, playerId, ready);
-
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"✅ [LobbyManager] Player {playerId} ready status: {ready}");
-            #endif
+            // ✅ DISABLED: Auto-start removed - user must click "Start Game" button
+            // CheckAutoStart(); // REMOVED - no auto-start
         }
 
         /// <summary>
-        /// ✅ CRITICAL FIX: Update player role selection (example for future use)
-        /// NOTE: Any modification to RoomPlayer properties requires SyncList update!
-        /// </summary>
-        [Command(requiresAuthority = false)]
-        public void CmdSetPlayerRole(ulong playerId, RoleId role, NetworkConnectionToClient sender = null)
-        {
-            if (!isServer) return;
-
-            if (!playerToRoom.TryGetValue(playerId, out uint roomId))
-            {
-                TargetRoomOperationFailed(sender, "You are not in a room");
-                return;
-            }
-
-            if (!rooms.TryGetValue(roomId, out RoomData room))
-            {
-                TargetRoomOperationFailed(sender, "Room not found");
-                return;
-            }
-
-            // Find player in room
-            var player = room.GetPlayer(playerId);
-            if (player == null)
-            {
-                TargetRoomOperationFailed(sender, "Player not found in room");
-                return;
-            }
-
-            // Update role
-            player.selectedRole = role;
-
-            // ✅ CRITICAL FIX: SyncList update required after modifying RoomPlayer properties
-            int index = roomList.IndexOf(room);
-            if (index >= 0)
-            {
-                roomList.RemoveAt(index);
-                roomList.Insert(index, room); // Triggers sync
-            }
-
-            // Notify clients
-            RpcPlayerRoleChanged(roomId, playerId, role);
-
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"✅ [LobbyManager] Player {playerId} selected role: {role}");
-            #endif
-        }
-
-        // ═══════════════════════════════════════════════════════════
-        // HELPER METHODS
-        // ═══════════════════════════════════════════════════════════
-
-        /// <summary>
-        /// Get player username (placeholder - should get from PlayerController)
+        /// Called when a player disconnects
         /// </summary>
         [Server]
-        private string GetPlayerUsername(ulong playerId)
+        public void UnregisterPlayer(uint connectionId)
         {
-            // TODO: Get from PlayerController or PlayerProfile
-            return $"Player_{playerId}";
-        }
-        
-        /// <summary>
-        /// Get room by ID (works on client via SyncList)
-        /// </summary>
-        public RoomData GetRoom(uint roomId)
-        {
-            // ✅ FIX: Client can access via SyncList, server via dictionary
-            if (isServer)
+            LobbyPlayerData? removedPlayer = null;
+
+            for (int i = players.Count - 1; i >= 0; i--)
             {
-                rooms.TryGetValue(roomId, out RoomData room);
-                return room;
-            }
-            else
-            {
-                // Client: Search in SyncList
-                return roomList.FirstOrDefault(r => r != null && r.roomId == roomId);
-            }
-        }
-        
-        /// <summary>
-        /// Get player's room ID (server-only, client can search SyncList)
-        /// </summary>
-        public uint GetPlayerRoomId(ulong playerId)
-        {
-            if (isServer)
-            {
-                playerToRoom.TryGetValue(playerId, out uint roomId);
-                return roomId;
-            }
-            else
-            {
-                // Client: Search in SyncList
-                foreach (var room in roomList)
+                if (players[i].connectionId == connectionId)
                 {
-                    if (room != null && room.IsPlayerInRoom(playerId))
+                    removedPlayer = players[i];
+                    players.RemoveAt(i);
+                    break;
+                }
+            }
+
+            if (removedPlayer.HasValue)
+            {
+                Debug.Log($"[LobbyManager] Player left: {removedPlayer.Value.playerName}");
+                
+                // If the host left, promote a new host
+                if (removedPlayer.Value.isHost && players.Count > 0)
+                {
+                    PromoteNewHost();
+                }
+            }
+        }
+
+        [Server]
+        private void PromoteNewHost()
+        {
+            if (players.Count == 0) return;
+
+            var newHostData = players[0];
+            newHostData.isHost = true;
+            players[0] = newHostData;
+
+            Debug.Log($"[LobbyManager] New host promoted: {newHostData.playerName}");
+        }
+
+        #endregion
+
+        #region Player Actions (Commands from Clients)
+
+        /// <summary>
+        /// Client requests to join the lobby
+        /// ✅ FIX: Mirror Command cannot have optional parameters
+        /// </summary>
+        [Command(requiresAuthority = false)]
+        public void CmdRegisterPlayer(string playerName)
+        {
+            // ✅ FIX: Get connection from Mirror's Command context
+            // Mirror automatically provides connection context via NetworkBehaviour.connectionToClient
+            if (connectionToClient == null) return;
+            
+            RegisterPlayer(connectionToClient, string.IsNullOrEmpty(playerName) ? "Player" : playerName);
+        }
+
+        /// <summary>
+        /// Client toggles ready state
+        /// ✅ FIX: Get connectionId from Command context
+        /// </summary>
+        [Command(requiresAuthority = false)]
+        public void CmdSetReady(bool ready)
+        {
+            if (connectionToClient == null) return;
+            
+            uint connectionId = (uint)connectionToClient.connectionId;
+            
+            for (int i = 0; i < players.Count; i++)
+            {
+                if (players[i].connectionId == connectionId)
+                {
+                    var playerData = players[i];
+                    playerData.isReady = ready;
+                    players[i] = playerData;
+                    
+                    Debug.Log($"[LobbyManager] Player {playerData.playerName} ready: {ready}");
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Client requests team change
+        /// ✅ FIX: Get connectionId from Command context
+        /// </summary>
+        [Command(requiresAuthority = false)]
+        public void CmdSetTeam(int teamId)
+        {
+            if (connectionToClient == null) return;
+            
+            // Validate team ID
+            if (teamId < -1 || teamId > 1)
+            {
+                Debug.LogWarning($"[LobbyManager] Invalid team ID: {teamId}");
+                return;
+            }
+
+            uint connectionId = (uint)connectionToClient.connectionId;
+
+            for (int i = 0; i < players.Count; i++)
+            {
+                if (players[i].connectionId == connectionId)
+                {
+                    var playerData = players[i];
+                    playerData.teamId = teamId;
+                    players[i] = playerData;
+                    
+                    Debug.Log($"[LobbyManager] Player {playerData.playerName} changed to team {teamId}");
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Host starts the game (only host can call this)
+        /// ✅ FIX: Mirror Command cannot have optional parameters
+        /// </summary>
+        [Command(requiresAuthority = false)]
+        public void CmdStartGame()
+        {
+            // ✅ FIX: Get connection from Mirror's Command context
+            // Mirror automatically provides connection context via NetworkBehaviour.connectionToClient
+            if (connectionToClient == null)
+            {
+                Debug.LogWarning("[LobbyManager] Could not determine caller connection!");
+                return;
+            }
+
+            uint callerConnectionId = (uint)connectionToClient.connectionId;
+
+            // Verify caller is host
+            bool isHost = false;
+            foreach (var player in players)
+            {
+                if (player.connectionId == callerConnectionId && player.isHost)
+                {
+                    isHost = true;
+                    break;
+                }
+            }
+
+            if (!isHost)
+            {
+                Debug.LogWarning($"[LobbyManager] Non-host tried to start game!");
+                return;
+            }
+
+            // ✅ TEST FIX: Allow 1 player for testing (bypass minimum check)
+            // Check minimum players (but allow 1 player for testing)
+            if (players.Count < minPlayersToStart && players.Count > 1)
+            {
+                // ✅ FIX: Use connectionToClient directly (from Command context)
+                RpcShowError(connectionToClient, $"Need at least {minPlayersToStart} players to start!");
+                return;
+            }
+            
+            // ✅ TEST FIX: Log test mode
+            if (players.Count == 1)
+            {
+                Debug.Log("[LobbyManager] TEST MODE: Starting with 1 player (testing)");
+            }
+
+            // Check if all players are ready (if required)
+            if (requireAllReady)
+            {
+                foreach (var player in players)
+                {
+                    if (!player.isReady && !player.isHost) // Host doesn't need to be ready
                     {
-                        return room.roomId;
+                        // ✅ FIX: Use connectionToClient directly (from Command context)
+                        RpcShowError(connectionToClient, $"Player {player.playerName} is not ready!");
+                        return;
                     }
                 }
-                return 0;
+            }
+
+            // All checks passed - start the game!
+            StartGame();
+        }
+
+        #endregion
+
+        #region Game Mode Management
+
+        /// <summary>
+        /// ✅ NEW: Set game mode (Individual or Team) - Host only
+        /// </summary>
+        public void SetGameMode(bool individual)
+        {
+            if (!isServer)
+            {
+                Debug.LogWarning("[LobbyManager] Only host can set game mode!");
+                return;
+            }
+
+            isIndividualMode = individual;
+            Debug.Log($"[LobbyManager] Game mode set to: {(individual ? "Individual" : "Team")}");
+        }
+
+        /// <summary>
+        /// ✅ NEW: Get current game mode
+        /// </summary>
+        public bool IsIndividualMode()
+        {
+            return isIndividualMode;
+        }
+
+        private void OnGameModeChanged(bool oldMode, bool newMode)
+        {
+            Debug.Log($"[LobbyManager] Game mode changed: {(newMode ? "Individual" : "Team")}");
+            
+            // Update UI if needed
+            if (lobbyUI != null)
+            {
+                lobbyUI.OnGameModeChanged(newMode);
+            }
+        }
+
+        #endregion
+
+        #region Game Start Logic
+
+        [Server]
+        private void StartGame()
+        {
+            Debug.Log("[LobbyManager] Starting game...");
+            
+            // ✅ CRITICAL: Show all player visuals before starting game (they were hidden in lobby)
+            RpcShowAllPlayerVisuals();
+            
+            // ✅ CRITICAL: Hide all UI before starting game
+            RpcHideAllUI();
+            
+            // ✅ CRITICAL: Start MatchManager match (not scene change - we're already in game scene)
+            if (MatchManager.Instance != null)
+            {
+                MatchManager.Instance.StartMatch();
+            }
+            else
+            {
+                Debug.LogError("[LobbyManager] MatchManager.Instance is NULL! Cannot start game.");
+            }
+            
+            // Notify all clients
+            RpcGameStarting();
+        }
+
+        /// <summary>
+        /// ✅ TEST FIX: Auto-start game if only 1 player (for testing)
+        /// </summary>
+        private void CheckAutoStart()
+        {
+            // Only auto-start if exactly 1 player (testing mode)
+            if (players.Count == 1)
+            {
+                Debug.Log("[LobbyManager] TEST MODE: Auto-starting with 1 player (testing)");
+                StartCoroutine(AutoStartDelay());
+            }
+        }
+
+        private System.Collections.IEnumerator AutoStartDelay()
+        {
+            // ✅ FIX: Wait 10 seconds for UI to settle and player to see lobby
+            // This gives time to see the lobby screen before auto-start
+            yield return new WaitForSeconds(10f);
+            
+            // Double-check we still have 1 player
+            if (players.Count == 1)
+            {
+                Debug.Log("[LobbyManager] TEST MODE: Starting game now...");
+                StartGame();
+            }
+        }
+
+        /// <summary>
+        /// ✅ NEW: Hide all UI when game starts
+        /// </summary>
+        [ClientRpc]
+        private void RpcHideAllUI()
+        {
+            if (UIFlowManager.Instance != null)
+            {
+                UIFlowManager.Instance.HideAllUI();
             }
         }
         
-        // ═══════════════════════════════════════════════════════════
-        // NETWORK SYNC (RPCs)
-        // ═══════════════════════════════════════════════════════════
-        
+        /// <summary>
+        /// ✅ NEW: Show all player visuals when game starts (they were hidden in lobby)
+        /// </summary>
         [ClientRpc]
-        private void RpcRoomCreated(RoomData room)
+        private void RpcShowAllPlayerVisuals()
         {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"📢 [LobbyManager CLIENT] Room created: {room.roomName}");
-            #endif
-            // Update UI room list
+            // Find all player controllers and show their visuals
+            var allPlayers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+            foreach (var player in allPlayers)
+            {
+                // Show all renderers (player body, weapons, etc.)
+                Renderer[] renderers = player.GetComponentsInChildren<Renderer>();
+                foreach (Renderer renderer in renderers)
+                {
+                    // Don't show camera or UI elements (they should always be visible)
+                    if (renderer.GetComponent<Camera>() == null && 
+                        renderer.GetComponent<Canvas>() == null)
+                    {
+                        renderer.enabled = true;
+                    }
+                }
+            }
+            
+            Debug.Log("[LobbyManager] All player visuals shown - game starting");
         }
-        
-        [ClientRpc]
-        private void RpcRoomDeleted(uint roomId)
+
+        #endregion
+
+        #region Client RPCs
+
+        [TargetRpc]
+        private void RpcNotifyPlayerJoined(NetworkConnection target, LobbyPlayerData playerData)
         {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"📢 [LobbyManager CLIENT] Room deleted: {roomId}");
-            #endif
-            // Update UI room list
-        }
-        
-        [ClientRpc]
-        private void RpcPlayerJoinedRoom(uint roomId, ulong playerId, string username)
-        {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"📢 [LobbyManager CLIENT] Player {username} joined room {roomId}");
-            #endif
-            // Update UI room details
-        }
-        
-        [ClientRpc]
-        private void RpcPlayerLeftRoom(uint roomId, ulong playerId)
-        {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"📢 [LobbyManager CLIENT] Player {playerId} left room {roomId}");
-            #endif
-            // Update UI room details
-        }
-        
-        [ClientRpc]
-        private void RpcMatchStarted(uint roomId)
-        {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"📢 [LobbyManager CLIENT] Match started in room {roomId}");
-            #endif
-            // Transition to game scene
-        }
-        
-        [ClientRpc]
-        private void RpcHostTransferred(uint roomId, ulong newHostId)
-        {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"📢 [LobbyManager CLIENT] Host transferred to {newHostId} in room {roomId}");
-            #endif
+            Debug.Log($"[LobbyManager] You joined the lobby as: {playerData.playerName}");
+            OnPlayerJoined?.Invoke(playerData);
         }
 
         [ClientRpc]
-        private void RpcPlayerReadyChanged(uint roomId, ulong playerId, bool ready)
+        private void RpcGameStarting()
         {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"📢 [LobbyManager CLIENT] Player {playerId} ready: {ready} in room {roomId}");
-            #endif
-            // Update UI ready status
+            Debug.Log("[LobbyManager] Game is starting!");
+            OnGameStarting?.Invoke();
+            
+            if (lobbyUI != null)
+            {
+                lobbyUI.ShowGameStarting();
+            }
         }
 
-        [ClientRpc]
-        private void RpcPlayerRoleChanged(uint roomId, ulong playerId, RoleId role)
+        [TargetRpc]
+        private void RpcShowError(NetworkConnection target, string errorMessage)
         {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"📢 [LobbyManager CLIENT] Player {playerId} selected role: {role} in room {roomId}");
-            #endif
-            // Update UI role selection
+            Debug.LogWarning($"[LobbyManager] Error: {errorMessage}");
+            
+            if (lobbyUI != null)
+            {
+                lobbyUI.ShowError(errorMessage);
+            }
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // TARGET RPCS (Client-specific responses)
-        // ═══════════════════════════════════════════════════════════
-        
         [TargetRpc]
-        private void TargetRoomCreated(NetworkConnection conn, RoomData room)
+        private void RpcSetLocalConnectionId(NetworkConnection target, uint connectionId)
         {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"✅ [LobbyManager] Room created successfully: {room.roomName}");
-            #endif
-            // Update UI - show room details
+            // ✅ NEW: Set local connection ID on client
+            localConnectionId = connectionId;
+            Debug.Log($"[LobbyManager] Local connection ID set to: {connectionId}");
         }
-        
-        [TargetRpc]
-        private void TargetRoomJoined(NetworkConnection conn, RoomData room)
+
+        #endregion
+
+        #region SyncList Callbacks
+
+        private void OnPlayersListChanged(SyncList<LobbyPlayerData>.Operation op, int index, LobbyPlayerData oldItem, LobbyPlayerData newItem)
         {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"✅ [LobbyManager] Joined room: {room.roomName}");
-            #endif
-            // Update UI - show room details
+            // This runs on all clients when the players list changes
+            
+            switch (op)
+            {
+                case SyncList<LobbyPlayerData>.Operation.OP_ADD:
+                    Debug.Log($"[LobbyManager] Player added: {newItem.playerName}");
+                    OnPlayerJoined?.Invoke(newItem);
+                    break;
+                    
+                case SyncList<LobbyPlayerData>.Operation.OP_REMOVEAT:
+                    Debug.Log($"[LobbyManager] Player removed: {oldItem.playerName}");
+                    OnPlayerLeft?.Invoke(oldItem);
+                    break;
+                    
+                case SyncList<LobbyPlayerData>.Operation.OP_SET:
+                    Debug.Log($"[LobbyManager] Player updated: {newItem.playerName}");
+                    OnPlayerUpdated?.Invoke(newItem);
+                    break;
+                    
+                case SyncList<LobbyPlayerData>.Operation.OP_CLEAR:
+                    Debug.Log($"[LobbyManager] Player list cleared");
+                    break;
+            }
+
+            // Refresh UI on any change
+            if (lobbyUI != null)
+            {
+                lobbyUI.RefreshPlayerList(GetAllPlayers());
+            }
         }
-        
-        [TargetRpc]
-        private void TargetRoomOperationFailed(NetworkConnection conn, string reason)
+
+        #endregion
+
+        #region Public Getters
+
+        public List<LobbyPlayerData> GetAllPlayers()
         {
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.LogWarning($"❌ [LobbyManager] Operation failed: {reason}");
-            #endif
-            // Show error in UI
+            return new List<LobbyPlayerData>(players);
         }
+
+        public int GetPlayerCount()
+        {
+            return players.Count;
+        }
+
+        public int GetMaxPlayers()
+        {
+            return maxPlayers;
+        }
+
+        public LobbyPlayerData? GetLocalPlayer()
+        {
+            if (!NetworkClient.active) return null;
+
+            // ✅ FIX: Use cached localConnectionId (set by server via RPC)
+            if (localConnectionId == 0)
+            {
+                // Fallback: Try to find host if we're on server
+                if (NetworkServer.active)
+                {
+                    foreach (var player in players)
+                    {
+                        if (player.isHost)
+                        {
+                            return player;
+                        }
+                    }
+                }
+                return null;
+            }
+            
+            foreach (var player in players)
+            {
+                if (player.connectionId == localConnectionId)
+                {
+                    return player;
+                }
+            }
+
+            return null;
+        }
+
+        public bool IsLocalPlayerHost()
+        {
+            var localPlayer = GetLocalPlayer();
+            return localPlayer?.isHost ?? false;
+        }
+
+        public int GetTeamPlayerCount(int teamId)
+        {
+            int count = 0;
+            foreach (var player in players)
+            {
+                if (player.teamId == teamId)
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        #endregion
+
+        #region Auto Team Balance
+
+        [Server]
+        public void AutoBalanceTeams()
+        {
+            int teamACount = GetTeamPlayerCount(0);
+            int teamBCount = GetTeamPlayerCount(1);
+
+            // Assign unassigned players to smaller team
+            for (int i = 0; i < players.Count; i++)
+            {
+                var player = players[i];
+                if (player.teamId == -1)
+                {
+                    player.teamId = teamACount <= teamBCount ? 0 : 1;
+                    players[i] = player;
+
+                    if (player.teamId == 0)
+                        teamACount++;
+                    else
+                        teamBCount++;
+                }
+            }
+
+            Debug.Log($"[LobbyManager] Teams balanced - Team A: {teamACount}, Team B: {teamBCount}");
+        }
+
+        #endregion
     }
 }
 

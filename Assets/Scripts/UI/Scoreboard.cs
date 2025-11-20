@@ -32,6 +32,25 @@ namespace TacticalCombat.UI
         private bool isVisible = false;
         private float lastUpdateTime = 0f;
         private Dictionary<ulong, GameObject> playerEntries = new Dictionary<ulong, GameObject>();
+        
+        // ✅ PERFORMANCE FIX: Cache text components per entry to avoid GetComponent calls
+        private Dictionary<ulong, PlayerEntryComponents> cachedEntryComponents = new Dictionary<ulong, PlayerEntryComponents>();
+        
+        // ✅ PERFORMANCE FIX: Cache string builder to avoid GC allocation
+        private System.Text.StringBuilder stringBuilder = new System.Text.StringBuilder(64);
+        
+        // Helper class to cache entry components
+        private class PlayerEntryComponents
+        {
+            public TextMeshProUGUI nameText;
+            public TextMeshProUGUI killsText;
+            public TextMeshProUGUI deathsText;
+            public TextMeshProUGUI assistsText;
+            public TextMeshProUGUI structuresText;
+            public TextMeshProUGUI trapKillsText;
+            public TextMeshProUGUI capturesText;
+            public TextMeshProUGUI scoreText;
+        }
 
         private void Start()
         {
@@ -116,8 +135,33 @@ namespace TacticalCombat.UI
             // Clear old entries
             ClearEntries();
 
-            // Find all players
-            PlayerController[] players = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
+            // ✅ PERFORMANCE FIX: Use NetworkServer.spawned or NetworkClient.spawned instead of FindObjectsByType
+            List<PlayerController> playersList = new List<PlayerController>();
+            
+            if (NetworkServer.active)
+            {
+                foreach (var kvp in NetworkServer.spawned)
+                {
+                    var player = kvp.Value.GetComponent<PlayerController>();
+                    if (player != null)
+                    {
+                        playersList.Add(player);
+                    }
+                }
+            }
+            else if (NetworkClient.active)
+            {
+                foreach (var kvp in NetworkClient.spawned)
+                {
+                    var player = kvp.Value.GetComponent<PlayerController>();
+                    if (player != null)
+                    {
+                        playersList.Add(player);
+                    }
+                }
+            }
+            
+            PlayerController[] players = playersList.ToArray();
 
             // Update team scores (if team mode)
             if (MatchManager.Instance != null)
@@ -149,14 +193,21 @@ namespace TacticalCombat.UI
                         MatchManager.Instance.CmdRequestAllPlayerStats();
                     }
 
+                    // ✅ PERFORMANCE FIX: Use StringBuilder to avoid GC allocation
                     if (teamAScoreText != null)
                     {
-                        teamAScoreText.text = $"TEAM A - {teamAScore}";
+                        stringBuilder.Clear();
+                        stringBuilder.Append("TEAM A - ");
+                        stringBuilder.Append(teamAScore);
+                        teamAScoreText.text = stringBuilder.ToString();
                     }
 
                     if (teamBScoreText != null)
                     {
-                        teamBScoreText.text = $"TEAM B - {teamBScore}";
+                        stringBuilder.Clear();
+                        stringBuilder.Append("TEAM B - ");
+                        stringBuilder.Append(teamBScore);
+                        teamBScoreText.text = stringBuilder.ToString();
                     }
                 }
                 else // FFA
@@ -194,6 +245,23 @@ namespace TacticalCombat.UI
                     GameObject entry = Instantiate(playerEntryPrefab, content);
                     playerEntries[player.netId] = entry;
 
+                    // ✅ PERFORMANCE FIX: Cache components on first creation
+                    if (!cachedEntryComponents.ContainsKey(player.netId))
+                    {
+                        var components = new PlayerEntryComponents
+                        {
+                            nameText = entry.transform.Find("NameText")?.GetComponent<TextMeshProUGUI>(),
+                            killsText = entry.transform.Find("KillsText")?.GetComponent<TextMeshProUGUI>(),
+                            deathsText = entry.transform.Find("DeathsText")?.GetComponent<TextMeshProUGUI>(),
+                            assistsText = entry.transform.Find("AssistsText")?.GetComponent<TextMeshProUGUI>(),
+                            structuresText = entry.transform.Find("StructuresText")?.GetComponent<TextMeshProUGUI>(),
+                            trapKillsText = entry.transform.Find("TrapKillsText")?.GetComponent<TextMeshProUGUI>(),
+                            capturesText = entry.transform.Find("CapturesText")?.GetComponent<TextMeshProUGUI>(),
+                            scoreText = entry.transform.Find("ScoreText")?.GetComponent<TextMeshProUGUI>()
+                        };
+                        cachedEntryComponents[player.netId] = components;
+                    }
+
                     // Update entry data
                     UpdatePlayerEntry(entry, player);
                 }
@@ -202,15 +270,23 @@ namespace TacticalCombat.UI
 
         private void UpdatePlayerEntry(GameObject entry, PlayerController player)
         {
-            // Find text components in entry
-            TextMeshProUGUI nameText = entry.transform.Find("NameText")?.GetComponent<TextMeshProUGUI>();
-            TextMeshProUGUI killsText = entry.transform.Find("KillsText")?.GetComponent<TextMeshProUGUI>();
-            TextMeshProUGUI deathsText = entry.transform.Find("DeathsText")?.GetComponent<TextMeshProUGUI>();
-            TextMeshProUGUI assistsText = entry.transform.Find("AssistsText")?.GetComponent<TextMeshProUGUI>();
-            TextMeshProUGUI structuresText = entry.transform.Find("StructuresText")?.GetComponent<TextMeshProUGUI>();
-            TextMeshProUGUI trapKillsText = entry.transform.Find("TrapKillsText")?.GetComponent<TextMeshProUGUI>();
-            TextMeshProUGUI capturesText = entry.transform.Find("CapturesText")?.GetComponent<TextMeshProUGUI>();
-            TextMeshProUGUI scoreText = entry.transform.Find("ScoreText")?.GetComponent<TextMeshProUGUI>();
+            // ✅ PERFORMANCE FIX: Use cached components instead of GetComponent every update
+            if (!cachedEntryComponents.TryGetValue(player.netId, out var components))
+            {
+                // Fallback: cache components if not already cached
+                components = new PlayerEntryComponents
+                {
+                    nameText = entry.transform.Find("NameText")?.GetComponent<TextMeshProUGUI>(),
+                    killsText = entry.transform.Find("KillsText")?.GetComponent<TextMeshProUGUI>(),
+                    deathsText = entry.transform.Find("DeathsText")?.GetComponent<TextMeshProUGUI>(),
+                    assistsText = entry.transform.Find("AssistsText")?.GetComponent<TextMeshProUGUI>(),
+                    structuresText = entry.transform.Find("StructuresText")?.GetComponent<TextMeshProUGUI>(),
+                    trapKillsText = entry.transform.Find("TrapKillsText")?.GetComponent<TextMeshProUGUI>(),
+                    capturesText = entry.transform.Find("CapturesText")?.GetComponent<TextMeshProUGUI>(),
+                    scoreText = entry.transform.Find("ScoreText")?.GetComponent<TextMeshProUGUI>()
+                };
+                cachedEntryComponents[player.netId] = components;
+            }
 
             // Get match stats
             // ✅ FIX: Use client-side stats cache
@@ -223,59 +299,78 @@ namespace TacticalCombat.UI
             int captures = stats?.captures ?? 0;
             int totalScore = stats?.totalScore ?? 0;
 
-            string playerName = $"Player {player.netId}";
+            // ✅ PERFORMANCE FIX: Use StringBuilder to avoid GC allocation
+            stringBuilder.Clear();
+            stringBuilder.Append("Player ");
+            stringBuilder.Append(player.netId);
+            string playerName = stringBuilder.ToString();
             float kd = deaths > 0 ? (float)kills / deaths : kills;
 
-            if (nameText != null)
+            // ✅ PERFORMANCE FIX: Use cached components and StringBuilder
+            if (components.nameText != null)
             {
-                nameText.text = playerName;
+                components.nameText.text = playerName;
 
                 // Highlight local player
                 if (player.isLocalPlayer)
                 {
-                    nameText.color = Color.yellow;
-                    nameText.fontStyle = FontStyles.Bold;
+                    components.nameText.color = Color.yellow;
+                    components.nameText.fontStyle = FontStyles.Bold;
                 }
             }
 
-            if (killsText != null)
+            if (components.killsText != null)
             {
-                killsText.text = kills.ToString();
+                stringBuilder.Clear();
+                stringBuilder.Append(kills);
+                components.killsText.text = stringBuilder.ToString();
             }
 
-            if (deathsText != null)
+            if (components.deathsText != null)
             {
-                deathsText.text = deaths.ToString();
+                stringBuilder.Clear();
+                stringBuilder.Append(deaths);
+                components.deathsText.text = stringBuilder.ToString();
             }
 
-            if (assistsText != null)
+            if (components.assistsText != null)
             {
-                assistsText.text = assists.ToString();
+                stringBuilder.Clear();
+                stringBuilder.Append(assists);
+                components.assistsText.text = stringBuilder.ToString();
             }
 
-            if (structuresText != null)
+            if (components.structuresText != null)
             {
-                structuresText.text = structures.ToString();
+                stringBuilder.Clear();
+                stringBuilder.Append(structures);
+                components.structuresText.text = stringBuilder.ToString();
             }
 
-            if (trapKillsText != null)
+            if (components.trapKillsText != null)
             {
-                trapKillsText.text = trapKills.ToString();
+                stringBuilder.Clear();
+                stringBuilder.Append(trapKills);
+                components.trapKillsText.text = stringBuilder.ToString();
             }
 
-            if (capturesText != null)
+            if (components.capturesText != null)
             {
-                capturesText.text = captures.ToString();
+                stringBuilder.Clear();
+                stringBuilder.Append(captures);
+                components.capturesText.text = stringBuilder.ToString();
             }
 
-            if (scoreText != null)
+            if (components.scoreText != null)
             {
-                scoreText.text = totalScore.ToString();
+                stringBuilder.Clear();
+                stringBuilder.Append(totalScore);
+                components.scoreText.text = stringBuilder.ToString();
                 // Highlight highest score
                 if (totalScore > 0)
                 {
-                    scoreText.color = Color.green;
-                    scoreText.fontStyle = FontStyles.Bold;
+                    components.scoreText.color = Color.green;
+                    components.scoreText.fontStyle = FontStyles.Bold;
                 }
             }
         }
@@ -292,6 +387,8 @@ namespace TacticalCombat.UI
             }
 
             playerEntries.Clear();
+            // ✅ PERFORMANCE FIX: Clear cached components when entries are destroyed
+            cachedEntryComponents.Clear();
         }
 
         /// <summary>

@@ -13,6 +13,11 @@ namespace TacticalCombat.Core
     {
         private Camera fallbackCam;
         private float nextCheckTime;
+        
+        // ✅ PERFORMANCE: Cache camera array to avoid repeated allocations
+        private Camera[] cachedCameras;
+        private float cameraListRefreshTime = 0f;
+        private const float CAMERA_LIST_REFRESH_INTERVAL = 2f; // Refresh camera list every 2s
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoCreate()
@@ -44,6 +49,10 @@ namespace TacticalCombat.Core
         {
             // Force re-check on scene change
             nextCheckTime = 0f;
+            
+            // ✅ PERFORMANCE: Invalidate camera cache on scene change
+            cachedCameras = null;
+            cameraListRefreshTime = 0f;
         }
 
         private void Update()
@@ -82,10 +91,18 @@ namespace TacticalCombat.Core
         private bool HasActiveCamera(out Camera activeCam)
         {
             activeCam = null;
-            var cams = FindObjectsByType<Camera>(FindObjectsSortMode.None);
-            for (int i = 0; i < cams.Length; i++)
+            
+            // ✅ PERFORMANCE: Refresh camera list only every 2 seconds instead of every check
+            if (cachedCameras == null || Time.unscaledTime >= cameraListRefreshTime)
             {
-                var c = cams[i];
+                cachedCameras = FindObjectsByType<Camera>(FindObjectsSortMode.None);
+                cameraListRefreshTime = Time.unscaledTime + CAMERA_LIST_REFRESH_INTERVAL;
+            }
+            
+            // Use cached array
+            for (int i = 0; i < cachedCameras.Length; i++)
+            {
+                var c = cachedCameras[i];
                 if (c != null && c.enabled && c.gameObject.activeInHierarchy)
                 {
                     activeCam = c;

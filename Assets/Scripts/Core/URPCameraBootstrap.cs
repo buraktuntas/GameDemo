@@ -35,9 +35,10 @@ namespace TacticalCombat.Core
             bootstrapCamera.cullingMask = 0; // Render nothing to save performance
             bootstrapCamera.depth = -100; // Lowest priority
 
-            var listener = go.AddComponent<AudioListener>();
-            listener.enabled = true;
-
+            // ✅ CRITICAL FIX: Don't add AudioListener to bootstrap camera
+            // Player camera will have its own AudioListener
+            // This prevents "2 audio listeners" warning
+            
             DontDestroyOnLoad(go);
 
             EnsureUrpAdditionalCameraData(bootstrapCamera);
@@ -45,41 +46,49 @@ namespace TacticalCombat.Core
             Debug.Log("🎥 [URPCameraBootstrap] Bootstrap camera created (will be destroyed when player camera is ready)");
         }
 
+        // ✅ CRITICAL PERFORMANCE FIX: Cache FPSController reference instead of FindObjectsByType every frame
+        private TacticalCombat.Player.FPSController cachedLocalFPS;
+        private float nextCheckTime = 0f;
+        private const float CHECK_INTERVAL = 0.5f; // Check every 0.5s instead of every frame
+        
         private void Update()
         {
-            // ✅ FIX: Check more frequently during early frames (player spawn)
-            int checkInterval = Time.frameCount < 600 ? 10 : 30; // First 10s: check every 10 frames, then every 30
-            if (Time.frameCount % checkInterval != 0) return;
+            // ✅ PERFORMANCE: Time-based check instead of frame-based (more consistent)
+            if (Time.unscaledTime < nextCheckTime) return;
+            nextCheckTime = Time.unscaledTime + CHECK_INTERVAL;
 
-            // If a local player's FPS camera exists, ensure it's URP-ready and remove bootstrap
-            var allFPS = FindObjectsByType<TacticalCombat.Player.FPSController>(FindObjectsSortMode.None);
-            foreach (var fps in allFPS)
+            // ✅ PERFORMANCE: Use cached reference if available
+            if (cachedLocalFPS == null)
             {
-                if (fps != null && fps.isLocalPlayer && fps.playerCamera != null)
+                // Only search once, then cache
+                var allFPS = FindObjectsByType<TacticalCombat.Player.FPSController>(FindObjectsSortMode.None);
+                foreach (var fps in allFPS)
                 {
-                    EnsureUrpAdditionalCameraData(fps.playerCamera);
-
-                    // ✅ FIX: Immediately disable bootstrap camera before destroying
-                    if (bootstrapCamera != null)
+                    if (fps != null && fps.isLocalPlayer)
                     {
-                        bootstrapCamera.enabled = false;
-
-                        // Disable AudioListener to prevent conflicts
-                        var listener = bootstrapCamera.GetComponent<AudioListener>();
-                        if (listener != null)
-                        {
-                            listener.enabled = false;
-                        }
-
-                        Destroy(bootstrapCamera.gameObject);
-                        bootstrapCamera = null;
-
-                        Debug.Log("🎥 [URPCameraBootstrap] Bootstrap camera destroyed - player camera is ready");
+                        cachedLocalFPS = fps;
+                        break; // Found it, stop searching
                     }
-
-                    Destroy(gameObject); // ✅ FIX: Destroy bootstrap completely
-                    return;
                 }
+            }
+            
+            // Check if cached FPS controller has camera ready
+            if (cachedLocalFPS != null && cachedLocalFPS.playerCamera != null)
+            {
+                EnsureUrpAdditionalCameraData(cachedLocalFPS.playerCamera);
+
+                // ✅ FIX: Immediately disable bootstrap camera before destroying
+                if (bootstrapCamera != null)
+                {
+                    bootstrapCamera.enabled = false;
+                    Destroy(bootstrapCamera.gameObject);
+                    bootstrapCamera = null;
+
+                    Debug.Log("🎥 [URPCameraBootstrap] Bootstrap camera destroyed - player camera is ready");
+                }
+
+                Destroy(gameObject); // ✅ FIX: Destroy bootstrap completely
+                return;
             }
         }
 

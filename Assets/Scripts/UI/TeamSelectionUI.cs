@@ -30,6 +30,14 @@ namespace TacticalCombat.UI
         private bool isConfirmed = false;
 
         public System.Action<Team> OnTeamConfirmed;
+        
+        // ✅ PERFORMANCE FIX: Cache components and throttle updates
+        private Canvas cachedCanvas;
+        private System.Text.StringBuilder stringBuilder = new System.Text.StringBuilder(32);
+        private float lastUpdateTime = 0f;
+        private const float UPDATE_INTERVAL = 0.2f; // Update every 200ms instead of every frame
+        private int lastTeamACount = -1;
+        private int lastTeamBCount = -1;
 
         private void Start()
         {
@@ -67,10 +75,11 @@ namespace TacticalCombat.UI
 
         private void Update()
         {
-            // Update team counts periodically
-            if (Time.frameCount % 30 == 0)
+            // ✅ PERFORMANCE FIX: Time-based throttling instead of frame-based
+            if (Time.time - lastUpdateTime >= UPDATE_INTERVAL)
             {
                 UpdateTeamCounts();
+                lastUpdateTime = Time.time;
             }
         }
 
@@ -83,14 +92,17 @@ namespace TacticalCombat.UI
             // Update selected team text
             if (selectedTeamText != null)
             {
+                // ✅ PERFORMANCE FIX: Use StringBuilder to avoid GC allocation
+                stringBuilder.Clear();
+                stringBuilder.Append("Selected: ");
                 string teamName = team switch
                 {
                     Team.TeamA => "Team A (Blue)",
                     Team.TeamB => "Team B (Red)",
                     _ => "Auto Balance"
                 };
-
-                selectedTeamText.text = $"Selected: {teamName}";
+                stringBuilder.Append(teamName);
+                selectedTeamText.text = stringBuilder.ToString();
             }
 
             // Highlight selected button
@@ -105,14 +117,23 @@ namespace TacticalCombat.UI
             int teamACount = GetTeamPlayerCount(Team.TeamA);
             int teamBCount = GetTeamPlayerCount(Team.TeamB);
 
-            if (teamACountText != null)
+            // ✅ PERFORMANCE FIX: Only update if count changed (avoid GC allocation)
+            if (teamACount != lastTeamACount && teamACountText != null)
             {
-                teamACountText.text = $"{teamACount} Players";
+                stringBuilder.Clear();
+                stringBuilder.Append(teamACount);
+                stringBuilder.Append(" Players");
+                teamACountText.text = stringBuilder.ToString();
+                lastTeamACount = teamACount;
             }
 
-            if (teamBCountText != null)
+            if (teamBCount != lastTeamBCount && teamBCountText != null)
             {
-                teamBCountText.text = $"{teamBCount} Players";
+                stringBuilder.Clear();
+                stringBuilder.Append(teamBCount);
+                stringBuilder.Append(" Players");
+                teamBCountText.text = stringBuilder.ToString();
+                lastTeamBCount = teamBCount;
             }
         }
 
@@ -237,8 +258,14 @@ namespace TacticalCombat.UI
                 Debug.Log("✅ EventSystem created for TeamSelectionUI");
             }
             
+            // ✅ PERFORMANCE FIX: Cache canvas reference
+            if (cachedCanvas == null)
+            {
+                cachedCanvas = GetComponentInParent<Canvas>();
+            }
+            
             // Ensure Canvas has GraphicRaycaster
-            Canvas canvas = GetComponentInParent<Canvas>();
+            Canvas canvas = cachedCanvas;
             if (canvas != null && canvas.GetComponent<UnityEngine.UI.GraphicRaycaster>() == null)
             {
                 canvas.gameObject.AddComponent<UnityEngine.UI.GraphicRaycaster>();

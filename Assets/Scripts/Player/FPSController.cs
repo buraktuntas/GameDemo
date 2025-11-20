@@ -1125,11 +1125,35 @@ namespace TacticalCombat.Player
         /// </summary>
         private bool IsAnyUIOpen()
         {
+            // ✅ CRITICAL FIX: Check MatchManager phase FIRST (Lobby phase = UI open)
+            if (TacticalCombat.Core.MatchManager.Instance != null)
+            {
+                TacticalCombat.Core.Phase currentPhase = TacticalCombat.Core.MatchManager.Instance.GetCurrentPhase();
+                if (currentPhase == TacticalCombat.Core.Phase.Lobby)
+                {
+                    return true; // Lobby phase = UI must be open
+                }
+            }
+            
             // ✅ FIX: Use public IsPanelOpen() methods for accurate UI state checking
             
             // Check MainMenu using public method
             var mainMenu = FindFirstObjectByType<TacticalCombat.UI.MainMenu>();
             if (mainMenu != null && mainMenu.IsPanelOpen())
+            {
+                return true;
+            }
+
+            // ✅ NEW: Check GameModeSelectionUI using public method
+            var gameModeSelection = FindFirstObjectByType<TacticalCombat.UI.GameModeSelectionUI>();
+            if (gameModeSelection != null && gameModeSelection.IsPanelOpen())
+            {
+                return true;
+            }
+
+            // ✅ NEW: Check LobbyUI using public method (CRITICAL - this was missing!)
+            var lobbyUI = FindFirstObjectByType<TacticalCombat.UI.LobbyUI>();
+            if (lobbyUI != null && lobbyUI.IsPanelOpen())
             {
                 return true;
             }

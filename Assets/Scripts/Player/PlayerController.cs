@@ -49,78 +49,170 @@ namespace TacticalCombat.Player
             // Update team color
             UpdateTeamColor();
 
+            // ✅ CRITICAL FIX: Disable player movement/camera in Lobby phase
+            CheckAndUpdatePlayerControls();
+
+            // ✅ CRITICAL FIX: Subscribe to MatchManager phase changes
+            if (MatchManager.Instance != null)
+            {
+                MatchManager.Instance.OnPhaseChangedEvent += OnMatchPhaseChanged;
+            }
+
             if (showDebugInfo)
             {
                 Debug.Log("✅ PlayerController initialized for local player");
             }
         }
 
+        private void OnDestroy()
+        {
+            // Unsubscribe from events
+            if (MatchManager.Instance != null)
+            {
+                MatchManager.Instance.OnPhaseChangedEvent -= OnMatchPhaseChanged;
+            }
+        }
+
         /// <summary>
-        /// ✅ CRITICAL FIX: Subscribe to UI selection events to receive team/role choices
+        /// ✅ CRITICAL FIX: Called when match phase changes
+        /// </summary>
+        private void OnMatchPhaseChanged(Phase newPhase)
+        {
+            CheckAndUpdatePlayerControls();
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL FIX: Enable/disable player controls based on match phase
+        /// GDD-compliant: Lobby phase = NO gameplay, NO movement, NO shooting
+        /// </summary>
+        private void CheckAndUpdatePlayerControls()
+        {
+            if (!isLocalPlayer) return;
+
+            bool shouldEnableControls = false;
+            bool isInLobbyPhase = false;
+
+            if (MatchManager.Instance != null)
+            {
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                // ✅ CRITICAL: Only enable controls when NOT in Lobby phase
+                // Lobby phase = UI only, no gameplay
+                isInLobbyPhase = (currentPhase == Phase.Lobby);
+                shouldEnableControls = !isInLobbyPhase;
+                
+                if (showDebugInfo)
+                {
+                    Debug.Log($"🎮 [PlayerController] Phase: {currentPhase}, Controls: {(shouldEnableControls ? "ENABLED" : "DISABLED")}");
+                }
+            }
+            else
+            {
+                // If MatchManager not found, enable controls (legacy mode)
+                shouldEnableControls = true;
+            }
+
+            // ✅ CRITICAL FIX: Hide player visuals in Lobby phase (so game world is not visible)
+            // This prevents the game from looking like it started when player spawns
+            if (playerVisuals != null)
+            {
+                // Hide the visual renderer in lobby phase
+                Renderer visualRenderer = playerVisuals.GetComponent<Renderer>();
+                if (visualRenderer == null)
+                {
+                    visualRenderer = playerVisuals.GetComponentInChildren<Renderer>();
+                }
+                
+                if (visualRenderer != null)
+                {
+                    visualRenderer.enabled = !isInLobbyPhase;
+                }
+                
+                // Also hide the entire PlayerVisuals GameObject if it's a child
+                if (playerVisuals.transform != transform && playerVisuals.gameObject != gameObject)
+                {
+                    playerVisuals.gameObject.SetActive(!isInLobbyPhase);
+                }
+            }
+            
+            // ✅ CRITICAL FIX: Hide player model/body in lobby phase
+            // Find all renderers in children (player body, weapons, etc.)
+            if (isInLobbyPhase)
+            {
+                Renderer[] allRenderers = GetComponentsInChildren<Renderer>();
+                foreach (Renderer renderer in allRenderers)
+                {
+                    // Don't hide camera or UI elements
+                    if (renderer.GetComponent<Camera>() == null && 
+                        renderer.GetComponent<Canvas>() == null)
+                    {
+                        renderer.enabled = false;
+                    }
+                }
+            }
+            else
+            {
+                // Show all renderers when game starts
+                Renderer[] allRenderers = GetComponentsInChildren<Renderer>();
+                foreach (Renderer renderer in allRenderers)
+                {
+                    renderer.enabled = true;
+                }
+            }
+
+            // ✅ CRITICAL: Disable/enable FPSController (movement + camera rotation)
+            if (fpsController != null)
+            {
+                fpsController.enabled = shouldEnableControls;
+            }
+
+            // ✅ CRITICAL: Disable/enable WeaponSystem (shooting)
+            // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
+            if (TryGetComponent<Combat.WeaponSystem>(out var weaponSystem))
+            {
+                weaponSystem.enabled = shouldEnableControls;
+            }
+
+            // ✅ CRITICAL: Disable/enable InputManager (all input)
+            // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent
+            if (TryGetComponent<InputManager>(out var inputManager))
+            {
+                if (shouldEnableControls)
+                {
+                    inputManager.UnblockAllInput();
+                }
+                else
+                {
+                    inputManager.BlockAllInput();
+                }
+            }
+
+            // ✅ CRITICAL: In Lobby phase, unlock cursor for UI interaction
+            if (!shouldEnableControls)
+            {
+                // Lobby phase: Unlock cursor for menu interaction
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                
+                if (showDebugInfo)
+                {
+                    Debug.Log("🔓 [PlayerController] Lobby phase - Cursor unlocked, all controls disabled, player hidden");
+                }
+            }
+
+            // ✅ CRITICAL: Keep camera enabled for UI rendering (FPSController disabled = no rotation)
+            // Camera will be controlled by FPSController when it's enabled
+        }
+
+        /// <summary>
+        /// ✅ REMOVED: Subscribe to UI selection events
+        /// Artık RoleSelectionUI ve TeamSelectionUI kullanılmıyor
+        /// Yeni akış: MainMenu → LobbyUI (game mode selection dahil)
         /// </summary>
         private void SubscribeToUIEvents()
         {
-            // Wait a frame for UI to initialize
-            StartCoroutine(SubscribeToUIEventsCoroutine());
-        }
-
-        private System.Collections.IEnumerator SubscribeToUIEventsCoroutine()
-        {
-            yield return null; // Wait one frame
-
-            // Find RoleSelectionUI and subscribe to confirm event
-            var roleUI = FindFirstObjectByType<TacticalCombat.UI.RoleSelectionUI>();
-            if (roleUI != null)
-            {
-                roleUI.OnRoleConfirmed += OnRoleSelectedFromUI;
-                Debug.Log("✅ Subscribed to RoleSelectionUI.OnRoleConfirmed");
-            }
-            else
-            {
-                Debug.LogWarning("⚠️ RoleSelectionUI not found - cannot subscribe to events");
-            }
-
-            // Find TeamSelectionUI and subscribe to confirm event
-            var teamUI = FindFirstObjectByType<TacticalCombat.UI.TeamSelectionUI>();
-            if (teamUI != null)
-            {
-                teamUI.OnTeamConfirmed += OnTeamSelectedFromUI;
-                Debug.Log("✅ Subscribed to TeamSelectionUI.OnTeamConfirmed");
-            }
-            else
-            {
-                Debug.LogWarning("⚠️ TeamSelectionUI not found - cannot subscribe to events");
-            }
-        }
-
-        /// <summary>
-        /// ✅ CRITICAL FIX: Called when player confirms role in UI
-        /// </summary>
-        private void OnRoleSelectedFromUI(RoleId selectedRole)
-        {
-            Debug.Log($"🎯 Player selected role: {selectedRole}");
-
-            // Get team from TeamSelectionUI
-            var teamUI = FindFirstObjectByType<TacticalCombat.UI.TeamSelectionUI>();
-            Team selectedTeam = Team.None;
-
-            if (teamUI != null)
-            {
-                selectedTeam = teamUI.GetSelectedTeam();
-                Debug.Log($"🎯 Player's team selection: {selectedTeam}");
-            }
-
-            // Send to server via Command
-            CmdSetTeamAndRole(selectedTeam, selectedRole);
-        }
-
-        /// <summary>
-        /// ✅ CRITICAL FIX: Called when player confirms team in UI
-        /// </summary>
-        private void OnTeamSelectedFromUI(Team selectedTeam)
-        {
-            Debug.Log($"🎯 Player selected team: {selectedTeam}");
-            // Team is stored, will be sent with role when role is confirmed
+            // ✅ REMOVED: RoleSelectionUI ve TeamSelectionUI artık kullanılmıyor
+            // Yeni basit akış: MainMenu → LobbyUI (game mode selection dahil)
+            // Team ve role seçimi artık LobbyUI içinde yapılıyor
         }
 
         /// <summary>
@@ -189,7 +281,9 @@ namespace TacticalCombat.Player
             }
             else
             {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning("⚠️ MatchManager.Instance is null! Cannot register player.");
+                #endif
             }
         }
         
