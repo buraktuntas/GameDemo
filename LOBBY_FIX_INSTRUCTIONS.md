@@ -37,3 +37,5 @@ Editor tool'u scene'de LobbyPanel ve gerekli UI elementlerini otomatik oluşturu
 Tool'u çalıştırdıktan sonra mutlaka scene'i kaydedin!
 
 
+
+

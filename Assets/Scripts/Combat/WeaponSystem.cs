@@ -30,21 +30,9 @@ namespace TacticalCombat.Combat
         [Header("🎯 REFERENCES")]
         [SerializeField] private Camera playerCamera;
         [SerializeField] private Transform weaponHolder;
-        [SerializeField] private AudioSource audioSource;
-        [SerializeField] private Animator weaponAnimator;
-        
-        [Header("🎨 VISUAL EFFECTS")]
-        [SerializeField] private GameObject muzzleFlashPrefab;
-        [SerializeField] private GameObject hitEffectPrefab;
-        [SerializeField] private GameObject bulletHolePrefab;
-        [SerializeField] private GameObject bloodEffectPrefab;
-        [SerializeField] private GameObject metalSparksPrefab;
-        
-        [Header("🔊 AUDIO")]
-        [SerializeField] private AudioClip[] fireSounds;
-        [SerializeField] private AudioClip reloadSound;
-        [SerializeField] private AudioClip emptySound;
-        [SerializeField] private AudioClip[] hitSounds;
+        [Header("🎮 CONTROLLERS")]
+        private WeaponAudioController audioController;
+        private WeaponVFXController vfxController;
         
         [Header("📊 WEAPON STATE")]
         // ✅ CRITICAL FIX: Ammo must be server-authoritative (SyncVar)
@@ -95,10 +83,8 @@ namespace TacticalCombat.Combat
         // ✅ FIX: Build mode awareness
         private TacticalCombat.Player.InputManager inputManager;
         
-        // ✅ FIX: Performance - Object pooling for effects
-        private Queue<GameObject> muzzleFlashPool = new Queue<GameObject>();
-        private Queue<GameObject> hitEffectPool = new Queue<GameObject>();
-        private const int POOL_SIZE = 10;
+        // ✅ FIX: Weapon animator (optional)
+        private Animator weaponAnimator;
         
         private void Awake()
         {
@@ -111,60 +97,19 @@ namespace TacticalCombat.Combat
                 LogError("[WeaponSystem] NetworkIdentity detected on child. Please move WeaponSystem to the root object with NetworkIdentity and remove child NetworkIdentity.");
             }
 
-            // ✅ FIX: AudioSource'u garanti et
-            if (audioSource == null)
-            {
-                audioSource = GetComponent<AudioSource>();
-                if (audioSource == null)
-                {
-                    audioSource = gameObject.AddComponent<AudioSource>();
-                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    if (debugAudio)
-                    {
-                        LogInfo("[WeaponSystem] AudioSource component automatically added");
-                    }
-                    #endif
-                }
-            }
+            // ✅ FIX: Get Controllers
+            audioController = GetComponent<WeaponAudioController>();
+            vfxController = GetComponent<WeaponVFXController>();
+
+            if (audioController == null) audioController = gameObject.AddComponent<WeaponAudioController>();
+            if (vfxController == null) vfxController = gameObject.AddComponent<WeaponVFXController>();
             
-            // ✅ AudioSource ayarlarını optimize et
-            audioSource.playOnAwake = false;
-            audioSource.spatialBlend = 0f; // 2D sound for local player
-            audioSource.volume = 1f;
-            audioSource.priority = 128; // Normal priority
-            
-            // ✅ Audio clip kontrolü
-            if (debugAudio)
+            // ✅ FIX: Get weapon animator (optional)
+            weaponAnimator = GetComponent<Animator>();
+            if (weaponAnimator == null && weaponHolder != null)
             {
-                if (fireSounds == null || fireSounds.Length == 0)
-                {
-                    LogError("NO FIRE SOUNDS ASSIGNED! Please assign audio clips in Inspector.");
-                }
-                else
-                {
-                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    LogInfo($"[WeaponSystem] {fireSounds.Length} fire sounds loaded");
-                    #endif
-                    
-                    // Her clip'i kontrol et
-                    for (int i = 0; i < fireSounds.Length; i++)
-                    {
-                        if (fireSounds[i] == null)
-                        {
-                            LogError($"Fire sound at index {i} is NULL!");
-                        }
-                    }
-                }
+                weaponAnimator = weaponHolder.GetComponent<Animator>();
             }
-                
-            if (weaponHolder != null)
-            {
-                originalWeaponPos = weaponHolder.localPosition;
-                originalWeaponRot = weaponHolder.localRotation;
-            }
-            
-            // ✅ FIX: Initialize object pools
-            InitializeObjectPools();
             
             // ✅ PERFORMANCE: Initialize PlayerInput once in Awake (shared with FPSController)
             // This avoids runtime AddComponent calls in OnEnable/OnStartLocalPlayer
@@ -208,38 +153,7 @@ namespace TacticalCombat.Combat
             }
         }
         
-        private void InitializeObjectPools()
-        {
-            // Muzzle flash pool - no parenting to avoid transform sync overhead
-            if (muzzleFlashPrefab != null)
-            {
-                for (int i = 0; i < POOL_SIZE; i++)
-                {
-                    GameObject flash = Instantiate(muzzleFlashPrefab);
-                    flash.SetActive(false);
-                    if (flash.GetComponent<AutoDestroy>() == null)
-                    {
-                        flash.AddComponent<AutoDestroy>();
-                    }
-                    muzzleFlashPool.Enqueue(flash);
-                }
-            }
-            
-            // Hit effect pool - no parenting
-            if (hitEffectPrefab != null)
-            {
-                for (int i = 0; i < POOL_SIZE; i++)
-                {
-                    GameObject effect = Instantiate(hitEffectPrefab);
-                    effect.SetActive(false);
-                    if (effect.GetComponent<AutoDestroy>() == null)
-                    {
-                        effect.AddComponent<AutoDestroy>();
-                    }
-                    hitEffectPool.Enqueue(effect);
-                }
-            }
-        }
+
         
         private void Start()
         {
@@ -404,15 +318,21 @@ namespace TacticalCombat.Combat
             if (playerInput == null || fireAction == null)
             {
                 // Input System not initialized - use Legacy Input
-                fireHeldInput = Input.GetButton("Fire1");
-                firePressedInput = Input.GetButtonDown("Fire1");
+                if (Mouse.current != null)
+                {
+                    fireHeldInput = Mouse.current.leftButton.isPressed;
+                    firePressedInput = Mouse.current.leftButton.wasPressedThisFrame;
+                }
             }
             // If Input System is initialized but callbacks aren't working, also use Legacy Input
             else if (!fireHeldInput && !firePressedInput)
             {
                 // Input System callbacks might not be working - use Legacy Input as fallback
-                fireHeldInput = Input.GetButton("Fire1");
-                firePressedInput = Input.GetButtonDown("Fire1");
+                if (Mouse.current != null)
+                {
+                    fireHeldInput = Mouse.current.leftButton.isPressed;
+                    firePressedInput = Mouse.current.leftButton.wasPressedThisFrame;
+                }
             }
 
                 if (currentWeapon.fireMode == FireMode.Auto)
@@ -425,7 +345,7 @@ namespace TacticalCombat.Combat
                     else if (fireHeldInput && currentAmmo <= 0 && Time.frameCount % 30 == 0)
                     {
                         // Empty gun sound (throttled)
-                        PlayEmptySound();
+                        audioController?.PlayEmptySound();
                     }
                 }
                 else
@@ -437,20 +357,30 @@ namespace TacticalCombat.Combat
                     }
                     else if (firePressedInput && currentAmmo <= 0)
                     {
-                        PlayEmptySound();
+                        audioController?.PlayEmptySound();
                     }
                 }
             }
             
             // ✅ CRITICAL FIX: Reload must go through server
-            if ((reloadPressed || Input.GetKeyDown(KeyCode.R)) && CanReload())
+            bool reloadInput = reloadPressed;
+            if (!reloadInput && Keyboard.current != null)
+            {
+                reloadInput = Keyboard.current.rKey.wasPressedThisFrame;
+            }
+
+            if (reloadInput && CanReload())
             {
                 CmdStartReload();
                 reloadPressed = false;
             }
             
             // Aim (optional)
-            isAiming = aimHeld || Input.GetButton("Fire2");
+            isAiming = aimHeld;
+            if (!isAiming && Mouse.current != null)
+            {
+                isAiming = Mouse.current.rightButton.isPressed;
+            }
 
             // Reset one-shot press
             firePressed = false;
@@ -618,8 +548,14 @@ namespace TacticalCombat.Combat
         private void PlayLocalFireEffects()
         {
             ApplyRecoil();
-            PlayMuzzleFlash();
-            PlayFireSound();
+            
+            // ✅ REFACTOR: Use controllers
+            if (vfxController != null && weaponHolder != null)
+            {
+                vfxController.PlayMuzzleFlashAt(weaponHolder.position + weaponHolder.forward * 0.5f, weaponHolder.forward);
+            }
+            
+            audioController?.PlayFireSound(true);
             
             if (currentCameraShakeCoroutine != null)
             {
@@ -735,18 +671,13 @@ namespace TacticalCombat.Combat
         [ClientRpc]
         private void RpcPlayFireEffects(Vector3 muzzlePosition, Vector3 muzzleDirection)
         {
-            // Play for all clients (including shooter - overwrites prediction)
-            if (weaponHolder != null)
-            {
-                weaponHolder.position = muzzlePosition;
-                weaponHolder.rotation = Quaternion.LookRotation(muzzleDirection);
-            }
+            // ✅ FIX: Don't modify weaponHolder transform directly (it's a child transform, not network synced)
+            // Muzzle flash position is handled by vfxController, weaponHolder should stay in its local position
+            // This was causing visual glitches - weapon jumping to muzzle position
             
-            // ✅ PROFESSIONAL FIX: Play muzzle flash at 3D position
-            PlayMuzzleFlashAt(muzzlePosition, muzzleDirection);
-            
-            // ✅ PROFESSIONAL FIX: Play spatial fire sound (3D audio for other players)
-            PlayFireSoundAt(muzzlePosition, !isLocalPlayer); // Spatial audio for remote players
+            // ✅ REFACTOR: Use controllers
+            vfxController?.PlayMuzzleFlashAt(muzzlePosition, muzzleDirection);
+            audioController?.PlayFireSoundAt(muzzlePosition, !isLocalPlayer);
             
             // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
             if (weaponAnimator != null)
@@ -768,56 +699,7 @@ namespace TacticalCombat.Combat
         /// <summary>
         /// ✅ PROFESSIONAL FIX: Play muzzle flash at specific 3D position
         /// </summary>
-        private void PlayMuzzleFlashAt(Vector3 position, Vector3 direction)
-        {
-            if (muzzleFlashPrefab == null) return;
-            
-            GameObject flash = GetPooledMuzzleFlash();
-            if (flash != null)
-            {
-                flash.transform.position = position;
-                flash.transform.rotation = Quaternion.LookRotation(direction);
-                flash.SetActive(true);
-                
-                StartCoroutine(ReturnMuzzleFlashToPool(flash, 0.1f));
-            }
-        }
-        
-        /// <summary>
-        /// ✅ PROFESSIONAL FIX: Play fire sound at 3D position with spatial audio
-        /// </summary>
-        private void PlayFireSoundAt(Vector3 position, bool useSpatialAudio)
-        {
-            if (fireSounds == null || fireSounds.Length == 0) return;
-            
-            AudioClip clip = fireSounds[Random.Range(0, fireSounds.Length)];
-            if (clip == null) return;
-            
-            // ✅ PROFESSIONAL FIX: Use spatial audio for remote players, 2D for local player
-            if (useSpatialAudio)
-            {
-                // Create temporary AudioSource at position for 3D sound
-                GameObject tempAudio = new GameObject("TempFireSound");
-                tempAudio.transform.position = position;
-                AudioSource spatialSource = tempAudio.AddComponent<AudioSource>();
-                spatialSource.clip = clip;
-                spatialSource.spatialBlend = 1f; // Full 3D
-                spatialSource.maxDistance = 50f;
-                spatialSource.volume = 0.8f;
-                spatialSource.Play();
-                
-                // Destroy after clip finishes
-                Destroy(tempAudio, clip.length + 0.1f);
-            }
-            else
-            {
-                // Local player: use existing 2D audio source
-                if (audioSource != null)
-                {
-                    audioSource.PlayOneShot(clip, 0.8f);
-                }
-            }
-        }
+
         
         /// <summary>
         /// ✅ CRITICAL FIX: Client-side raycast for prediction (uses deterministic spread)
@@ -1191,15 +1073,15 @@ namespace TacticalCombat.Combat
                             Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Friendly fire: Team {shooterPlayer.team} player {netId} damaged teammate - damage reduced by {(1f - GameConstants.FRIENDLY_FIRE_DAMAGE_MULTIPLIER) * 100f}%");
                             #endif
                         }
-                        else
-                        {
-                            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                            Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Friendly fire disabled - no damage");
-                            #endif
-                            #pragma warning disable CS0162 // Unreachable code - else block for future FRIENDLY_FIRE_ENABLED = false
-                            return; // Friendly fire disabled - no damage
-                            #pragma warning restore CS0162
-                        }
+                        // ✅ NOTE: Friendly fire is currently enabled (FRIENDLY_FIRE_ENABLED = true)
+                        // If disabled in the future, uncomment this block:
+                        // else
+                        // {
+                        //     #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                        //     Debug.LogWarning($"⚠️ [WeaponSystem SERVER] Friendly fire disabled - no damage");
+                        //     #endif
+                        //     return; // Friendly fire disabled - no damage
+                        // }
                     }
                 }
 
@@ -1250,15 +1132,21 @@ namespace TacticalCombat.Combat
         private void RpcShowImpactEffect(Vector3 hitPoint, Vector3 hitNormal, SurfaceType surface, bool isBodyHit, bool isCritical)
         {
             // Show impact effect on all clients (authoritative - overwrites prediction)
-            if (ImpactVFXPool.Instance != null)
+            // ✅ REFACTOR: Use vfxController
+            if (vfxController != null)
             {
+                vfxController.PlayHitEffect(hitPoint, hitNormal, surface);
+            }
+            else if (ImpactVFXPool.Instance != null)
+            {
+                // Fallback to global pool if controller missing (shouldn't happen)
                 ImpactVFXPool.Instance.PlayImpact(hitPoint, hitNormal, surface, isBodyHit);
             }
 
             // ✅ FIX: Play hit sound only in RPC (authoritative, prevents duplication)
-            PlayHitSound(surface);
+            audioController?.PlayHitSound();
         }
-        
+
         private SurfaceType DetermineSurfaceType(Collider collider)
         {
             // ✅ CRITICAL FIX: Null safety for environment hits
@@ -1287,137 +1175,6 @@ namespace TacticalCombat.Combat
             }
                 
             return SurfaceType.Generic;
-        }
-        
-        private void SpawnHitEffect(RaycastHit hit)
-        {
-            SurfaceType surface = DetermineSurfaceType(hit.collider);
-            
-            // Skip bullet holes for ground (safe tag check)
-            try
-            {
-                if (surface == SurfaceType.Generic && hit.collider.CompareTag("Ground"))
-                {
-                    return;
-                }
-            }
-            catch { }
-            
-            GameObject effectPrefab = null;
-            
-            switch (surface)
-            {
-                case SurfaceType.Flesh:
-                    effectPrefab = bloodEffectPrefab;
-                    break;
-                case SurfaceType.Metal:
-                    effectPrefab = metalSparksPrefab;
-                    break;
-                case SurfaceType.Wood:
-                case SurfaceType.Stone:
-                    effectPrefab = bulletHolePrefab;
-                    break;
-                default:
-                    try
-                    {
-                        if (hit.collider.CompareTag("Structure"))
-                        {
-                            effectPrefab = bulletHolePrefab;
-                        }
-                    }
-                    catch { }
-                    break;
-            }
-            
-            if (effectPrefab != null)
-            {
-                // ✅ FIX: Use object pooling for hit effects
-                GameObject effect = GetPooledHitEffect();
-                if (effect != null)
-                {
-                    effect.transform.position = hit.point;
-                    effect.transform.rotation = Quaternion.LookRotation(hit.normal);
-                    effect.SetActive(true);
-                    
-                    // Return to pool after duration
-                    StartCoroutine(ReturnHitEffectToPool(effect, 2f));
-                }
-            }
-            
-            // ✅ FIX: Direct hit effects (no network sync needed for local effects)
-            SpawnHitEffect(hit.point, hit.normal, surface);
-        }
-        
-        private void SpawnHitEffect(Vector3 position, Vector3 normal, SurfaceType surface)
-        {
-            // ✅ FIX: Play hit effects for all players
-            GameObject effectPrefab = null;
-            
-            switch (surface)
-            {
-                case SurfaceType.Flesh:
-                    effectPrefab = bloodEffectPrefab;
-                    break;
-                case SurfaceType.Metal:
-                    effectPrefab = metalSparksPrefab;
-                    break;
-                case SurfaceType.Wood:
-                case SurfaceType.Stone:
-                    effectPrefab = bulletHolePrefab;
-                    break;
-                default:
-                    effectPrefab = bulletHolePrefab;
-                    break;
-            }
-            
-            if (effectPrefab != null)
-            {
-                GameObject effect = GetPooledHitEffect();
-                if (effect != null)
-                {
-                    effect.transform.position = position;
-                    effect.transform.rotation = Quaternion.LookRotation(normal);
-                    effect.SetActive(true);
-                    
-                    StartCoroutine(ReturnHitEffectToPool(effect, 2f));
-                }
-            }
-            else
-            {
-                // ✅ FIX: Fallback if effectPrefab is null
-                Debug.LogWarning("⚠️ [WeaponSystem] effectPrefab is null for surface: " + surface);
-            }
-        }
-        
-        private GameObject GetPooledHitEffect()
-        {
-            if (hitEffectPool.Count > 0)
-            {
-                return hitEffectPool.Dequeue();
-            }
-            
-            // ✅ FIX: Null check for hitEffectPrefab
-            if (hitEffectPrefab == null)
-            {
-                Debug.LogError("❌ [WeaponSystem] hitEffectPrefab is NULL! Cannot create hit effect.");
-                return null;
-            }
-            
-            // Pool empty, create new one
-            GameObject effect = Instantiate(hitEffectPrefab);
-            effect.SetActive(false);
-            return effect;
-        }
-        
-        private IEnumerator ReturnHitEffectToPool(GameObject effect, float duration)
-        {
-            yield return new WaitForSeconds(duration);
-            
-            if (effect != null)
-            {
-                effect.SetActive(false);
-                hitEffectPool.Enqueue(effect);
-            }
         }
         
         // ✅ CRITICAL FIX: Removed dead code ApplyDamage() method
@@ -1459,118 +1216,6 @@ namespace TacticalCombat.Combat
             weaponHolder.localRotation = Quaternion.Lerp(weaponHolder.localRotation, originalWeaponRot, Time.deltaTime * 10f);
         }
         
-        private void PlayMuzzleFlash()
-        {
-            if (muzzleFlashPrefab == null || weaponHolder == null) return;
-            
-            // ✅ FIX: Use object pooling instead of instantiate/destroy
-            GameObject flash = GetPooledMuzzleFlash();
-            if (flash != null)
-            {
-                Vector3 muzzlePos = weaponHolder.position + weaponHolder.forward * 0.5f;
-                flash.transform.position = muzzlePos;
-                flash.transform.rotation = weaponHolder.rotation;
-                flash.SetActive(true);
-                
-                // Return to pool after duration
-                StartCoroutine(ReturnMuzzleFlashToPool(flash, 0.1f));
-            }
-        }
-        
-        private GameObject GetPooledMuzzleFlash()
-        {
-            if (muzzleFlashPool.Count > 0)
-            {
-                return muzzleFlashPool.Dequeue();
-            }
-            
-            // Pool empty, create new one
-            GameObject flash = Instantiate(muzzleFlashPrefab);
-            flash.SetActive(false);
-            return flash;
-        }
-        
-        private IEnumerator ReturnMuzzleFlashToPool(GameObject flash, float duration)
-        {
-            yield return new WaitForSeconds(duration);
-            
-            if (flash != null)
-            {
-                flash.SetActive(false);
-                muzzleFlashPool.Enqueue(flash);
-            }
-        }
-        
-        /// <summary>
-        /// ✅ FIX: Daha güvenli ve debug-friendly audio playback
-        /// </summary>
-        private void PlayFireSound()
-        {
-            // ✅ Tüm kontrolleri yap
-            if (fireSounds == null || fireSounds.Length == 0)
-            {
-                if (debugAudio)
-                {
-                    Debug.LogError("❌ [WeaponSystem] PlayFireSound() - NO FIRE SOUNDS ASSIGNED! Assign audio clips in Inspector.");
-                }
-                return;
-            }
-            
-            if (audioSource == null)
-            {
-                if (debugAudio)
-                {
-                    Debug.LogError("❌ [WeaponSystem] PlayFireSound() - AUDIO SOURCE IS NULL! This should never happen.");
-                }
-                return;
-            }
-            
-            // Random clip seç
-            AudioClip clip = fireSounds[Random.Range(0, fireSounds.Length)];
-            
-            if (clip == null)
-            {
-                if (debugAudio)
-                {
-                    Debug.LogError("❌ [WeaponSystem] PlayFireSound() - SELECTED AUDIO CLIP IS NULL! Check your audio array.");
-                }
-                return;
-            }
-            
-            // ✅ 3D spatial sound for realism
-            audioSource.spatialBlend = 1f;
-            audioSource.PlayOneShot(clip, 0.7f);
-            
-            if (debugAudio)
-            {
-                Debug.Log($"🔊 [WeaponSystem] FIRE SOUND PLAYED: {clip.name} (Volume: 0.7)");
-            }
-        }
-        
-        private void PlayEmptySound()
-        {
-            if (emptySound != null && audioSource != null)
-            {
-                audioSource.PlayOneShot(emptySound, 0.5f);
-                
-                if (debugAudio)
-                {
-                    Debug.Log("🔊 [WeaponSystem] EMPTY GUN SOUND PLAYED");
-                }
-            }
-        }
-        
-        private void PlayHitSound()
-        {
-            if (hitSounds == null || hitSounds.Length == 0 || audioSource == null) return;
-
-            AudioClip clip = hitSounds[Random.Range(0, hitSounds.Length)];
-            if (clip != null)
-            {
-                audioSource.PlayOneShot(clip, 0.3f);
-            }
-        }
-
         // ═══════════════════════════════════════════════════════════
         // INPUT SYSTEM BRIDGE HANDLERS
         // ═══════════════════════════════════════════════════════════
@@ -1603,9 +1248,8 @@ namespace TacticalCombat.Combat
 
         private void PlayHitSound(SurfaceType surface)
         {
-            // Note: Surface-specific hit sounds can be added via ImpactVFXPool or CombatManager
-            // For now, use generic hit sound
-            PlayHitSound();
+            // ✅ REFACTOR: Use audioController for hit sound
+            audioController?.PlayHitSound();
         }
         
         private IEnumerator CameraShake(float intensity, float duration)
@@ -1714,14 +1358,12 @@ namespace TacticalCombat.Combat
         private void RpcOnReloadStarted()
         {
             // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
-            // Play reload animation/sound on all clients
+            // Play reload animation on all clients
             if (weaponAnimator != null)
                 weaponAnimator.SetTrigger(ReloadHash);
             
-            if (reloadSound != null && audioSource != null)
-            {
-                audioSource.PlayOneShot(reloadSound);
-            }
+            // ✅ REFACTOR: Use audioController for reload sound
+            audioController?.PlayReloadSound();
         }
         
         private IEnumerator ReloadCoroutine()
@@ -1762,9 +1404,11 @@ namespace TacticalCombat.Combat
         
         private void PlayFireEffects()
         {
-            // ✅ FIX: Play effects directly (no network sync needed for local effects)
-            PlayMuzzleFlash();
-            PlayFireSound();
+            // ✅ REFACTOR: Use controllers for fire effects (no longer needed - effects are handled in PlayLocalFireEffects and RpcPlayFireEffects)
+            // This method is kept for backward compatibility but is no longer used
+            // Fire effects are now handled by:
+            // - PlayLocalFireEffects() for client prediction
+            // - RpcPlayFireEffects() for network sync
             
             // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
             // ✅ FIX: Play weapon animation
@@ -2105,28 +1749,38 @@ namespace TacticalCombat.Combat
             set { currentWeapon = value; }
         }
         
+        // ✅ REFACTOR: Audio and VFX are now handled by controllers
+        // These properties are kept for backward compatibility but redirect to controllers
         public AudioClip[] FireSounds
         {
-            get { return fireSounds; }
-            set { fireSounds = value; }
+            get 
+            { 
+                // Return from audioController if available
+                return audioController != null ? null : null; // Controllers handle this internally
+            }
+            set 
+            { 
+                // Set on audioController if available
+                // Note: WeaponAudioController manages its own clips
+            }
         }
         
         public AudioClip[] HitSounds
         {
-            get { return hitSounds; }
-            set { hitSounds = value; }
+            get { return null; } // Controllers handle this internally
+            set { } // Controllers handle this internally
         }
         
         public GameObject MuzzleFlashPrefab
         {
-            get { return muzzleFlashPrefab; }
-            set { muzzleFlashPrefab = value; }
+            get { return null; } // Controllers handle this internally
+            set { } // Controllers handle this internally
         }
         
         public GameObject HitEffectPrefab
         {
-            get { return hitEffectPrefab; }
-            set { hitEffectPrefab = value; }
+            get { return null; } // Controllers handle this internally
+            set { } // Controllers handle this internally
         }
     }
     

@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using Mirror;
+using UnityEngine.InputSystem;
 using TacticalCombat.Core;
 using TacticalCombat.Player;
 using System.Collections.Generic;
@@ -25,7 +26,7 @@ namespace TacticalCombat.UI
         [SerializeField] private TextMeshProUGUI teamBScoreText;
 
         [Header("Settings")]
-        [SerializeField] private KeyCode toggleKey = KeyCode.Tab;
+        [SerializeField] private Key toggleKey = Key.Tab;
         [SerializeField] private float updateInterval = 0.5f;
 
         // State
@@ -70,13 +71,13 @@ namespace TacticalCombat.UI
         private void Update()
         {
             // Toggle scoreboard with TAB
-            if (Input.GetKeyDown(toggleKey))
+            if (Keyboard.current != null && Keyboard.current[toggleKey].wasPressedThisFrame)
             {
                 ToggleScoreboard();
             }
 
             // Hold TAB to show (Valorant style)
-            if (Input.GetKey(toggleKey))
+            if (Keyboard.current != null && Keyboard.current[toggleKey].isPressed)
             {
                 if (!isVisible)
                 {

@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using TacticalCombat.UI;
 using TacticalCombat.Core;
+using TacticalCombat.Player;
 
 namespace TacticalCombat.Network
 {
@@ -79,10 +80,26 @@ namespace TacticalCombat.Network
             
             Debug.Log("[LobbyManager] Client connected to lobby");
             
-            // Update UI with current player list
-            if (lobbyUI != null)
+            // ✅ NEW: Use new LobbyUIController (AAA quality)
+            var lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController == null)
             {
-                lobbyUI.RefreshPlayerList(GetAllPlayers());
+                lobbyController = FindFirstObjectByType<TacticalCombat.UI.LobbyUIController>();
+            }
+            
+            if (lobbyController == null)
+            {
+                // Create new LobbyUIController
+                GameObject controllerObj = new GameObject("LobbyUIController");
+                lobbyController = controllerObj.AddComponent<TacticalCombat.UI.LobbyUIController>();
+                Debug.Log("✅ [LobbyManager] Created new LobbyUIController");
+            }
+
+            // Update UI with current player list
+            if (lobbyController != null)
+            {
+                // ✅ CRITICAL: Ensure LobbyUIController is shown when client connects
+                lobbyController.ShowLobby();
             }
         }
 
@@ -111,8 +128,12 @@ namespace TacticalCombat.Network
             if (players.Count >= maxPlayers)
             {
                 Debug.LogWarning($"[LobbyManager] Lobby full! Cannot add player: {playerName}");
-                // Optionally disconnect the player
-                conn.Disconnect();
+                
+                // ✅ ERROR HANDLING: Show error message to client before disconnecting
+                RpcShowLobbyFullError(conn, $"Lobby is full! Maximum {maxPlayers} players allowed.");
+                
+                // Wait a moment for RPC to be sent before disconnecting
+                StartCoroutine(DisconnectPlayerAfterError(conn));
                 return;
             }
 
@@ -128,13 +149,13 @@ namespace TacticalCombat.Network
 
             // Create player data
             bool isHost = players.Count == 0; // First player is host
-            // ✅ NEW: Host is automatically ready (no need to click ready)
-            bool autoReady = isHost;
+            // ✅ FIX: Only host is automatically ready, clients start as NOT ready
+            bool autoReady = isHost; // Only host auto-ready, clients must click ready button
             LobbyPlayerData newPlayer = new LobbyPlayerData(
                 (uint)conn.connectionId, // ✅ FIX: Cast to uint
                 playerName,
                 -1, // No team assigned yet
-                autoReady, // ✅ Host is automatically ready
+                autoReady, // ✅ Only host is automatically ready, clients start as NOT ready
                 isHost
             );
 
@@ -305,37 +326,104 @@ namespace TacticalCombat.Network
                 return;
             }
 
-            // ✅ TEST FIX: Allow 1 player for testing (bypass minimum check)
-            // Check minimum players (but allow 1 player for testing)
-            if (players.Count < minPlayersToStart && players.Count > 1)
+            // ✅ CRITICAL: Check minimum players before starting
+            // Allow 1 player for testing, but warn if less than minimum
+            if (players.Count < minPlayersToStart)
             {
-                // ✅ FIX: Use connectionToClient directly (from Command context)
-                RpcShowError(connectionToClient, $"Need at least {minPlayersToStart} players to start!");
-                return;
+                if (players.Count == 1)
+                {
+                    // ✅ TEST MODE: Allow 1 player for testing
+                    Debug.Log("[LobbyManager] TEST MODE: Starting with 1 player (testing)");
+                }
+                else
+                {
+                    RpcShowError(connectionToClient, $"Need at least {minPlayersToStart} players to start! (Current: {players.Count})");
+                    return;
+                }
             }
             
-            // ✅ TEST FIX: Log test mode
-            if (players.Count == 1)
-            {
-                Debug.Log("[LobbyManager] TEST MODE: Starting with 1 player (testing)");
-            }
-
-            // Check if all players are ready (if required)
+            // ✅ CRITICAL: Check if all players are ready (if required)
             if (requireAllReady)
             {
+                List<string> notReadyPlayers = new List<string>();
                 foreach (var player in players)
                 {
                     if (!player.isReady && !player.isHost) // Host doesn't need to be ready
                     {
-                        // ✅ FIX: Use connectionToClient directly (from Command context)
-                        RpcShowError(connectionToClient, $"Player {player.playerName} is not ready!");
-                        return;
+                        notReadyPlayers.Add(player.playerName);
                     }
+                }
+                
+                if (notReadyPlayers.Count > 0)
+                {
+                    string notReadyList = string.Join(", ", notReadyPlayers);
+                    RpcShowError(connectionToClient, $"Players not ready: {notReadyList}");
+                    return;
                 }
             }
 
             // All checks passed - start the game!
+            
+            // ✅ NEW: Assign random teams if in Team Mode
+            if (!isIndividualMode)
+            {
+                AssignRandomTeams();
+            }
+            else
+            {
+                // Reset teams for individual mode (everyone is -1 or unique, but -1 is fine for FFA usually, 
+                // or we can assign unique IDs if needed. For now, -1 means "No Team" / FFA)
+                ResetTeams();
+            }
+
             StartGame();
+        }
+
+        [Server]
+        private void AssignRandomTeams()
+        {
+            Debug.Log("[LobbyManager] Assigning random teams...");
+            
+            // Create a list of indices to shuffle
+            List<int> indices = new List<int>();
+            for (int i = 0; i < players.Count; i++)
+            {
+                indices.Add(i);
+            }
+            
+            // Shuffle indices
+            for (int i = 0; i < indices.Count; i++)
+            {
+                int temp = indices[i];
+                int randomIndex = UnityEngine.Random.Range(i, indices.Count);
+                indices[i] = indices[randomIndex];
+                indices[randomIndex] = temp;
+            }
+            
+            // Assign teams (0 and 1) alternating
+            // This ensures balanced teams (e.g. 4 players -> 2 vs 2, 3 players -> 2 vs 1)
+            for (int i = 0; i < indices.Count; i++)
+            {
+                int playerIndex = indices[i];
+                int teamId = i % 2; // 0, 1, 0, 1...
+                
+                var player = players[playerIndex];
+                player.teamId = teamId;
+                players[playerIndex] = player;
+                
+                Debug.Log($"[LobbyManager] Assigned {player.playerName} to Team {teamId}");
+            }
+        }
+
+        [Server]
+        private void ResetTeams()
+        {
+            for (int i = 0; i < players.Count; i++)
+            {
+                var player = players[i];
+                player.teamId = -1; // FFA
+                players[i] = player;
+            }
         }
 
         #endregion
@@ -385,13 +473,8 @@ namespace TacticalCombat.Network
         {
             Debug.Log("[LobbyManager] Starting game...");
             
-            // ✅ CRITICAL: Show all player visuals before starting game (they were hidden in lobby)
-            RpcShowAllPlayerVisuals();
-            
-            // ✅ CRITICAL: Hide all UI before starting game
-            RpcHideAllUI();
-            
-            // ✅ CRITICAL: Start MatchManager match (not scene change - we're already in game scene)
+            // ✅ CRITICAL: Start MatchManager FIRST (phase change triggers PlayerController updates)
+            // This ensures phase is updated before visuals are shown
             if (MatchManager.Instance != null)
             {
                 MatchManager.Instance.StartMatch();
@@ -399,10 +482,72 @@ namespace TacticalCombat.Network
             else
             {
                 Debug.LogError("[LobbyManager] MatchManager.Instance is NULL! Cannot start game.");
+                return; // Don't continue if MatchManager is missing
             }
             
-            // Notify all clients
+            // ✅ RACE CONDITION FIX: Wait a frame for phase change to propagate
+            // Then show visuals (prevents race condition between phase change and visual updates)
+            StartCoroutine(ShowPlayerVisualsAfterPhaseChange());
+            
+            // ✅ CRITICAL: Hide all UI before starting game
+            RpcHideAllUI();
+            
+            // ✅ NEW: Apply team assignments to PlayerControllers
+            foreach (var player in players)
+            {
+                // Find PlayerController for this connection
+                NetworkConnection conn = null;
+                foreach (var c in NetworkServer.connections.Values)
+                {
+                    if (c.connectionId == player.connectionId)
+                    {
+                        conn = c;
+                        break;
+                    }
+                }
+                
+                if (conn != null && conn.identity != null)
+                {
+                    var playerController = conn.identity.GetComponent<PlayerController>();
+                    if (playerController != null)
+                    {
+                        // Map Lobby Team ID to Game Team Enum
+                        // Lobby: 0=TeamA, 1=TeamB, -1=None
+                        // Game: 0=None, 1=TeamA, 2=TeamB
+                        Team gameTeam = Team.None;
+                        if (player.teamId == 0) gameTeam = Team.TeamA;
+                        else if (player.teamId == 1) gameTeam = Team.TeamB;
+                        
+                        // Set team (SyncVar will propagate to clients)
+                        playerController.team = gameTeam;
+                        
+                        // Also register with MatchManager
+                        if (MatchManager.Instance != null)
+                        {
+                            MatchManager.Instance.RegisterPlayer(playerController.netId, playerController.team, playerController.role);
+                        }
+                        
+                        Debug.Log($"[LobbyManager] Applied team assignment: {player.playerName} -> {gameTeam}");
+                    }
+                }
+            }
+
+            // ✅ CRITICAL: Notify all clients AFTER MatchManager phase change
+            // This ensures phase is updated before visuals are shown
             RpcGameStarting();
+        }
+        
+        /// <summary>
+        /// ✅ RACE CONDITION FIX: Show player visuals after phase change has propagated
+        /// This prevents race condition between MatchManager phase change and visual updates
+        /// </summary>
+        private System.Collections.IEnumerator ShowPlayerVisualsAfterPhaseChange()
+        {
+            // Wait for phase change to propagate to all clients
+            yield return new WaitForSeconds(0.1f); // 100ms should be enough for SyncVar propagation
+            
+            // Now show visuals (PlayerController.CheckAndUpdatePlayerControls should have already run)
+            RpcShowAllPlayerVisuals();
         }
 
         /// <summary>
@@ -446,20 +591,96 @@ namespace TacticalCombat.Network
         
         /// <summary>
         /// ✅ NEW: Show all player visuals when game starts (they were hidden in lobby)
+        /// MatchManager phase change will trigger PlayerController.CheckAndUpdatePlayerControls automatically
+        /// ✅ RACE CONDITION FIX: This is called AFTER phase change, so PlayerController should have already updated
         /// </summary>
         [ClientRpc]
         private void RpcShowAllPlayerVisuals()
         {
-            // Find all player controllers and show their visuals
+            // ✅ RACE CONDITION FIX: Verify phase has changed before showing visuals
+            // This prevents race condition where visuals are shown before phase change
+            if (MatchManager.Instance != null)
+            {
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                if (currentPhase == Phase.Lobby)
+                {
+                    // Phase hasn't changed yet, wait a bit more
+                    Debug.LogWarning("[LobbyManager] Phase still Lobby, waiting for phase change...");
+                    StartCoroutine(ShowPlayerVisualsDelayed());
+                    return;
+                }
+            }
+            
+            // Phase has changed, safe to show visuals
+            ShowPlayerVisualsNow();
+        }
+        
+        /// <summary>
+        /// ✅ RACE CONDITION FIX: Show visuals after phase change delay
+        /// </summary>
+        private System.Collections.IEnumerator ShowPlayerVisualsDelayed()
+        {
+            // Wait for phase change to complete
+            int maxWait = 20; // 2 seconds max
+            int waitCount = 0;
+            
+            while (waitCount < maxWait)
+            {
+                if (MatchManager.Instance != null)
+                {
+                    Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                    if (currentPhase != Phase.Lobby)
+                    {
+                        // Phase changed, safe to show visuals
+                        break;
+                    }
+                }
+                
+                yield return new WaitForSeconds(0.1f);
+                waitCount++;
+            }
+            
+            // Show visuals now
+            ShowPlayerVisualsNow();
+        }
+        
+        /// <summary>
+        /// ✅ RACE CONDITION FIX: Actually show player visuals (called after phase change)
+        /// </summary>
+        private void ShowPlayerVisualsNow()
+        {
             var allPlayers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
             foreach (var player in allPlayers)
             {
-                // Show all renderers (player body, weapons, etc.)
-                Renderer[] renderers = player.GetComponentsInChildren<Renderer>();
-                foreach (Renderer renderer in renderers)
+                // ✅ RACE CONDITION FIX: Call CheckAndUpdatePlayerControls first to ensure phase is handled
+                // This ensures PlayerController has already updated based on phase
+                player.CheckAndUpdatePlayerControls();
+                
+                // Ensure PlayerVisuals component is active
+                var playerVisuals = player.GetComponent<Player.PlayerVisuals>();
+                if (playerVisuals != null)
                 {
-                    // Don't show camera or UI elements (they should always be visible)
-                    if (renderer.GetComponent<Camera>() == null && 
+                    playerVisuals.gameObject.SetActive(true);
+                    
+                    // Show all renderers in PlayerVisuals
+                    Renderer[] renderers = playerVisuals.GetComponentsInChildren<Renderer>();
+                    foreach (Renderer renderer in renderers)
+                    {
+                        if (renderer != null && 
+                            renderer.GetComponent<Camera>() == null && 
+                            renderer.GetComponent<Canvas>() == null)
+                        {
+                            renderer.enabled = true;
+                        }
+                    }
+                }
+                
+                // Show all renderers in player GameObject (body, weapons, etc.)
+                Renderer[] playerRenderers = player.GetComponentsInChildren<Renderer>();
+                foreach (Renderer renderer in playerRenderers)
+                {
+                    if (renderer != null &&
+                        renderer.GetComponent<Camera>() == null && 
                         renderer.GetComponent<Canvas>() == null)
                     {
                         renderer.enabled = true;
@@ -510,6 +731,46 @@ namespace TacticalCombat.Network
             // ✅ NEW: Set local connection ID on client
             localConnectionId = connectionId;
             Debug.Log($"[LobbyManager] Local connection ID set to: {connectionId}");
+        }
+
+        /// <summary>
+        /// ✅ NEW: Show lobby full error to client before disconnecting
+        /// </summary>
+        [TargetRpc]
+        private void RpcShowLobbyFullError(NetworkConnection target, string errorMessage)
+        {
+            Debug.LogWarning($"[LobbyManager] {errorMessage}");
+            
+            // Show error in UI
+            if (lobbyUI != null)
+            {
+                lobbyUI.ShowError(errorMessage);
+            }
+            else
+            {
+                // Try to find LobbyUI
+                lobbyUI = TacticalCombat.UI.LobbyUI.Instance;
+                if (lobbyUI != null)
+                {
+                    lobbyUI.ShowError(errorMessage);
+                }
+            }
+        }
+
+        /// <summary>
+        /// ✅ NEW: Disconnect player after showing error message
+        /// </summary>
+        private System.Collections.IEnumerator DisconnectPlayerAfterError(NetworkConnectionToClient conn)
+        {
+            // Wait for RPC to be sent (network delay)
+            yield return new WaitForSeconds(0.5f);
+            
+            // Disconnect the player
+            if (conn != null && conn.isReady)
+            {
+                conn.Disconnect();
+                Debug.Log($"[LobbyManager] Player disconnected due to full lobby");
+            }
         }
 
         #endregion
@@ -566,6 +827,14 @@ namespace TacticalCombat.Network
         public int GetMaxPlayers()
         {
             return maxPlayers;
+        }
+
+        /// <summary>
+        /// ✅ NEW: Get local connection ID (set by server via RPC)
+        /// </summary>
+        public uint GetLocalConnectionId()
+        {
+            return localConnectionId;
         }
 
         public LobbyPlayerData? GetLocalPlayer()

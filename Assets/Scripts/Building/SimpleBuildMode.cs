@@ -1,6 +1,7 @@
 using UnityEngine;
 using Unity.Profiling;
 using Mirror;
+using UnityEngine.InputSystem;
 using TacticalCombat.Core;
 using TacticalCombat.Player;
 using TacticalCombat.Combat;
@@ -32,9 +33,9 @@ namespace TacticalCombat.Building
         [SerializeField] private LayerMask structureLayer; // for stability/support checks
         public float placementDistance = 5f;
         public float rotationSpeed = 90f;
-        public KeyCode buildModeKey = KeyCode.B;
-        public KeyCode rotateKey = KeyCode.R;
-        public KeyCode cycleStructureKey = KeyCode.Tab;
+        public Key buildModeKey = Key.B;
+        public Key rotateKey = Key.R;
+        public Key cycleStructureKey = Key.Tab;
         public float gridSize = 1f;
         
         [Header("Build Mode Behavior")]
@@ -45,13 +46,10 @@ namespace TacticalCombat.Building
         [SerializeField] private bool showStabilityPreview = true;
         [SerializeField] private float maxSupportDistance = 10f;
 
-        [Header("Structure Costs")]
-        [SerializeField] private int wallCost = 10;
-        [SerializeField] private int floorCost = 5;
-        [SerializeField] private int roofCost = 8;
-        [SerializeField] private int doorCost = 15;
-        [SerializeField] private int windowCost = 12;
-        [SerializeField] private int stairsCost = 20;
+        // ✅ REMOVED: Structure costs are now managed by StructureDatabase
+        // Old fields (kept for reference, but no longer used):
+        // - wallCost, floorCost, roofCost, doorCost, windowCost, stairsCost
+        // Use StructureDatabase.Instance.GetCost(StructureType) instead
         
         // ✅ FIX: Weapon system reference
         private WeaponSystem weaponSystem;
@@ -305,7 +303,10 @@ namespace TacticalCombat.Building
             }
 
             // ✅ FIX: Add cooldown to prevent rapid toggle causing state corruption
-            if (Input.GetKeyDown(buildModeKey) && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
+            // Check keyboard validity
+            if (Keyboard.current == null) return;
+
+            if (Keyboard.current[buildModeKey].wasPressedThisFrame && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
             {
                 isTogglingBuildMode = true;
                 lastToggleTime = Time.time;
@@ -331,7 +332,7 @@ namespace TacticalCombat.Building
             }
 
             // ESC also exits build mode (with same cooldown and guard)
-            if (isBuildModeActive && Input.GetKeyDown(KeyCode.Escape) && Time.time - lastToggleTime > TOGGLE_COOLDOWN && !isTogglingBuildMode)
+            if (isBuildModeActive && Keyboard.current.escapeKey.wasPressedThisFrame && Time.time - lastToggleTime > TOGGLE_COOLDOWN && !isTogglingBuildMode)
             {
                 isTogglingBuildMode = true;
                 lastToggleTime = Time.time;
@@ -349,7 +350,7 @@ namespace TacticalCombat.Building
         
         private void HandleStructureSelection()
         {
-            if (Input.GetKeyDown(cycleStructureKey))
+            if (Keyboard.current != null && Keyboard.current[cycleStructureKey].wasPressedThisFrame)
             {
                 CycleStructure();
             }
@@ -386,7 +387,7 @@ namespace TacticalCombat.Building
         
         private void HandleRotation()
         {
-            if (Input.GetKey(rotateKey))
+            if (Keyboard.current != null && Keyboard.current[rotateKey].isPressed)
             {
                 currentRotationY += rotationSpeed * Time.deltaTime;
                 currentRotationY = Mathf.Repeat(currentRotationY, 360f);
@@ -402,7 +403,7 @@ namespace TacticalCombat.Building
             if (!isBuildModeActive) return;
 
             // ✅ PERFORMANCE FIX: Prevent rapid placement spam (freeze fix)
-            if (Input.GetMouseButtonDown(0) && canPlace)
+            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame && canPlace)
             {
                 float timeSinceLastPlacement = Time.time - lastPlacementTime;
                 if (timeSinceLastPlacement >= PLACEMENT_COOLDOWN)
@@ -589,9 +590,9 @@ namespace TacticalCombat.Building
 
         private void UpdateGhostPreview()
         {
-            if (ghostPreview == null || playerCamera == null) return;
+            if (ghostPreview == null || playerCamera == null || Mouse.current == null) return;
 
-            Ray ray = playerCamera.ScreenPointToRay(Input.mousePosition);
+            Ray ray = playerCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
 
             if (Physics.Raycast(ray, out RaycastHit hit, placementDistance, groundLayer))
             {
@@ -1062,19 +1063,13 @@ namespace TacticalCombat.Building
             if (availableStructures == null || currentStructureIndex >= availableStructures.Length)
                 return 0;
 
-            GameObject structure = availableStructures[currentStructureIndex];
-            if (structure == null) return 0;
-
-            string structureName = structure.name.ToLower();
-
-            if (structureName.Contains("wall")) return wallCost;
-            if (structureName.Contains("floor")) return floorCost;
-            if (structureName.Contains("roof")) return roofCost;
-            if (structureName.Contains("door")) return doorCost;
-            if (structureName.Contains("window")) return windowCost;
-            if (structureName.Contains("stair")) return stairsCost;
-
-            return 10; // Default cost
+            StructureType type = GetStructureTypeFromIndex(currentStructureIndex);
+            // ✅ FIX: Null check for StructureDatabase
+            if (StructureDatabase.Instance != null)
+            {
+                return StructureDatabase.Instance.GetCost(type);
+            }
+            return 1; // Default fallback
         }
 
         /// <summary>

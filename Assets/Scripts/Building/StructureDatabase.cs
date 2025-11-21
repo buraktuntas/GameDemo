@@ -1,135 +1,87 @@
 using UnityEngine;
 using System.Collections.Generic;
-using TacticalCombat.Core;
+using System.Linq;
+using TacticalCombat.Core; // ✅ FIX: Required for StructureType and StructureCategory enums
 
 namespace TacticalCombat.Building
 {
     /// <summary>
-    /// ✅ NEW: Database for StructureSO ScriptableObjects (per Level Design Spec)
-    /// Provides centralized access to structure configurations
+    /// ✅ NEW: Central database for all structure data.
+    /// Replaces hardcoded switch statements in Structure.cs.
     /// </summary>
     [CreateAssetMenu(fileName = "StructureDatabase", menuName = "Tactical Combat/Structure Database")]
     public class StructureDatabase : ScriptableObject
     {
-        [Header("Structure Configurations")]
-        [SerializeField] private List<StructureSO> structures = new List<StructureSO>();
-        
-        private Dictionary<string, StructureSO> structureDict;
-        private Dictionary<StructureType, StructureSO> structureTypeDict;
-        
-        /// <summary>
-        /// Initialize dictionary for fast lookup
-        /// </summary>
+        private static StructureDatabase _instance;
+        public static StructureDatabase Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    _instance = Resources.Load<StructureDatabase>("StructureDatabase");
+                }
+                return _instance;
+            }
+        }
+
+        [Header("Registered Structures")]
+        public List<StructureSO> structures = new List<StructureSO>();
+
+        private Dictionary<StructureType, StructureSO> _lookup;
+
         private void OnEnable()
         {
-            BuildDictionary();
+            InitializeLookup();
         }
-        
-        private void BuildDictionary()
+
+        private void InitializeLookup()
         {
-            structureDict = new Dictionary<string, StructureSO>();
-            structureTypeDict = new Dictionary<StructureType, StructureSO>();
-            
-            foreach (var structure in structures)
+            _lookup = new Dictionary<StructureType, StructureSO>();
+            foreach (var s in structures)
             {
-                if (structure == null) continue;
-                
-                // Index by ID
-                if (!string.IsNullOrEmpty(structure.id))
+                if (s != null && !_lookup.ContainsKey(s.structureType))
                 {
-                    structureDict[structure.id] = structure;
-                }
-                
-                // Index by StructureType
-                structureTypeDict[structure.structureType] = structure;
-            }
-        }
-        
-        /// <summary>
-        /// Get structure by ID (per spec: StructureDatabase.Get(structId))
-        /// </summary>
-        public static StructureSO Get(string structId)
-        {
-            // Find database instance
-            var database = Resources.Load<StructureDatabase>("StructureDatabase");
-            if (database == null)
-            {
-                Debug.LogWarning($"[StructureDatabase] Database not found at Resources/StructureDatabase.asset");
-                return null;
-            }
-            
-            if (database.structureDict == null || database.structureDict.Count == 0)
-            {
-                database.BuildDictionary();
-            }
-            
-            if (database.structureDict.TryGetValue(structId, out StructureSO structure))
-            {
-                return structure;
-            }
-            
-            Debug.LogWarning($"[StructureDatabase] Structure '{structId}' not found");
-            return null;
-        }
-        
-        /// <summary>
-        /// Get structure by StructureType
-        /// </summary>
-        public static StructureSO Get(StructureType type)
-        {
-            var database = Resources.Load<StructureDatabase>("StructureDatabase");
-            if (database == null)
-            {
-                Debug.LogWarning($"[StructureDatabase] Database not found at Resources/StructureDatabase.asset");
-                return null;
-            }
-            
-            if (database.structureTypeDict == null || database.structureTypeDict.Count == 0)
-            {
-                database.BuildDictionary();
-            }
-            
-            if (database.structureTypeDict.TryGetValue(type, out StructureSO structure))
-            {
-                return structure;
-            }
-            
-            Debug.LogWarning($"[StructureDatabase] Structure type '{type}' not found");
-            return null;
-        }
-        
-        /// <summary>
-        /// Get all structures
-        /// </summary>
-        public static List<StructureSO> GetAll()
-        {
-            var database = Resources.Load<StructureDatabase>("StructureDatabase");
-            if (database == null)
-            {
-                return new List<StructureSO>();
-            }
-            
-            return new List<StructureSO>(database.structures);
-        }
-        
-        /// <summary>
-        /// Get structures by category
-        /// </summary>
-        public static List<StructureSO> GetByCategory(StructureCategory category)
-        {
-            var all = GetAll();
-            var filtered = new List<StructureSO>();
-            
-            foreach (var structure in all)
-            {
-                if (structure != null && structure.category == category)
-                {
-                    filtered.Add(structure);
+                    _lookup.Add(s.structureType, s);
                 }
             }
-            
-            return filtered;
+        }
+
+        public StructureSO GetStructureData(StructureType type)
+        {
+            if (_lookup == null || _lookup.Count == 0)
+            {
+                InitializeLookup();
+            }
+
+            if (_lookup.TryGetValue(type, out var data))
+            {
+                return data;
+            }
+
+            Debug.LogWarning($"[StructureDatabase] No data found for structure type: {type}");
+            return null;
+        }
+
+        public int GetCost(StructureType type)
+        {
+            var data = GetStructureData(type);
+            return data != null ? data.GetCost() : 1; // Default cost 1
+        }
+
+        public int GetHealth(StructureType type)
+        {
+            var data = GetStructureData(type);
+            return data != null ? data.GetMaxHealth() : 100; // Default health 100
+        }
+
+        /// <summary>
+        /// ✅ NEW: Get structure category (replaces Structure.GetStructureCategory)
+        /// </summary>
+        public StructureCategory GetCategory(StructureType type)
+        {
+            var data = GetStructureData(type);
+            return data != null ? data.category : StructureCategory.Wall; // Default to Wall
         }
     }
 }
-

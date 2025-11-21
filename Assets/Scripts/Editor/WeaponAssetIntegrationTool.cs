@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEngine.InputSystem;
 using TacticalCombat.Combat;
 using Mirror;
 
@@ -430,8 +431,15 @@ namespace TacticalCombat.Editor
         void Update()
         {
             // Weapon sway
-            float mouseX = Input.GetAxis("Mouse X");
-            float mouseY = Input.GetAxis("Mouse Y");
+            float mouseX = 0f;
+            float mouseY = 0f;
+
+            if (Mouse.current != null)
+            {
+                Vector2 delta = Mouse.current.delta.ReadValue();
+                mouseX = delta.x * 0.1f; // Adjust sensitivity if needed
+                mouseY = delta.y * 0.1f;
+            }
             
             Vector3 swayOffset = new Vector3(
                 mouseX * weaponSwayAmount,

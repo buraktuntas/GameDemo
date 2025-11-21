@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using UnityEngine.InputSystem;
 
 namespace TacticalCombat.Debugging
 {
@@ -24,15 +25,15 @@ namespace TacticalCombat.Debugging
         private void Update()
         {
             // Press F1 to run diagnostics manually
-            if (Input.GetKeyDown(KeyCode.F1))
+            if (Keyboard.current != null && Keyboard.current.f1Key.wasPressedThisFrame)
             {
                 RunDiagnostics();
             }
 
             // Show mouse position and raycast info
-            if (Input.GetMouseButtonDown(0))
+            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
             {
-                Debug.Log($"🖱️ MOUSE CLICK at position: {Input.mousePosition}");
+                Debug.Log($"🖱️ MOUSE CLICK at position: {Mouse.current.position.ReadValue()}");
                 Debug.Log($"   Cursor state: {Cursor.lockState}, Visible: {Cursor.visible}");
 
                 CheckRaycastAtMousePosition();
@@ -141,7 +142,7 @@ namespace TacticalCombat.Debugging
             Debug.Log($"\n🖱️ Cursor State:");
             Debug.Log($"   Lock State: {Cursor.lockState}");
             Debug.Log($"   Visible: {Cursor.visible}");
-            Debug.Log($"   Position: {Input.mousePosition}");
+            Debug.Log($"   Position: {(Mouse.current != null ? Mouse.current.position.ReadValue().ToString() : "N/A")}");
 
             if (Cursor.lockState == CursorLockMode.Locked)
             {
@@ -224,7 +225,7 @@ namespace TacticalCombat.Debugging
         {
             PointerEventData eventData = new PointerEventData(EventSystem.current)
             {
-                position = Input.mousePosition
+                position = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero
             };
 
             var results = new System.Collections.Generic.List<RaycastResult>();

@@ -87,3 +87,5 @@ Eğer farklı versiyonlar yüklüyse, Unity versiyonu ile uyumsuz olabilir.
 - Tüm paketler birbirine bağlı, bu yüzden Library'yi silmek en iyi çözüm
 
 
+
+

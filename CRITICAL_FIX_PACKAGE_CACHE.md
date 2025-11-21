@@ -63,3 +63,5 @@ Library klasörünü silmeden önce Unity Editor'ın KAPALI olduğundan emin olu
 Aksi halde dosya kilitlenir ve silinemez.
 
 
+
+

@@ -48,3 +48,5 @@ Unity Editor scriptleri otomatik derler, ancak bazen manuel yeniden derleme gere
 Değişiklikler görünmüyorsa mutlaka **Assets > Reimport All** yapın.
 
 
+
+

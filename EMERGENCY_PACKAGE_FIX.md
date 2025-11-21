@@ -68,3 +68,5 @@ Aksi halde dosya kilitlenir ve silinemez.
    - Unity Burst
 
 
+
+

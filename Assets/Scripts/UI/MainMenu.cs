@@ -472,42 +472,62 @@ namespace TacticalCombat.UI
         /// <summary>
         /// ✅ NEW: Show Lobby UI
         /// </summary>
+        /// <summary>
+        /// ✅ NEW: Validate IP address format
+        /// </summary>
+        private bool IsValidIPAddress(string ip)
+        {
+            if (string.IsNullOrEmpty(ip))
+                return false;
+            
+            // Allow localhost
+            if (ip.Equals("localhost", System.StringComparison.OrdinalIgnoreCase) || 
+                ip.Equals("127.0.0.1"))
+                return true;
+            
+            // Validate IPv4 format
+            string[] parts = ip.Split('.');
+            if (parts.Length != 4)
+                return false;
+            
+            foreach (string part in parts)
+            {
+                if (!int.TryParse(part, out int num) || num < 0 || num > 255)
+                    return false;
+            }
+            
+            return true;
+        }
+
         private void ShowLobby()
         {
-            GameLogger.LogUI("Looking for LobbyUI");
+            GameLogger.LogUI("Looking for LobbyUIController");
             
-            // Try multiple methods to find LobbyUI
-            LobbyUI lobbyUI = FindFirstObjectByType<LobbyUI>();
+            // ✅ NEW: Use new LobbyUIController (AAA quality, sıfırdan temiz)
+            LobbyUIController lobbyController = LobbyUIController.Instance;
             
-            // Method 2: Search by GameObject name (even if inactive)
-            if (lobbyUI == null)
+            if (lobbyController == null)
             {
-                GameObject lobbyPanel = GameObject.Find("LobbyPanel");
-                if (lobbyPanel != null)
-                {
-                    lobbyUI = lobbyPanel.GetComponent<LobbyUI>();
-                }
+                // Try to find existing
+                lobbyController = FindFirstObjectByType<LobbyUIController>();
             }
             
-            // Method 3: Search in Canvas hierarchy
-            if (lobbyUI == null)
+            if (lobbyController == null)
             {
-                Canvas canvas = FindFirstObjectByType<Canvas>();
-                if (canvas != null)
-                {
-                    lobbyUI = canvas.GetComponentInChildren<LobbyUI>(true); // true = include inactive
-                }
+                // Create new LobbyUIController
+                GameObject controllerObj = new GameObject("LobbyUIController");
+                lobbyController = controllerObj.AddComponent<LobbyUIController>();
+                GameLogger.LogUI("✅ Created new LobbyUIController");
             }
             
-            if (lobbyUI != null)
+            if (lobbyController != null)
             {
-                GameLogger.LogUI($"Found LobbyUI at: {lobbyUI.gameObject.name}");
-                lobbyUI.ShowPanel();
+                GameLogger.LogUI($"✅ Found LobbyUIController: {lobbyController.gameObject.name}");
+                lobbyController.ShowLobby();
             }
             else
             {
-                GameLogger.LogError("LobbyUI not found! Cannot proceed to lobby. Please ensure LobbyPanel exists in the scene with LobbyUI component.");
-                // Don't load game scene - stay in menu
+                GameLogger.LogError("❌ Failed to create LobbyUIController!");
             }
         }
 
@@ -573,6 +593,14 @@ namespace TacticalCombat.UI
 
             // ✅ CRITICAL FIX: IP adresini temizle (boşlukları kaldır)
             ipAddress = ipAddress.Trim();
+            
+            // ✅ NEW: Validate IP address format
+            if (!IsValidIPAddress(ipAddress))
+            {
+                GameLogger.LogError($"❌ [MainMenu] Invalid IP address format: {ipAddress}");
+                GameLogger.LogError("   Please enter a valid IP address (e.g., 192.168.1.100) or 'localhost'");
+                return;
+            }
 
             Debug.Log("═══════════════════════════════════════");
             Debug.Log($"🎮 [MainMenu] Connecting to {ipAddress}...");
@@ -630,8 +658,10 @@ namespace TacticalCombat.UI
                     joinPanel.SetActive(false);
                 }
 
-                // ✅ NEW FLOW: Client → Direct to Lobby
-                ShowLobby();
+                // ✅ FIX: Don't show lobby immediately - wait for OnClientConnect
+                // NetworkGameManager.OnClientConnect() will handle showing the lobby
+                // This ensures the client is fully connected and LobbyManager is ready
+                Debug.Log("✅ [MainMenu] Client connection started. Lobby will be shown after connection is established.");
             }
             else
             {
@@ -655,7 +685,10 @@ namespace TacticalCombat.UI
             #endif
         }
 
-        private void ShowMainMenu()
+        /// <summary>
+        /// ✅ PUBLIC: Show main menu (called from other scripts)
+        /// </summary>
+        public void ShowMainMenu()
         {
             if (mainMenuPanel != null)
             {
@@ -829,10 +862,23 @@ namespace TacticalCombat.UI
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
 
-            // Set default IP
-            if (ipAddressInput != null && string.IsNullOrEmpty(ipAddressInput.text))
+            // Set default IP and placeholder
+            if (ipAddressInput != null)
             {
-                ipAddressInput.text = "localhost";
+                if (string.IsNullOrEmpty(ipAddressInput.text))
+                {
+                    ipAddressInput.text = "localhost";
+                }
+                
+                // ✅ NEW: Set placeholder text to help users
+                if (ipAddressInput.placeholder != null)
+                {
+                    var placeholderText = ipAddressInput.placeholder.GetComponent<TMPro.TextMeshProUGUI>();
+                    if (placeholderText != null)
+                    {
+                        placeholderText.text = "localhost (aynı PC) veya 192.168.x.x (LAN)";
+                    }
+                }
             }
         }
         

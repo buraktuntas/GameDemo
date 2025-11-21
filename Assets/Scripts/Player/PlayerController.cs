@@ -84,8 +84,9 @@ namespace TacticalCombat.Player
         /// <summary>
         /// ✅ CRITICAL FIX: Enable/disable player controls based on match phase
         /// GDD-compliant: Lobby phase = NO gameplay, NO movement, NO shooting
+        /// ✅ PUBLIC: Made public so LobbyManager can call it to ensure phase is handled
         /// </summary>
-        private void CheckAndUpdatePlayerControls()
+        public void CheckAndUpdatePlayerControls()
         {
             if (!isLocalPlayer) return;
 
@@ -136,17 +137,37 @@ namespace TacticalCombat.Player
             
             // ✅ CRITICAL FIX: Hide player model/body in lobby phase
             // Find all renderers in children (player body, weapons, etc.)
+            // ✅ CRITICAL: NEVER hide cameras - they're needed for UI rendering
             if (isInLobbyPhase)
             {
                 Renderer[] allRenderers = GetComponentsInChildren<Renderer>();
                 foreach (Renderer renderer in allRenderers)
                 {
-                    // Don't hide camera or UI elements
-                    if (renderer.GetComponent<Camera>() == null && 
-                        renderer.GetComponent<Canvas>() == null)
+                    if (renderer == null) continue;
+                    
+                    // ✅ CRITICAL: Don't hide camera or UI elements
+                    // Camera must stay active for UI rendering
+                    Camera cam = renderer.GetComponent<Camera>();
+                    Canvas canvas = renderer.GetComponent<Canvas>();
+                    
+                    if (cam == null && canvas == null)
                     {
                         renderer.enabled = false;
                     }
+                    else if (cam != null)
+                    {
+                        // ✅ CRITICAL: Ensure camera stays enabled for UI rendering
+                        cam.enabled = true;
+                        cam.gameObject.SetActive(true);
+                    }
+                }
+                
+                // ✅ CRITICAL: Ensure camera component itself is enabled
+                Camera playerCamera = GetComponentInChildren<Camera>();
+                if (playerCamera != null)
+                {
+                    playerCamera.enabled = true;
+                    playerCamera.gameObject.SetActive(true);
                 }
             }
             else
@@ -155,7 +176,10 @@ namespace TacticalCombat.Player
                 Renderer[] allRenderers = GetComponentsInChildren<Renderer>();
                 foreach (Renderer renderer in allRenderers)
                 {
-                    renderer.enabled = true;
+                    if (renderer != null)
+                    {
+                        renderer.enabled = true;
+                    }
                 }
             }
 

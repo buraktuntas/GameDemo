@@ -94,7 +94,8 @@ namespace TacticalCombat.Building
             var simpleFloorPrefab = buildModeType.GetField("floorPrefab", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
             var simpleStairsPrefab = buildModeType.GetField("stairsPrefab", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
             
-            bool loaded = false;
+            // ✅ FIX: Track if any prefabs were loaded for debug logging
+            bool anyPrefabLoaded = false;
             
             if (wallPrefab == null && wallPrefabField != null && simpleWallPrefab != null)
             {
@@ -102,7 +103,7 @@ namespace TacticalCombat.Building
                 if (prefab != null)
                 {
                     wallPrefabField.SetValue(this, prefab);
-                    loaded = true;
+                    anyPrefabLoaded = true;
                 }
             }
             
@@ -113,7 +114,7 @@ namespace TacticalCombat.Building
                 if (prefab != null)
                 {
                     platformPrefabField.SetValue(this, prefab);
-                    loaded = true;
+                    anyPrefabLoaded = true;
                 }
             }
             
@@ -124,12 +125,12 @@ namespace TacticalCombat.Building
                 if (prefab != null)
                 {
                     rampPrefabField.SetValue(this, prefab);
-                    loaded = true;
+                    anyPrefabLoaded = true;
                 }
             }
             
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (loaded)
+            if (anyPrefabLoaded)
             {
                 Debug.Log("✅ [BuildValidator] Prefabs loaded from SimpleBuildMode");
             }
@@ -183,9 +184,21 @@ namespace TacticalCombat.Building
                 return false;
             }
 
+            // ✅ FIX: Null check for StructureDatabase
+            if (StructureDatabase.Instance == null)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogError("❌ [BuildValidator] StructureDatabase.Instance is NULL! Please create StructureDatabase asset in Resources folder.");
+                #endif
+                return false;
+            }
+            
             // Get structure info
-            StructureCategory category = Structure.GetStructureCategory(request.type);
-            int cost = Structure.GetStructureCost(request.type);
+            var structureData = StructureDatabase.Instance.GetStructureData(request.type);
+            if (structureData == null) return false;
+
+            StructureCategory category = structureData.category;
+            int cost = structureData.GetCost();
 
             // ✅ CRITICAL FIX: Terrain anchor validation (height limit, ground distance, slope)
             // DO ALL VALIDATION BEFORE SPENDING BUDGET (prevents resource drain exploit)
@@ -339,7 +352,16 @@ namespace TacticalCombat.Building
             Structure structure = structureObj.GetComponent<Structure>();
             if (structure != null)
             {
-                structure.Initialize(team, request.type, Structure.GetStructureCategory(request.type), request.playerId);
+                StructureCategory category = StructureCategory.Wall; // Default
+                if (StructureDatabase.Instance != null)
+                {
+                    var data = StructureDatabase.Instance.GetStructureData(request.type);
+                    if (data != null)
+                    {
+                        category = data.category;
+                    }
+                }
+                structure.Initialize(team, request.type, category, request.playerId);
             }
 
             // ✅ CRITICAL FIX: Initialize traps (traps won't arm without Initialize call)

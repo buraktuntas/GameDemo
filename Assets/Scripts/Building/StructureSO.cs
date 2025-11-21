@@ -61,27 +61,37 @@ namespace TacticalCombat.Building
         }
         
         /// <summary>
-        /// Get structure cost (fallback to static method if not set)
+        /// Get structure cost
         /// </summary>
         public int GetCost()
         {
             if (cost > 0)
                 return cost;
             
-            // Fallback to static method
-            return Structure.GetStructureCost(structureType);
+            // ✅ REFACTOR: Fallback to StructureDatabase if cost not set
+            if (StructureDatabase.Instance != null)
+            {
+                return StructureDatabase.Instance.GetCost(structureType);
+            }
+            
+            return 1; // Ultimate fallback
         }
         
         /// <summary>
-        /// Get structure health (fallback to static method if not set)
+        /// Get structure health
         /// </summary>
         public int GetMaxHealth()
         {
             if (maxHealth > 0)
                 return maxHealth;
             
-            // Fallback to static method (via GameConstants)
-            return Structure.GetStructureHealth(structureType);
+            // ✅ REFACTOR: Fallback to StructureDatabase if health not set
+            if (StructureDatabase.Instance != null)
+            {
+                return StructureDatabase.Instance.GetHealth(structureType);
+            }
+            
+            return 100; // Ultimate fallback
         }
         
         /// <summary>

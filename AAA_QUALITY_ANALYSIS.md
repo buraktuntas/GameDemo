@@ -432,3 +432,5 @@
 **Sonuç:** Core gameplay AAA seviyesinde, ancak AAA oyunların standart özellikleri (settings, accessibility, polish) eksik. Bu özellikler eklendiğinde oyun AAA kalitesine ulaşacak.
 
 
+
+

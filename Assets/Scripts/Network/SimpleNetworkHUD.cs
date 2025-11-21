@@ -1,5 +1,6 @@
 using UnityEngine;
 using Mirror;
+using UnityEngine.InputSystem;
 
 namespace TacticalCombat.Network
 {
@@ -87,8 +88,10 @@ namespace TacticalCombat.Network
             // Klavye kısayolları
             if (!NetworkClient.isConnected && !NetworkServer.active)
             {
+                if (Keyboard.current == null) return;
+
                 // H tuşu = Host
-                if (Input.GetKeyDown(KeyCode.H))
+                if (Keyboard.current.hKey.wasPressedThisFrame)
                 {
                     // ✅ CRITICAL FIX: Host başlatılırken networkAddress'i temizle
                     if (networkManager.networkAddress == "localhost" || networkManager.networkAddress == "127.0.0.1")
@@ -101,7 +104,7 @@ namespace TacticalCombat.Network
                 }
 
                 // C tuşu = Client
-                if (Input.GetKeyDown(KeyCode.C))
+                if (Keyboard.current.cKey.wasPressedThisFrame)
                 {
                     // Client için networkAddress ayarlanmalı (kullanıcıdan alınmalı)
                     // Bu basit HUD'da default olarak localhost kullanıyoruz

@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace TacticalCombat.Player
 {
@@ -54,83 +55,6 @@ namespace TacticalCombat.Player
         {
             // Her player'ın kendi InputManager'ı var - singleton değil
             Debug.Log("✅ InputManager initialized for this player");
-        }
-        
-        private void Start()
-        {
-            SetCursorMode(CursorMode.Locked);
-        }
-        
-        private void Update()
-        {
-            HandleEscapeKey();
-            HandleDebugKeys();
-        }
-        
-        private void HandleEscapeKey()
-        {
-            if (!Input.GetKeyDown(KeyCode.Escape)) return;
-            
-            // Priority 1: If paused, resume
-            if (IsPaused)
-            {
-                Resume();
-                return;
-            }
-            
-            // Priority 2: If in build mode, exit build mode
-            if (IsInBuildMode)
-            {
-                ExitBuildMode();
-                return;
-            }
-            
-            // Priority 3: If in menu, close menu
-            if (IsInMenu)
-            {
-                ExitMenu();
-                return;
-            }
-            
-            // Priority 4: Open pause menu
-            Pause();
-        }
-        
-        private void HandleDebugKeys()
-        {
-            // F1 = Debug info
-            if (Input.GetKeyDown(KeyCode.F1))
-            {
-                ShowDebugInfo();
-            }
-            
-            // F2 = Toggle debug display
-            if (Input.GetKeyDown(KeyCode.F2))
-            {
-                showDebugInfo = !showDebugInfo;
-                Debug.Log($"Debug info: {(showDebugInfo ? "ON" : "OFF")}");
-            }
-        }
-        
-        private void ShowDebugInfo()
-        {
-            Debug.Log($"═══════════════════════════════\n" +
-                      $"INPUT MANAGER STATUS\n" +
-                      $"═══════════════════════════════\n" +
-                      $"Cursor Mode: {currentMode}\n" +
-                      $"Paused: {IsPaused}\n" +
-                      $"Build Mode: {IsInBuildMode}\n" +
-                      $"Menu Mode: {IsInMenu}\n" +
-                      $"─────────────────────────────\n" +
-                      $"Camera Input: {(BlockCameraInput ? "BLOCKED ❌" : "ENABLED ✅")}\n" +
-                      $"Movement Input: {(BlockMovementInput ? "BLOCKED ❌" : "ENABLED ✅")}\n" +
-                      $"Jump Input: {(BlockJumpInput ? "BLOCKED ❌" : "ENABLED ✅")}\n" +
-                      $"Sprint Input: {(BlockSprintInput ? "BLOCKED ❌" : "ENABLED ✅")}\n" +
-                      $"─────────────────────────────\n" +
-                      $"Cursor Lock: {Cursor.lockState}\n" +
-                      $"Cursor Visible: {Cursor.visible}\n" +
-                      $"Time Scale: {Time.timeScale}\n" +
-                      $"═══════════════════════════════");
         }
         
         // ═══════════════════════════════════════════════════════════

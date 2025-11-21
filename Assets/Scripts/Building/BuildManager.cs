@@ -195,8 +195,12 @@ namespace TacticalCombat.Building
                 playerStructureCounts[request.playerId] = 0;
             }
             
-            // Check if structure is a trap
-            bool isTrap = Structure.GetStructureCategory(request.type) == StructureCategory.Trap;
+            // ✅ REFACTOR: Check if structure is a trap using StructureDatabase
+            bool isTrap = false;
+            if (StructureDatabase.Instance != null)
+            {
+                isTrap = StructureDatabase.Instance.GetCategory(request.type) == StructureCategory.Trap;
+            }
             
             if (isTrap)
             {
@@ -325,8 +329,13 @@ namespace TacticalCombat.Building
                     playerStructureCounts[ownerId]--;
                 }
                 
-                // ✅ NEW: Decrement trap count if trap
-                if (Structure.GetStructureCategory(structure.GetStructureType()) == StructureCategory.Trap)
+                // ✅ REFACTOR: Decrement trap count if trap
+                bool isTrap = false;
+                if (StructureDatabase.Instance != null)
+                {
+                    isTrap = StructureDatabase.Instance.GetCategory(structure.GetStructureType()) == StructureCategory.Trap;
+                }
+                if (isTrap)
                 {
                     if (playerTrapCounts.ContainsKey(ownerId))
                     {

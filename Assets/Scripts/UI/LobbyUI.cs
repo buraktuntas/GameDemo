@@ -76,6 +76,28 @@ namespace TacticalCombat.UI
         private const float UPDATE_INTERVAL = 0.2f; // Update every 200ms instead of every frame
         private int lastTeamACount = -1;
         private int lastTeamBCount = -1;
+        
+        // ✅ MEMORY LEAK FIX: Track coroutines for cleanup
+        private System.Collections.IEnumerator activeNetworkCoroutine;
+        private bool isDestroyed = false;
+
+        // Singleton instance
+        public static LobbyUI Instance { get; private set; }
+
+        private void Awake()
+        {
+            if (Instance == null)
+            {
+                Instance = this;
+                // ✅ CRITICAL: Persist LobbyUI across scenes (Main Menu -> Game Scene)
+                DontDestroyOnLoad(transform.root.gameObject);
+            }
+            else
+            {
+                Destroy(gameObject);
+                return;
+            }
+        }
 
         private void Start()
         {
@@ -150,6 +172,16 @@ namespace TacticalCombat.UI
 
         private void OnDestroy()
         {
+            isDestroyed = true;
+            
+            // ✅ MEMORY LEAK FIX: Stop active coroutines
+            if (activeNetworkCoroutine != null)
+            {
+                StopCoroutine(activeNetworkCoroutine);
+                activeNetworkCoroutine = null;
+            }
+            
+            // ✅ MEMORY LEAK FIX: Unsubscribe from events
             if (lobbyManager != null)
             {
                 lobbyManager.OnPlayerJoined -= OnPlayerJoined;
@@ -157,6 +189,9 @@ namespace TacticalCombat.UI
                 lobbyManager.OnPlayerUpdated -= OnPlayerUpdated;
                 lobbyManager.OnGameStarting -= OnGameStarting;
             }
+            
+            // ✅ MEMORY LEAK FIX: Cancel Invoke calls
+            CancelInvoke();
         }
 
         private void Update()
@@ -167,6 +202,76 @@ namespace TacticalCombat.UI
                 UpdatePlayerCount();
                 UpdateHostControls();
                 lastUpdateTime = Time.time;
+            }
+            
+            // ✅ CRITICAL FIX: Continuously ensure camera is active when lobby is open
+            // This prevents "No cameras rendering" warning
+            if (IsPanelOpen())
+            {
+                EnsureCameraActive();
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Ensure at least one camera is active when lobby is open
+        /// </summary>
+        private void EnsureCameraActive()
+        {
+            // Find local player's camera
+            var playerControllers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+            foreach (var player in playerControllers)
+            {
+                if (player != null && player.isLocalPlayer)
+                {
+                    // Try multiple methods to find camera
+                    Camera playerCamera = player.GetComponentInChildren<Camera>();
+                    
+                    if (playerCamera == null)
+                    {
+                        // Try FPSController
+                        var fpsController = player.GetComponent<Player.FPSController>();
+                        if (fpsController != null)
+                        {
+                            playerCamera = fpsController.GetComponentInChildren<Camera>();
+                        }
+                    }
+                    
+                    if (playerCamera == null)
+                    {
+                        // Try finding by name
+                        Transform cameraTransform = player.transform.Find("PlayerCamera");
+                        if (cameraTransform != null)
+                        {
+                            playerCamera = cameraTransform.GetComponent<Camera>();
+                        }
+                    }
+                    
+                    if (playerCamera != null)
+                    {
+                        // ✅ CRITICAL: Force camera to be active
+                        if (!playerCamera.enabled)
+                        {
+                            playerCamera.enabled = true;
+                        }
+                        if (!playerCamera.gameObject.activeInHierarchy)
+                        {
+                            playerCamera.gameObject.SetActive(true);
+                        }
+                        return; // Camera found and enabled
+                    }
+                }
+            }
+            
+            // Fallback: Enable any camera we can find
+            Camera[] allCameras = FindObjectsByType<Camera>(FindObjectsSortMode.None);
+            foreach (var cam in allCameras)
+            {
+                if (cam != null && !cam.name.Contains("UI") && !cam.name.Contains("Overlay"))
+                {
+                    cam.enabled = true;
+                    cam.gameObject.SetActive(true);
+                    return; // At least one camera is now active
+                }
             }
         }
 
@@ -179,7 +284,7 @@ namespace TacticalCombat.UI
         {
             LogUI("LobbyUI ShowPanel called");
             
-            // ✅ STEP 1: Configure Canvas (full screen)
+            // ✅ STEP 1: Configure Canvas (full screen) - AGGRESSIVE
             Canvas canvas = GetComponentInParent<Canvas>();
             if (canvas == null)
             {
@@ -192,6 +297,7 @@ namespace TacticalCombat.UI
                     canvasObj.AddComponent<UnityEngine.UI.CanvasScaler>();
                     canvasObj.AddComponent<UnityEngine.UI.GraphicRaycaster>();
                     transform.SetParent(canvas.transform, false);
+                    LogUI("✅ [LobbyUI] Created new LobbyCanvas");
                 }
             }
             
@@ -200,21 +306,35 @@ namespace TacticalCombat.UI
                 canvas.gameObject.SetActive(true);
                 canvas.renderMode = RenderMode.ScreenSpaceOverlay;
                 canvas.sortingOrder = 100;
+                canvas.enabled = true;
+                LogUI($"✅ [LobbyUI] Canvas configured: {canvas.name}, Active: {canvas.gameObject.activeInHierarchy}, SortingOrder: {canvas.sortingOrder}");
+            }
+            else
+            {
+                LogUI("❌ [LobbyUI] CRITICAL: Canvas is null after setup!");
             }
             
-            // ✅ STEP 2: Configure root GameObject (full screen)
+            // ✅ STEP 2: Configure root GameObject (full screen) - AGGRESSIVE
             if (!gameObject.activeSelf)
             {
                 gameObject.SetActive(true);
+                LogUI("✅ [LobbyUI] Activated root GameObject");
             }
             
             RectTransform rootRect = GetComponent<RectTransform>();
+            if (rootRect == null)
+            {
+                rootRect = gameObject.AddComponent<RectTransform>();
+                LogUI("✅ [LobbyUI] Added RectTransform to root GameObject");
+            }
+            
             if (rootRect != null)
             {
                 rootRect.anchorMin = Vector2.zero;
                 rootRect.anchorMax = Vector2.one;
                 rootRect.sizeDelta = Vector2.zero;
                 rootRect.anchoredPosition = Vector2.zero;
+                LogUI($"✅ [LobbyUI] Root RectTransform configured: {rootRect.rect}");
             }
             
             // ✅ STEP 3: Show lobby panel (full screen)
@@ -227,8 +347,19 @@ namespace TacticalCombat.UI
                 }
                 else
                 {
-                    // Use GameObject itself as panel
-                    lobbyPanel = gameObject;
+                    // ✅ AUTO-CREATE: Create lobby panel if it doesn't exist
+                    lobbyPanel = new GameObject("LobbyPanel");
+                    lobbyPanel.transform.SetParent(transform, false);
+                    RectTransform panelRect = lobbyPanel.AddComponent<RectTransform>();
+                    panelRect.anchorMin = Vector2.zero;
+                    panelRect.anchorMax = Vector2.one;
+                    panelRect.sizeDelta = Vector2.zero;
+                    panelRect.anchoredPosition = Vector2.zero;
+                    
+                    Image panelBg = lobbyPanel.AddComponent<Image>();
+                    panelBg.color = new Color(0.1f, 0.1f, 0.15f, 1f);
+                    
+                    LogUI("✅ [LobbyUI] Auto-created LobbyPanel");
                 }
             }
             
@@ -253,6 +384,9 @@ namespace TacticalCombat.UI
                     panelBg = lobbyPanel.AddComponent<Image>();
                 }
                 panelBg.color = new Color(0.1f, 0.1f, 0.15f, 1f); // Dark blue-gray, fully opaque
+                
+                // ✅ AUTO-CREATE: Create basic UI elements if they don't exist
+                CreateBasicUIElementsIfNeeded(lobbyPanel.transform);
             }
             
             // ✅ STEP 4: Show game mode selection panel
@@ -262,13 +396,23 @@ namespace TacticalCombat.UI
             }
             
             // ✅ STEP 5: Start network FIRST (this creates LobbyManager), then wait for it
-            StartCoroutine(StartNetworkAndWaitForLobbyManager());
+            // ✅ MEMORY LEAK FIX: Stop previous coroutine if running
+            if (activeNetworkCoroutine != null)
+            {
+                StopCoroutine(activeNetworkCoroutine);
+            }
+            activeNetworkCoroutine = StartNetworkAndWaitForLobbyManager();
+            StartCoroutine(activeNetworkCoroutine);
             
             // ✅ STEP 6: Hide other UIs (AGGRESSIVE - hide MainMenu completely)
             HideOtherUIs();
             
             // ✅ STEP 7: Hide game world (players, weapons - but keep cameras)
             HideGameWorld();
+            
+            // ✅ CRITICAL FIX: Ensure camera is active AFTER hiding game world
+            // This must be done after HideGameWorld() to override any camera disabling
+            EnsureCameraActive();
             
             // ✅ STEP 8: Force cursor unlock
             Cursor.lockState = CursorLockMode.None;
@@ -282,10 +426,13 @@ namespace TacticalCombat.UI
         
         /// <summary>
         /// ✅ NEW: Start network and wait for LobbyManager, then update UI
+        /// Works for both Host and Client
         /// </summary>
         private System.Collections.IEnumerator StartNetworkAndWaitForLobbyManager()
         {
-            // Step 1: Start network if not already started (for host)
+            // ✅ MEMORY LEAK FIX: Check if destroyed
+            if (isDestroyed) yield break;
+            // Step 1: Start network if not already started (for host only)
             if (!NetworkServer.active && !NetworkClient.isConnected)
             {
                 NetworkManager networkManager = NetworkManager.singleton;
@@ -308,14 +455,26 @@ namespace TacticalCombat.UI
                     yield break;
                 }
             }
+            else if (NetworkClient.isConnected && !NetworkServer.active)
+            {
+                // ✅ NEW: Client is already connected, just wait for LobbyManager
+                LogUI("Client already connected - waiting for LobbyManager...");
+            }
             
             // Step 2: Wait for LobbyManager to be spawned by NetworkManager
-            int maxWaitTime = 50; // 5 seconds max wait
+            // ✅ TIMING FIX: Increased timeout to 15 seconds (150x100ms) to handle slow network
+            int maxWaitTime = 150; // 15 seconds max wait (increased from 5)
             int waitCount = 0;
             
-            while (lobbyManager == null && waitCount < maxWaitTime)
+            while (lobbyManager == null && waitCount < maxWaitTime && !isDestroyed)
             {
+                // ✅ RACE CONDITION FIX: Try multiple methods to find LobbyManager
                 lobbyManager = LobbyManager.Instance;
+                if (lobbyManager == null)
+                {
+                    lobbyManager = FindFirstObjectByType<LobbyManager>();
+                }
+                
                 if (lobbyManager == null)
                 {
                     yield return new WaitForSeconds(0.1f);
@@ -323,23 +482,90 @@ namespace TacticalCombat.UI
                 }
             }
             
+            // ✅ MEMORY LEAK FIX: Check if destroyed before continuing
+            if (isDestroyed) yield break;
+            
             if (lobbyManager == null)
             {
                 LogWarning("LobbyManager not found after waiting. Network might not have started properly.");
+                // ✅ ERROR HANDLING: Show error to user
+                ShowError("LobbyManager not found. Please try again.");
+                yield break;
             }
             else
             {
                 LogUI("LobbyManager found!");
                 
-                // Subscribe to events if not already subscribed
+                // ✅ MEMORY LEAK FIX: Unsubscribe first to prevent duplicates
+                lobbyManager.OnPlayerJoined -= OnPlayerJoined;
+                lobbyManager.OnPlayerLeft -= OnPlayerLeft;
+                lobbyManager.OnPlayerUpdated -= OnPlayerUpdated;
+                lobbyManager.OnGameStarting -= OnGameStarting;
+                
+                // Subscribe to events
                 lobbyManager.OnPlayerJoined += OnPlayerJoined;
                 lobbyManager.OnPlayerLeft += OnPlayerLeft;
                 lobbyManager.OnPlayerUpdated += OnPlayerUpdated;
                 lobbyManager.OnGameStarting += OnGameStarting;
                 
-                // Update UI now that LobbyManager is ready
-                UpdateUI();
+                // ✅ FIX: Client registration is handled by OnServerAddPlayer in NetworkGameManager
+                // Do NOT register here to avoid double registration
+                // Server automatically registers players when they spawn via OnServerAddPlayer -> RegisterPlayer
+                if (NetworkClient.isConnected && !NetworkServer.active && !isDestroyed)
+                {
+                    // Wait for server to register player (OnServerAddPlayer will be called)
+                    yield return new WaitForSeconds(1.0f);
+                    
+                    // ✅ MEMORY LEAK FIX: Check if destroyed
+                    if (isDestroyed) yield break;
+                    
+                    // ✅ NULL CHECK: Verify lobbyManager is still valid
+                    if (lobbyManager == null)
+                    {
+                        LogWarning("LobbyManager became null during client registration wait");
+                        yield break;
+                    }
+                    
+                    uint localConnectionId = lobbyManager.GetLocalConnectionId();
+                    var allPlayers = lobbyManager.GetAllPlayers();
+                    bool isRegistered = false;
+                    
+                    // ✅ NULL CHECK: Defensive null checks
+                    if (allPlayers != null && localConnectionId != 0)
+                    {
+                        for (int i = 0; i < allPlayers.Count; i++)
+                        {
+                            if (allPlayers[i].connectionId == localConnectionId)
+                            {
+                                isRegistered = true;
+                                LogUI($"✅ Client player already registered in lobby (ConnectionID: {localConnectionId})");
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Only register if server hasn't done it yet (shouldn't happen, but safety check)
+                    if (!isRegistered && localConnectionId != 0 && !isDestroyed)
+                    {
+                        LogUI($"⚠️ Client player not registered yet, attempting registration (ConnectionID: {localConnectionId})...");
+                        // ✅ NULL CHECK: Verify lobbyManager before calling command
+                        if (lobbyManager != null)
+                        {
+                            lobbyManager.CmdRegisterPlayer($"Player{localConnectionId}");
+                        }
+                    }
+                }
+                
+                // ✅ MEMORY LEAK FIX: Check if destroyed before updating UI
+                if (!isDestroyed)
+                {
+                    // Update UI now that LobbyManager is ready
+                    UpdateUI();
+                }
             }
+            
+            // ✅ MEMORY LEAK FIX: Clear coroutine reference
+            activeNetworkCoroutine = null;
         }
         
         /// <summary>
@@ -347,6 +573,51 @@ namespace TacticalCombat.UI
         /// </summary>
         private void HideGameWorld()
         {
+            // ✅ CRITICAL FIX: Ensure at least one camera is active to prevent "No cameras rendering" warning
+            // Find all cameras and ensure at least the local player's camera is active
+            Camera[] allCameras = FindObjectsByType<Camera>(FindObjectsSortMode.None);
+            bool hasActiveCamera = false;
+            
+            foreach (var cam in allCameras)
+            {
+                if (cam != null && cam.enabled)
+                {
+                    hasActiveCamera = true;
+                    break;
+                }
+            }
+            
+            // If no camera is active, find and enable the local player's camera
+            if (!hasActiveCamera)
+            {
+                var playerControllers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+                foreach (var player in playerControllers)
+                {
+                    if (player != null && player.isLocalPlayer)
+                    {
+                        Camera playerCamera = player.GetComponentInChildren<Camera>();
+                        if (playerCamera == null)
+                        {
+                            // Try to find camera in FPSController
+                            var fpsController = player.GetComponent<Player.FPSController>();
+                            if (fpsController != null)
+                            {
+                                playerCamera = fpsController.GetComponentInChildren<Camera>();
+                            }
+                        }
+                        
+                        if (playerCamera != null)
+                        {
+                            playerCamera.enabled = true;
+                            playerCamera.gameObject.SetActive(true);
+                            LogUI($"✅ [LobbyUI] Enabled local player camera: {playerCamera.name}");
+                            hasActiveCamera = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
             // ✅ FIX: Don't hide cameras - just hide game objects
             // UI needs at least one camera to render (Screen Space Overlay still needs a camera)
             
@@ -354,26 +625,34 @@ namespace TacticalCombat.UI
             var weaponSystems = FindObjectsByType<Combat.WeaponSystem>(FindObjectsSortMode.None);
             foreach (var weapon in weaponSystems)
             {
-                if (weapon.gameObject != null)
+                if (weapon != null && weapon.gameObject != null)
                 {
                     weapon.gameObject.SetActive(false);
                 }
             }
             
             // Hide player models (but keep cameras active)
-            var playerControllers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
-            foreach (var player in playerControllers)
+            var playerControllers2 = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+            foreach (var player in playerControllers2)
             {
+                if (player == null) continue;
+                
+                // ✅ CRITICAL: Don't hide the camera GameObject
                 var visuals = player.GetComponent<Player.PlayerVisuals>();
                 if (visuals != null && visuals.gameObject != null)
                 {
-                    visuals.gameObject.SetActive(false);
+                    // Check if this GameObject contains a camera before hiding
+                    Camera cam = visuals.GetComponentInChildren<Camera>();
+                    if (cam == null)
+                    {
+                        visuals.gameObject.SetActive(false);
+                    }
                 }
             }
             
-            // ✅ FIX: Keep cameras active - UI needs them for rendering
-            // Screen Space Overlay doesn't need a camera, but we keep them active anyway
-            // to avoid "No cameras rendering" warning
+            // ✅ CRITICAL FIX: Ensure at least one camera is active after hiding game objects
+            // Always ensure camera is active, even if we found one earlier
+            EnsureCameraActive();
         }
 
         /// <summary>
@@ -408,6 +687,251 @@ namespace TacticalCombat.UI
             }
             // If no lobbyPanel, check if GameObject itself is active
             return gameObject.activeInHierarchy;
+        }
+        
+        /// <summary>
+        /// ✅ AUTO-CREATE: Create basic UI elements if they don't exist
+        /// This ensures lobby UI is visible even if setup tool wasn't run
+        /// </summary>
+        private void CreateBasicUIElementsIfNeeded(Transform parent)
+        {
+            if (parent == null)
+            {
+                LogUI("❌ [LobbyUI] CreateBasicUIElementsIfNeeded: parent is null!");
+                return;
+            }
+            
+            LogUI($"✅ [LobbyUI] CreateBasicUIElementsIfNeeded called with parent: {parent.name}");
+            
+            // Create title text if missing
+            if (lobbyTitleText == null)
+            {
+                GameObject titleObj = new GameObject("LobbyTitleText");
+                titleObj.transform.SetParent(parent, false);
+                titleObj.SetActive(true); // ✅ CRITICAL: Make sure it's active
+                TextMeshProUGUI title = titleObj.AddComponent<TextMeshProUGUI>();
+                
+                // ✅ CRITICAL: Assign default font from TMP Settings
+                if (TMPro.TMP_Settings.defaultFontAsset != null)
+                {
+                    title.font = TMPro.TMP_Settings.defaultFontAsset;
+                }
+                
+                title.text = "LOBBY";
+                title.fontSize = 48;
+                title.color = Color.white;
+                title.alignment = TMPro.TextAlignmentOptions.Center;
+                RectTransform titleRect = titleObj.GetComponent<RectTransform>();
+                titleRect.anchorMin = new Vector2(0, 0.9f);
+                titleRect.anchorMax = new Vector2(1, 1);
+                titleRect.sizeDelta = Vector2.zero;
+                lobbyTitleText = title;
+                LogUI("✅ [LobbyUI] Auto-created LobbyTitleText");
+            }
+            else
+            {
+                // ✅ CRITICAL: Ensure existing text is active and visible
+                if (lobbyTitleText.gameObject != null)
+                {
+                    lobbyTitleText.gameObject.SetActive(true);
+                    lobbyTitleText.enabled = true;
+                    
+                    // ✅ CRITICAL: Ensure font is assigned
+                    if (lobbyTitleText.font == null && TMPro.TMP_Settings.defaultFontAsset != null)
+                    {
+                        lobbyTitleText.font = TMPro.TMP_Settings.defaultFontAsset;
+                    }
+                }
+            }
+            
+            // Create player count text if missing
+            if (playerCountText == null)
+            {
+                GameObject countObj = new GameObject("PlayerCountText");
+                countObj.transform.SetParent(parent, false);
+                countObj.SetActive(true); // ✅ CRITICAL: Make sure it's active
+                TextMeshProUGUI count = countObj.AddComponent<TextMeshProUGUI>();
+                
+                // ✅ CRITICAL: Assign default font from TMP Settings
+                if (TMPro.TMP_Settings.defaultFontAsset != null)
+                {
+                    count.font = TMPro.TMP_Settings.defaultFontAsset;
+                }
+                
+                count.text = "Players: 0/8";
+                count.fontSize = 24;
+                count.color = Color.white;
+                count.alignment = TMPro.TextAlignmentOptions.Center;
+                RectTransform countRect = countObj.GetComponent<RectTransform>();
+                countRect.anchorMin = new Vector2(0, 0.85f);
+                countRect.anchorMax = new Vector2(1, 0.9f);
+                countRect.sizeDelta = Vector2.zero;
+                playerCountText = count;
+                LogUI("✅ [LobbyUI] Auto-created PlayerCountText");
+            }
+            else
+            {
+                // ✅ CRITICAL: Ensure existing text is active and visible
+                if (playerCountText.gameObject != null)
+                {
+                    playerCountText.gameObject.SetActive(true);
+                    playerCountText.enabled = true;
+                    
+                    // ✅ CRITICAL: Ensure font is assigned
+                    if (playerCountText.font == null && TMPro.TMP_Settings.defaultFontAsset != null)
+                    {
+                        playerCountText.font = TMPro.TMP_Settings.defaultFontAsset;
+                    }
+                }
+            }
+            
+            // Create start game button if missing (host only)
+            if (startGameButton == null)
+            {
+                GameObject startBtnObj = new GameObject("StartGameButton");
+                startBtnObj.transform.SetParent(parent, false);
+                startBtnObj.SetActive(true); // ✅ CRITICAL: Make sure it's active
+                Image btnImg = startBtnObj.AddComponent<Image>();
+                btnImg.color = new Color(0.2f, 0.8f, 0.2f);
+                Button btn = startBtnObj.AddComponent<Button>();
+                RectTransform btnRect = startBtnObj.GetComponent<RectTransform>();
+                btnRect.anchorMin = new Vector2(0.4f, 0.1f);
+                btnRect.anchorMax = new Vector2(0.6f, 0.2f);
+                btnRect.sizeDelta = Vector2.zero;
+                
+                GameObject btnTextObj = new GameObject("Text");
+                btnTextObj.transform.SetParent(startBtnObj.transform, false);
+                btnTextObj.SetActive(true);
+                TextMeshProUGUI btnText = btnTextObj.AddComponent<TextMeshProUGUI>();
+                
+                // ✅ CRITICAL: Assign default font from TMP Settings
+                if (TMPro.TMP_Settings.defaultFontAsset != null)
+                {
+                    btnText.font = TMPro.TMP_Settings.defaultFontAsset;
+                }
+                
+                btnText.text = "START GAME";
+                btnText.fontSize = 32;
+                btnText.color = Color.white;
+                btnText.alignment = TMPro.TextAlignmentOptions.Center;
+                RectTransform btnTextRect = btnTextObj.GetComponent<RectTransform>();
+                btnTextRect.anchorMin = Vector2.zero;
+                btnTextRect.anchorMax = Vector2.one;
+                btnTextRect.sizeDelta = Vector2.zero;
+                
+                startGameButton = btn;
+                startGameButtonText = btnText;
+                LogUI("✅ [LobbyUI] Auto-created StartGameButton");
+            }
+            else
+            {
+                // ✅ CRITICAL: Ensure existing button is active and visible
+                if (startGameButton.gameObject != null)
+                {
+                    startGameButton.gameObject.SetActive(true);
+                    startGameButton.enabled = true;
+                }
+            }
+            
+            // Create ready button if missing
+            if (readyButton == null)
+            {
+                GameObject readyBtnObj = new GameObject("ReadyButton");
+                readyBtnObj.transform.SetParent(parent, false);
+                readyBtnObj.SetActive(true); // ✅ CRITICAL: Make sure it's active
+                Image readyImg = readyBtnObj.AddComponent<Image>();
+                readyImg.color = new Color(0.8f, 0.2f, 0.2f);
+                Button readyBtn = readyBtnObj.AddComponent<Button>();
+                RectTransform readyRect = readyBtnObj.GetComponent<RectTransform>();
+                readyRect.anchorMin = new Vector2(0.2f, 0.1f);
+                readyRect.anchorMax = new Vector2(0.4f, 0.2f);
+                readyRect.sizeDelta = Vector2.zero;
+                
+                GameObject readyTextObj = new GameObject("Text");
+                readyTextObj.transform.SetParent(readyBtnObj.transform, false);
+                readyTextObj.SetActive(true);
+                TextMeshProUGUI readyText = readyTextObj.AddComponent<TextMeshProUGUI>();
+                
+                // ✅ CRITICAL: Assign default font from TMP Settings
+                if (TMPro.TMP_Settings.defaultFontAsset != null)
+                {
+                    readyText.font = TMPro.TMP_Settings.defaultFontAsset;
+                }
+                
+                readyText.text = "NOT READY";
+                readyText.fontSize = 28;
+                readyText.color = Color.white;
+                readyText.alignment = TMPro.TextAlignmentOptions.Center;
+                RectTransform readyTextRect = readyTextObj.GetComponent<RectTransform>();
+                readyTextRect.anchorMin = Vector2.zero;
+                readyTextRect.anchorMax = Vector2.one;
+                readyTextRect.sizeDelta = Vector2.zero;
+                
+                readyButton = readyBtn;
+                readyButtonText = readyText;
+                LogUI("✅ [LobbyUI] Auto-created ReadyButton");
+            }
+            else
+            {
+                // ✅ CRITICAL: Ensure existing button is active and visible
+                if (readyButton.gameObject != null)
+                {
+                    readyButton.gameObject.SetActive(true);
+                    readyButton.enabled = true;
+                }
+            }
+            
+            // Create leave button if missing
+            if (leaveButton == null)
+            {
+                GameObject leaveBtnObj = new GameObject("LeaveButton");
+                leaveBtnObj.transform.SetParent(parent, false);
+                leaveBtnObj.SetActive(true); // ✅ CRITICAL: Make sure it's active
+                Image leaveImg = leaveBtnObj.AddComponent<Image>();
+                leaveImg.color = new Color(0.8f, 0.2f, 0.2f);
+                Button leaveBtn = leaveBtnObj.AddComponent<Button>();
+                RectTransform leaveRect = leaveBtnObj.GetComponent<RectTransform>();
+                leaveRect.anchorMin = new Vector2(0.6f, 0.1f);
+                leaveRect.anchorMax = new Vector2(0.8f, 0.2f);
+                leaveRect.sizeDelta = Vector2.zero;
+                
+                GameObject leaveTextObj = new GameObject("Text");
+                leaveTextObj.transform.SetParent(leaveBtnObj.transform, false);
+                leaveTextObj.SetActive(true);
+                TextMeshProUGUI leaveText = leaveTextObj.AddComponent<TextMeshProUGUI>();
+                
+                // ✅ CRITICAL: Assign default font from TMP Settings
+                if (TMPro.TMP_Settings.defaultFontAsset != null)
+                {
+                    leaveText.font = TMPro.TMP_Settings.defaultFontAsset;
+                }
+                
+                leaveText.text = "LEAVE";
+                leaveText.fontSize = 28;
+                leaveText.color = Color.white;
+                leaveText.alignment = TMPro.TextAlignmentOptions.Center;
+                RectTransform leaveTextRect = leaveTextObj.GetComponent<RectTransform>();
+                leaveTextRect.anchorMin = Vector2.zero;
+                leaveTextRect.anchorMax = Vector2.one;
+                leaveTextRect.sizeDelta = Vector2.zero;
+                
+                leaveButton = leaveBtn;
+                LogUI("✅ [LobbyUI] Auto-created LeaveButton");
+            }
+            else
+            {
+                // ✅ CRITICAL: Ensure existing button is active and visible
+                if (leaveButton.gameObject != null)
+                {
+                    leaveButton.gameObject.SetActive(true);
+                    leaveButton.enabled = true;
+                }
+            }
+            
+            // Re-setup buttons after creating them
+            SetupButtons();
+            
+            LogUI("✅ [LobbyUI] CreateBasicUIElementsIfNeeded completed");
         }
 
         private void ShowLobbyPanel()
@@ -651,14 +1175,67 @@ namespace TacticalCombat.UI
 
         private void OnLeaveClicked()
         {
-            if (NetworkClient.active)
+            LogUI("Leave button clicked - disconnecting from lobby...");
+            
+            // ✅ MEMORY LEAK FIX: Stop active coroutines
+            if (activeNetworkCoroutine != null)
             {
-                NetworkManager.singleton.StopClient();
+                StopCoroutine(activeNetworkCoroutine);
+                activeNetworkCoroutine = null;
             }
-            else if (NetworkServer.active)
+            
+            // ✅ FIX: Proper cleanup before disconnecting
+            if (lobbyManager != null)
             {
-                NetworkManager.singleton.StopHost();
+                // Unsubscribe from events
+                lobbyManager.OnPlayerJoined -= OnPlayerJoined;
+                lobbyManager.OnPlayerLeft -= OnPlayerLeft;
+                lobbyManager.OnPlayerUpdated -= OnPlayerUpdated;
+                lobbyManager.OnGameStarting -= OnGameStarting;
             }
+            
+            // Hide lobby UI
+            HidePanel();
+            
+            // ✅ NULL CHECK: Verify NetworkManager exists before disconnecting
+            var networkManager = NetworkManager.singleton;
+            if (networkManager != null)
+            {
+                // Disconnect from network
+                if (NetworkClient.active)
+                {
+                    networkManager.StopClient();
+                    LogUI("Client disconnected");
+                }
+                else if (NetworkServer.active)
+                {
+                    networkManager.StopHost();
+                    LogUI("Host stopped");
+                }
+            }
+            else
+            {
+                LogWarning("NetworkManager.singleton is null - cannot disconnect properly");
+            }
+            
+            // Show main menu
+            var mainMenu = FindFirstObjectByType<TacticalCombat.UI.MainMenu>();
+            if (mainMenu != null)
+            {
+                mainMenu.ShowMainMenu();
+            }
+            else
+            {
+                var uiFlowManager = TacticalCombat.UI.UIFlowManager.Instance;
+                if (uiFlowManager != null)
+                {
+                    uiFlowManager.ShowMainMenu();
+                }
+            }
+            
+            // ✅ UI STATE FIX: Unlock cursor and ensure it's visible
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
         }
 
         #endregion
@@ -953,8 +1530,17 @@ namespace TacticalCombat.UI
                         teamText.color = teamBColor;
                         break;
                     default:
-                        teamText.text = "NO TEAM";
-                        teamText.color = Color.gray;
+                        // ✅ NEW: Show correct text based on game mode
+                        if (lobbyManager != null && lobbyManager.IsIndividualMode())
+                        {
+                            teamText.text = "FFA";
+                            teamText.color = Color.white;
+                        }
+                        else
+                        {
+                            teamText.text = "RANDOM"; // Teams assigned at start
+                            teamText.color = Color.cyan;
+                        }
                         break;
                 }
             }
@@ -1024,17 +1610,18 @@ namespace TacticalCombat.UI
             // Show/hide team selection buttons based on mode
             if (teamSelectionPanel != null)
             {
-                teamSelectionPanel.SetActive(!isIndividualMode); // Show in team mode only
+                // ✅ CHANGED: Always hide team selection panel because teams are assigned RANDOMLY at start
+                teamSelectionPanel.SetActive(false); 
             }
 
             if (teamAButton != null)
             {
-                teamAButton.gameObject.SetActive(!isIndividualMode);
+                teamAButton.gameObject.SetActive(false);
             }
 
             if (teamBButton != null)
             {
-                teamBButton.gameObject.SetActive(!isIndividualMode);
+                teamBButton.gameObject.SetActive(false);
             }
 
             // Update player list to reflect team assignments

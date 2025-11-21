@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using System.Collections;
 
 namespace TacticalCombat.Combat
@@ -15,7 +16,7 @@ namespace TacticalCombat.Combat
     {
         [Header("🎯 ADS Settings")]
         [SerializeField] private bool adsEnabled = true;
-        [SerializeField] private KeyCode adsKey = KeyCode.Mouse1; // Right click
+        // [SerializeField] private KeyCode adsKey = KeyCode.Mouse1; // Replaced by Input System (Right Click)
         
         [Header("📷 Camera")]
         [SerializeField] private Camera playerCamera;
@@ -90,12 +91,25 @@ namespace TacticalCombat.Combat
         
         private void HandleInput()
         {
-            // Toggle ADS
-            if (Input.GetKeyDown(adsKey))
+            // Toggle ADS (Hold Right Mouse Button)
+            bool isAimingInput = false;
+            
+            if (Mouse.current != null)
+            {
+                isAimingInput = Mouse.current.rightButton.isPressed;
+            }
+            
+            // Optional: Keyboard fallback (e.g. Z key)
+            if (!isAimingInput && Keyboard.current != null)
+            {
+                // isAimingInput = Keyboard.current.zKey.isPressed;
+            }
+
+            if (isAimingInput && !isAiming)
             {
                 StartADS();
             }
-            else if (Input.GetKeyUp(adsKey))
+            else if (!isAimingInput && isAiming)
             {
                 StopADS();
             }

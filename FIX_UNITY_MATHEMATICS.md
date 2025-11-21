@@ -36,3 +36,5 @@ Unity 6 için Unity.Mathematics 1.3.2 veya 1.3.3 versiyonları uyumludur.
 Paket cache'i bozuk olduğu için temizlenmesi gerekiyor.
 
 
+
+

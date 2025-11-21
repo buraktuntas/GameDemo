@@ -260,6 +260,13 @@ namespace TacticalCombat.Player
                 Cursor.visible = true;
                 Debug.Log("🔓 [FPSController] UI detected - cursor kept unlocked");
             }
+            
+            // ✅ CRITICAL FIX: Ensure camera is always active (prevents "No cameras rendering" warning)
+            if (playerCamera != null)
+            {
+                playerCamera.enabled = true;
+                playerCamera.gameObject.SetActive(true);
+            }
 
             // Player registration handled by PlayerController
         }
@@ -389,7 +396,7 @@ namespace TacticalCombat.Player
             if (!uiIsOpen)
             {
                 // ESC to unlock, click to re-lock (standard FPS behavior)
-                if (Input.GetKeyDown(KeyCode.Escape))
+                if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
                 {
                     Cursor.lockState = CursorLockMode.None;
                     Cursor.visible = true;
@@ -397,7 +404,7 @@ namespace TacticalCombat.Player
                 else if (Cursor.lockState != CursorLockMode.Locked)
                 {
                     // ANY mouse button click re-locks cursor (ONLY when UI is closed!)
-                    if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2))
+                    if (Mouse.current != null && (Mouse.current.leftButton.wasPressedThisFrame || Mouse.current.rightButton.wasPressedThisFrame || Mouse.current.middleButton.wasPressedThisFrame))
                     {
                         Cursor.lockState = CursorLockMode.Locked;
                         Cursor.visible = false;
@@ -407,6 +414,20 @@ namespace TacticalCombat.Player
 
             // ✅ CAMERA JITTER FIX: Read input in Update, apply in LateUpdate
             ReadRotationInput();
+            
+            // ✅ CRITICAL FIX: Ensure camera is always active (prevents "No cameras rendering" warning)
+            // This is especially important when UI is shown (lobby, menu, etc.)
+            if (playerCamera != null)
+            {
+                if (!playerCamera.enabled)
+                {
+                    playerCamera.enabled = true;
+                }
+                if (!playerCamera.gameObject.activeInHierarchy)
+                {
+                    playerCamera.gameObject.SetActive(true);
+                }
+            }
         }
 
         private void OnApplicationFocus(bool hasFocus)
@@ -643,7 +664,17 @@ namespace TacticalCombat.Player
                 moveAxis = moveAction.ReadValue<Vector2>();
                 return new Vector3(moveAxis.x, 0, moveAxis.y);
             }
-            return new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
+            
+            // Fallback to new input system direct check if action missing
+            float h = 0, v = 0;
+            if (Keyboard.current != null)
+            {
+                if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) h -= 1;
+                if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) h += 1;
+                if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) v -= 1;
+                if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed) v += 1;
+            }
+            return new Vector3(h, 0, v);
         }
         
         private Vector3 CalculateHorizontalMovement(Vector3 input)
@@ -664,7 +695,11 @@ namespace TacticalCombat.Player
             right.Normalize();
             
             // Check if can sprint
-            bool wantsToSprint = sprintHeld || Input.GetKey(KeyCode.LeftShift);
+            bool wantsToSprint = sprintHeld;
+            if (!wantsToSprint && Keyboard.current != null)
+            {
+                 wantsToSprint = Keyboard.current.leftShiftKey.isPressed;
+            }
             bool canSprint = !useStamina || currentStamina > 0;
             
             // ⭐ Check if sprint is blocked
@@ -692,7 +727,7 @@ namespace TacticalCombat.Player
             {
                 // Skip jump check
             }
-            else if ((jumpPressed || Input.GetButtonDown("Jump")) && canMove && grounded)
+            else if ((jumpPressed || (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)) && canMove && grounded)
             {
                 return jumpPower;
             }
@@ -769,10 +804,13 @@ namespace TacticalCombat.Player
                 pendingMouseX = lookDelta.x;
                 pendingMouseY = lookDelta.y;
             }
-            else
+            else if (Mouse.current != null)
             {
-                pendingMouseX = Input.GetAxis("Mouse X");
-                pendingMouseY = Input.GetAxis("Mouse Y");
+                Vector2 delta = Mouse.current.delta.ReadValue();
+                // Adjust sensitivity as Mouse.delta is pixels, legacy GetAxis was different. 
+                // 0.05f is a rough approximation to match legacy feel, user can adjust lookSpeed.
+                pendingMouseX = delta.x * 0.05f; 
+                pendingMouseY = delta.y * 0.05f;
             }
         }
 
@@ -800,7 +838,8 @@ namespace TacticalCombat.Player
         
         private void HandleStamina()
         {
-            bool sprinting = Input.GetKey(KeyCode.LeftShift) && IsMoving();
+            bool isShiftPressed = Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed;
+            bool sprinting = isShiftPressed && IsMoving();
             
             if (sprinting && currentStamina > 0)
             {
@@ -846,7 +885,8 @@ namespace TacticalCombat.Player
         {
             if (playerCamera == null) return;
             
-            bool sprinting = Input.GetKey(KeyCode.LeftShift) && IsMoving() && IsGrounded();
+            bool isShiftPressed = Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed;
+            bool sprinting = isShiftPressed && IsMoving() && IsGrounded();
             float targetFOV = sprinting ? baseFOV + sprintFOVIncrease : baseFOV;
             
             playerCamera.fieldOfView = Mathf.Lerp(
@@ -866,7 +906,8 @@ namespace TacticalCombat.Player
             float speed = new Vector3(moveDirection.x, 0, moveDirection.z).magnitude;
             stepTimer += Time.deltaTime;
             
-            bool sprinting = Input.GetKey(KeyCode.LeftShift);
+            bool isShiftPressed = Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed;
+            bool sprinting = isShiftPressed;
             float stepInterval = sprinting ? 0.3f : 0.5f;
             
             if (stepTimer >= stepInterval)
@@ -1005,7 +1046,7 @@ namespace TacticalCombat.Player
         
         public float GetStaminaPercent() => currentStamina / maxStamina;
         
-        public bool IsSprinting() => (sprintHeld || Input.GetKey(KeyCode.LeftShift)) && IsMoving() && IsGrounded();
+        public bool IsSprinting() => (sprintHeld || (Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed)) && IsMoving() && IsGrounded();
 
         // ═══════════════════════════════════════════════════════════
         // INPUT SYSTEM BRIDGE HANDLERS

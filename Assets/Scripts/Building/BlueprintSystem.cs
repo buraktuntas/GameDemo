@@ -275,15 +275,23 @@ namespace TacticalCombat.Building
         [Server]
         private StructureCategory GetCategoryForType(StructureType type)
         {
-            // Use Structure's static method for consistency
-            return Structure.GetStructureCategory(type);
+            // ✅ REFACTOR: Use StructureDatabase for consistency
+            if (StructureDatabase.Instance != null)
+            {
+                return StructureDatabase.Instance.GetCategory(type);
+            }
+            return StructureCategory.Wall; // Default fallback
         }
 
         [Server]
         private int GetCostForType(StructureType type)
         {
-            // Use Structure's static method for consistency
-            return Structure.GetStructureCost(type);
+            // ✅ REFACTOR: Use StructureDatabase for consistency
+            if (StructureDatabase.Instance != null)
+            {
+                return StructureDatabase.Instance.GetCost(type);
+            }
+            return 1; // Default fallback
         }
 
         /// <summary>

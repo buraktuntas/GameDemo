@@ -22,6 +22,14 @@ namespace TacticalCombat.Network
 
         private int teamACount = 0;
         private int teamBCount = 0;
+        
+        // ✅ MEMORY LEAK FIX: Track coroutines for cleanup
+        private System.Collections.IEnumerator activeRegisterHostCoroutine;
+        private System.Collections.IEnumerator activeShowLobbyCoroutine;
+        private bool isDestroyed = false;
+        
+        // ✅ NEW: Track if client successfully connected (to distinguish from failed connection)
+        private bool clientSuccessfullyConnected = false;
 
         public override void OnStartServer()
         {
@@ -29,13 +37,71 @@ namespace TacticalCombat.Network
             teamACount = 0;
             teamBCount = 0;
             
+            // ✅ NEW: Ensure LobbyManager prefab is in spawnable prefabs list
+            if (lobbyManagerPrefab != null)
+            {
+                // ✅ FIX: Mirror uses 'spawnPrefabs' not 'spawnablePrefabs'
+                // Check if LobbyManager prefab is already in spawnable prefabs
+                bool isInList = false;
+                foreach (var prefab in spawnPrefabs)
+                {
+                    if (prefab == lobbyManagerPrefab)
+                    {
+                        isInList = true;
+                        break;
+                    }
+                }
+                
+                // Add to spawnable prefabs if not already there
+                if (!isInList)
+                {
+                    // ✅ FIX: spawnPrefabs is a List<GameObject> in Mirror, not an array
+                    // Use Add() method instead of creating a new list
+                    spawnPrefabs.Add(lobbyManagerPrefab);
+                    LogNetwork("✅ LobbyManager prefab added to spawnable prefabs list");
+                }
+            }
+            
             // ✅ NEW: Instantiate lobby manager on server
             if (lobbyManagerPrefab != null)
             {
-                var lobbyGO = Instantiate(lobbyManagerPrefab);
-                NetworkServer.Spawn(lobbyGO);
-                activeLobbyManager = lobbyGO.GetComponent<LobbyManager>();
-                LogNetwork("Lobby Manager spawned on server");
+                // ✅ CRITICAL FIX: Ensure prefab has NetworkIdentity with valid assetId
+                NetworkIdentity prefabIdentity = lobbyManagerPrefab.GetComponent<NetworkIdentity>();
+                if (prefabIdentity == null)
+                {
+                    LogError("❌ LobbyManager prefab has no NetworkIdentity! Cannot spawn.");
+                }
+                else
+                {
+                    // ✅ CRITICAL: Ensure assetId is set (Mirror needs this for client spawning)
+                    if (prefabIdentity.assetId == 0)
+                    {
+                        LogWarning("⚠️ LobbyManager prefab has assetId=0! This might cause spawn issues.");
+                        LogWarning("   Make sure the prefab is saved and has a valid NetworkIdentity assetId.");
+                    }
+                    
+                    LogNetwork($"✅ LobbyManager prefab assetId: {prefabIdentity.assetId}");
+                    
+                    var lobbyGO = Instantiate(lobbyManagerPrefab);
+                    NetworkIdentity spawnedIdentity = lobbyGO.GetComponent<NetworkIdentity>();
+                    
+                    if (spawnedIdentity != null)
+                    {
+                        // ✅ CRITICAL: Ensure spawned object has valid assetId before spawning
+                        if (spawnedIdentity.assetId == 0)
+                        {
+                            LogError("❌ Spawned LobbyManager has assetId=0! This will fail on clients.");
+                        }
+                        
+                        NetworkServer.Spawn(lobbyGO);
+                        activeLobbyManager = lobbyGO.GetComponent<LobbyManager>();
+                        LogNetwork($"✅ Lobby Manager spawned on server (assetId: {spawnedIdentity.assetId}, netId: {spawnedIdentity.netId})");
+                    }
+                    else
+                    {
+                        LogError("❌ Spawned LobbyManager has no NetworkIdentity!");
+                    }
+                }
             }
             else
             {
@@ -88,6 +154,42 @@ namespace TacticalCombat.Network
             base.OnStopServer();
             teamACount = 0;
             teamBCount = 0;
+            
+            // ✅ MEMORY LEAK FIX: Cleanup coroutines
+            if (activeRegisterHostCoroutine != null)
+            {
+                StopCoroutine(activeRegisterHostCoroutine);
+                activeRegisterHostCoroutine = null;
+            }
+            if (activeShowLobbyCoroutine != null)
+            {
+                StopCoroutine(activeShowLobbyCoroutine);
+                activeShowLobbyCoroutine = null;
+            }
+        }
+        
+        /// <summary>
+        /// ✅ FIX: Override OnDestroy to cleanup resources
+        /// </summary>
+        public override void OnDestroy()
+        {
+            base.OnDestroy(); // Call base implementation first
+            isDestroyed = true;
+            
+            // ✅ MEMORY LEAK FIX: Stop all coroutines
+            if (activeRegisterHostCoroutine != null)
+            {
+                StopCoroutine(activeRegisterHostCoroutine);
+                activeRegisterHostCoroutine = null;
+            }
+            if (activeShowLobbyCoroutine != null)
+            {
+                StopCoroutine(activeShowLobbyCoroutine);
+                activeShowLobbyCoroutine = null;
+            }
+            
+            // ✅ MEMORY LEAK FIX: Cancel Invoke calls
+            CancelInvoke();
         }
 
         public override void OnServerAddPlayer(NetworkConnectionToClient conn)
@@ -291,12 +393,129 @@ namespace TacticalCombat.Network
             Debug.Log($"   Is Server: {NetworkServer.active}");
             Debug.Log("═══════════════════════════════════════");
             
+            // ✅ NEW: Mark that client successfully connected
+            clientSuccessfullyConnected = true;
+            
             // ✅ NEW: If we're the host, ensure we're registered in the lobby
             // This handles the case where StartHost() doesn't automatically call OnServerAddPlayer
-            if (NetworkServer.active && NetworkClient.isConnected)
+            if (NetworkServer.active && NetworkClient.isConnected && !isDestroyed)
             {
-                StartCoroutine(RegisterHostInLobby());
+                // ✅ MEMORY LEAK FIX: Stop previous coroutine if running
+                if (activeRegisterHostCoroutine != null)
+                {
+                    StopCoroutine(activeRegisterHostCoroutine);
+                }
+                activeRegisterHostCoroutine = RegisterHostInLobby();
+                StartCoroutine(activeRegisterHostCoroutine);
             }
+            // ✅ NEW: If we're a client (not host), show lobby UI and wait for spawn
+            else if (NetworkClient.isConnected && !NetworkServer.active && !isDestroyed)
+            {
+                // ✅ MEMORY LEAK FIX: Stop previous coroutine if running
+                if (activeShowLobbyCoroutine != null)
+                {
+                    StopCoroutine(activeShowLobbyCoroutine);
+                }
+                activeShowLobbyCoroutine = ShowLobbyForClient();
+                StartCoroutine(activeShowLobbyCoroutine);
+            }
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Show lobby UI for client after connecting (wait for spawn and LobbyManager)
+        /// </summary>
+        private System.Collections.IEnumerator ShowLobbyForClient()
+        {
+            // ✅ MEMORY LEAK FIX: Check if destroyed
+            if (isDestroyed) yield break;
+            
+            Debug.Log("🎮 [NetworkGameManager CLIENT] Waiting for player spawn and LobbyManager...");
+            
+            // Wait for player to spawn (OnServerAddPlayer will be called)
+            yield return new WaitForSeconds(0.5f);
+            
+            // ✅ MEMORY LEAK FIX: Check if destroyed after wait
+            if (isDestroyed) yield break;
+            
+            // ✅ FIX: Wait for LobbyManager to be spawned by server
+            // LobbyManager is spawned by server in OnStartServer, but it takes time to sync to clients
+            // ✅ TIMING FIX: Increased timeout to 15 seconds (150x100ms) to handle slow network
+            int maxWaitTime = 150; // 15 seconds max wait (increased from 10)
+            int waitCount = 0;
+            
+            while (LobbyManager.Instance == null && waitCount < maxWaitTime && !isDestroyed)
+            {
+                // ✅ FIX: Also try to find LobbyManager in scene (in case it's already spawned but Instance not set yet)
+                if (LobbyManager.Instance == null)
+                {
+                    var foundLobbyManager = FindFirstObjectByType<LobbyManager>();
+                    if (foundLobbyManager != null)
+                    {
+                        Debug.Log("✅ [NetworkGameManager CLIENT] Found LobbyManager via FindFirstObjectByType!");
+                        break;
+                    }
+                }
+                
+                yield return new WaitForSeconds(0.1f);
+                waitCount++;
+            }
+            
+            // ✅ MEMORY LEAK FIX: Check if destroyed
+            if (isDestroyed) yield break;
+            
+            // ✅ FIX: Try one more time with FindFirstObjectByType
+            LobbyManager lobbyManager = LobbyManager.Instance;
+            if (lobbyManager == null)
+            {
+                lobbyManager = FindFirstObjectByType<LobbyManager>();
+                if (lobbyManager != null)
+                {
+                    Debug.Log("✅ [NetworkGameManager CLIENT] Found LobbyManager via FindFirstObjectByType (after wait)!");
+                }
+            }
+            
+            if (lobbyManager == null)
+            {
+                Debug.LogWarning("⚠️ [NetworkGameManager CLIENT] LobbyManager not found after waiting. This might be normal if server hasn't spawned it yet.");
+                Debug.LogWarning("   Client will still show LobbyUI - it will connect to LobbyManager when it becomes available.");
+            }
+            else
+            {
+                Debug.Log("✅ [NetworkGameManager CLIENT] LobbyManager found!");
+            }
+            
+            // ✅ MEMORY LEAK FIX: Check if destroyed before showing UI
+            if (isDestroyed) yield break;
+            
+            // ✅ NEW: Show lobby UI using new LobbyUIController (AAA quality)
+            var lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController == null)
+            {
+                lobbyController = FindFirstObjectByType<TacticalCombat.UI.LobbyUIController>();
+            }
+            
+            if (lobbyController == null)
+            {
+                // Create new LobbyUIController
+                GameObject controllerObj = new GameObject("LobbyUIController");
+                lobbyController = controllerObj.AddComponent<TacticalCombat.UI.LobbyUIController>();
+                Debug.Log("✅ [NetworkGameManager CLIENT] Created new LobbyUIController");
+            }
+            
+            if (lobbyController != null)
+            {
+                Debug.Log("✅ [NetworkGameManager CLIENT] Showing LobbyUIController...");
+                lobbyController.ShowLobby();
+            }
+            else
+            {
+                Debug.LogError("❌ [NetworkGameManager CLIENT] Failed to create LobbyUIController! Client cannot join lobby.");
+                // ✅ ERROR HANDLING: Return to main menu if LobbyUIController not found
+                CleanupOnDisconnect();
+            }
+            
+            // ✅ MEMORY LEAK FIX: Clear coroutine reference
+            activeShowLobbyCoroutine = null;
         }
         
         /// <summary>
@@ -304,16 +523,45 @@ namespace TacticalCombat.Network
         /// </summary>
         private System.Collections.IEnumerator RegisterHostInLobby()
         {
-            // Wait for LobbyManager to be ready
-            yield return new WaitForSeconds(0.5f);
+            // ✅ MEMORY LEAK FIX: Check if destroyed
+            if (isDestroyed) yield break;
             
-            // Try to find LobbyManager
-            LobbyManager lobbyManager = activeLobbyManager ?? LobbyManager.Instance;
+            // ✅ TIMING FIX: Wait longer for LobbyManager to be spawned and synced
+            // Increased from 0.5s to 1.0s, with retry mechanism
+            yield return new WaitForSeconds(1.0f);
+            
+            // ✅ MEMORY LEAK FIX: Check if destroyed after wait
+            if (isDestroyed) yield break;
+            
+            // ✅ RACE CONDITION FIX: Try multiple methods to find LobbyManager with retry
+            LobbyManager lobbyManager = null;
+            int maxRetries = 10; // 10 retries = 5 seconds total
+            int retryCount = 0;
+            
+            while (lobbyManager == null && retryCount < maxRetries && !isDestroyed)
+            {
+                // Try multiple methods
+                lobbyManager = activeLobbyManager ?? LobbyManager.Instance;
+                if (lobbyManager == null)
+                {
+                    lobbyManager = FindFirstObjectByType<LobbyManager>();
+                }
+                
+                if (lobbyManager == null)
+                {
+                    retryCount++;
+                    yield return new WaitForSeconds(0.5f); // Wait 0.5s between retries
+                }
+            }
+            
             if (lobbyManager == null)
             {
-                LogWarning("LobbyManager not found - cannot register host");
+                LogError("LobbyManager not found after retries - host registration failed");
                 yield break;
             }
+            
+            // ✅ MEMORY LEAK FIX: Check if destroyed
+            if (isDestroyed) yield break;
             
             // Find host connection (connection with ID 0 or the first connection)
             NetworkConnectionToClient hostConnection = null;
@@ -373,6 +621,9 @@ namespace TacticalCombat.Network
             {
                 LogWarning("Could not find host connection - cannot register host in lobby");
             }
+            
+            // ✅ MEMORY LEAK FIX: Clear coroutine reference
+            activeRegisterHostCoroutine = null;
         }
 
         /// <summary>
@@ -381,7 +632,97 @@ namespace TacticalCombat.Network
         public override void OnClientDisconnect()
         {
             base.OnClientDisconnect();
+            Debug.LogWarning("═══════════════════════════════════════");
             Debug.LogWarning("⚠️ [NetworkGameManager CLIENT] Disconnected from server");
+            Debug.LogWarning($"   Was Successfully Connected: {clientSuccessfullyConnected}");
+            Debug.LogWarning("═══════════════════════════════════════");
+            
+            // ✅ FIX: Only cleanup and return to main menu if we were successfully connected
+            // If we never connected (connection failed), we're already on main menu
+            if (clientSuccessfullyConnected)
+            {
+                // Client was connected and then disconnected - return to main menu
+                CleanupOnDisconnect();
+            }
+            else
+            {
+                // Client never successfully connected - connection failed
+                // Show error message but don't change UI (we're already on main menu)
+                Debug.LogWarning("⚠️ [NetworkGameManager CLIENT] Connection failed - never successfully connected");
+                
+                // Show error in UI if LobbyUIController exists
+                var lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+                if (lobbyController == null)
+                {
+                    lobbyController = FindFirstObjectByType<TacticalCombat.UI.LobbyUIController>();
+                }
+                if (lobbyController != null)
+                {
+                    lobbyController.ShowError("Connection failed. Please check if server is running and try again.");
+                }
+                
+                // Show error in MainMenu
+                var mainMenu = FindFirstObjectByType<TacticalCombat.UI.MainMenu>();
+                if (mainMenu != null)
+                {
+                    // MainMenu should show error message
+                    Debug.LogWarning("⚠️ [NetworkGameManager CLIENT] Connection failed - showing error in MainMenu");
+                }
+            }
+            
+            // Reset flag for next connection attempt
+            clientSuccessfullyConnected = false;
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Cleanup UI and network state on disconnect
+        /// </summary>
+        private void CleanupOnDisconnect()
+        {
+            // ✅ MEMORY LEAK FIX: Stop all coroutines
+            if (activeRegisterHostCoroutine != null)
+            {
+                StopCoroutine(activeRegisterHostCoroutine);
+                activeRegisterHostCoroutine = null;
+            }
+            if (activeShowLobbyCoroutine != null)
+            {
+                StopCoroutine(activeShowLobbyCoroutine);
+                activeShowLobbyCoroutine = null;
+            }
+            
+            // ✅ NEW: Hide LobbyUIController
+            var lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController == null)
+            {
+                lobbyController = FindFirstObjectByType<TacticalCombat.UI.LobbyUIController>();
+            }
+            if (lobbyController != null)
+            {
+                lobbyController.HideLobby();
+            }
+            
+            // Show main menu
+            var mainMenu = FindFirstObjectByType<TacticalCombat.UI.MainMenu>();
+            if (mainMenu != null)
+            {
+                mainMenu.ShowMainMenu();
+            }
+            else
+            {
+                // Fallback: Use UIFlowManager
+                var uiFlowManager = TacticalCombat.UI.UIFlowManager.Instance;
+                if (uiFlowManager != null)
+                {
+                    uiFlowManager.ShowMainMenu();
+                }
+            }
+            
+            // ✅ UI STATE FIX: Unlock cursor and ensure it's visible
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            
+            Debug.Log("✅ [NetworkGameManager] Cleanup completed - returned to main menu");
         }
 
         /// <summary>
@@ -413,6 +754,34 @@ namespace TacticalCombat.Network
             if (kcpTransport != null)
             {
                 Debug.LogError($"   Port: {kcpTransport.port}");
+            }
+            
+            // ✅ FIX: Mark that connection failed
+            clientSuccessfullyConnected = false;
+            
+            // ✅ NEW: Show error using LobbyUIController
+            var lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController == null)
+            {
+                lobbyController = FindFirstObjectByType<TacticalCombat.UI.LobbyUIController>();
+            }
+            if (lobbyController != null)
+            {
+                string errorMessage = $"Connection failed: {reason}";
+                lobbyController.ShowError(errorMessage);
+            }
+            else
+            {
+                Debug.LogError($"[NetworkGameManager] Lobby Error: Connection failed: {reason}");
+            }
+            
+            // ✅ FIX: Don't call CleanupOnDisconnect() here - we're already on main menu
+            // OnClientDisconnect() will be called after this, and it will handle cleanup if needed
+            // Just ensure main menu is shown
+            var mainMenu = FindFirstObjectByType<TacticalCombat.UI.MainMenu>();
+            if (mainMenu != null)
+            {
+                mainMenu.ShowMainMenu();
             }
             
             // ✅ CRITICAL FIX: Yaygın hatalar için çözüm önerileri
