@@ -1424,6 +1424,11 @@ namespace TacticalCombat.Core
         [Server]
         public MatchStats GetPlayerMatchStats(ulong playerId)
         {
+            // ✅ FIX: Null check for matchState
+            if (matchState == null || matchState.playerStats == null)
+            {
+                return null;
+            }
             return matchState.playerStats.ContainsKey(playerId) ? matchState.playerStats[playerId] : null;
         }
         
@@ -1469,6 +1474,11 @@ namespace TacticalCombat.Core
         /// </summary>
         public MatchStats GetPlayerMatchStatsClient(ulong playerId)
         {
+            // ✅ FIX: Null check for clientStatsCache
+            if (clientStatsCache == null)
+            {
+                return null;
+            }
             return clientStatsCache.ContainsKey(playerId) ? clientStatsCache[playerId] : null;
         }
         

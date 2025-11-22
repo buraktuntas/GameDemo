@@ -35,7 +35,8 @@ namespace TacticalCombat.Player
         private float speedVelocityRef = 0f; // Reference for SmoothDamp (required parameter)
         
         [Header("Look")]
-        public float lookSpeed = 5f;
+        [Tooltip("Mouse sensitivity (lower = slower, higher = faster). Recommended: 1-3")]
+        public float lookSpeed = 2f; // ✅ Reduced from 5f to 2f for better control
         public float lookXLimit = 60f;
         
         [Header("Ground Check")]
@@ -816,16 +817,18 @@ private void Update()
             if (lookAction != null)
             {
                 lookDelta = lookAction.ReadValue<Vector2>();
-                pendingMouseX = lookDelta.x;
-                pendingMouseY = lookDelta.y;
+                // ✅ FIX: Apply sensitivity multiplier for Input System (0.01f = smoother, adjustable via lookSpeed)
+                float inputSensitivity = 0.01f; // Input System delta is in pixels, needs scaling
+                pendingMouseX = lookDelta.x * inputSensitivity;
+                pendingMouseY = lookDelta.y * inputSensitivity;
             }
             else if (Mouse.current != null)
             {
                 Vector2 delta = Mouse.current.delta.ReadValue();
                 // Adjust sensitivity as Mouse.delta is pixels, legacy GetAxis was different. 
-                // 0.05f is a rough approximation to match legacy feel, user can adjust lookSpeed.
-                pendingMouseX = delta.x * 0.05f; 
-                pendingMouseY = delta.y * 0.05f;
+                // 0.03f reduced from 0.05f for smoother feel, user can adjust lookSpeed.
+                pendingMouseX = delta.x * 0.03f; // ✅ Reduced from 0.05f
+                pendingMouseY = delta.y * 0.03f; // ✅ Reduced from 0.05f
             }
         }
 

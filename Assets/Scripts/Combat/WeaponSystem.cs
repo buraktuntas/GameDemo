@@ -570,8 +570,31 @@ namespace TacticalCombat.Combat
             PerformServerRaycast(lag);
 
             // ✅ CRITICAL FIX: Sync fire effects to ALL clients
-            Vector3 muzzlePos = weaponHolder != null ? weaponHolder.position : transform.position;
-            Vector3 muzzleDir = weaponHolder != null ? weaponHolder.forward : transform.forward;
+            // ✅ FIX: Use MuzzlePoint for accurate muzzle flash position
+            Vector3 muzzlePos;
+            Vector3 muzzleDir;
+            
+            if (weaponHolder != null)
+            {
+                Transform muzzlePoint = weaponHolder.Find("MuzzlePoint");
+                if (muzzlePoint != null)
+                {
+                    muzzlePos = muzzlePoint.position;
+                    muzzleDir = muzzlePoint.forward;
+                }
+                else
+                {
+                    // Fallback: use weaponHolder position + forward offset
+                    muzzlePos = weaponHolder.position + weaponHolder.forward * 0.5f;
+                    muzzleDir = weaponHolder.forward;
+                }
+            }
+            else
+            {
+                muzzlePos = transform.position;
+                muzzleDir = transform.forward;
+            }
+            
             RpcPlayFireEffects(muzzlePos, muzzleDir);
             
             // ✅ CRITICAL: Sync ammo to ALL clients (SyncVar might not trigger event immediately)
@@ -610,7 +633,24 @@ namespace TacticalCombat.Combat
             // ✅ REFACTOR: Use controllers
             if (vfxController != null && weaponHolder != null)
             {
-                vfxController.PlayMuzzleFlashAt(weaponHolder.position + weaponHolder.forward * 0.5f, weaponHolder.forward);
+                // ✅ FIX: Find MuzzlePoint child for accurate muzzle flash position
+                Transform muzzlePoint = weaponHolder.Find("MuzzlePoint");
+                Vector3 muzzlePos;
+                Vector3 muzzleDir;
+                
+                if (muzzlePoint != null)
+                {
+                    muzzlePos = muzzlePoint.position;
+                    muzzleDir = muzzlePoint.forward;
+                }
+                else
+                {
+                    // Fallback: use weaponHolder position + forward offset
+                    muzzlePos = weaponHolder.position + weaponHolder.forward * 0.5f;
+                    muzzleDir = weaponHolder.forward;
+                }
+                
+                vfxController.PlayMuzzleFlashAt(muzzlePos, muzzleDir);
             }
             
             audioController?.PlayFireSound(true);
@@ -738,7 +778,8 @@ namespace TacticalCombat.Combat
             audioController?.PlayFireSoundAt(muzzlePosition, !isLocalPlayer);
             
             // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
-            if (weaponAnimator != null)
+            // ✅ FIX: Check if parameter exists before setting trigger
+            if (weaponAnimator != null && HasAnimatorParameter(weaponAnimator, FireHash, AnimatorControllerParameterType.Trigger))
             {
                 weaponAnimator.SetTrigger(FireHash);
             }
@@ -1438,8 +1479,11 @@ namespace TacticalCombat.Combat
         {
             // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
             // Play reload animation on all clients
-            if (weaponAnimator != null)
+            // ✅ FIX: Check if parameter exists before setting trigger
+            if (weaponAnimator != null && HasAnimatorParameter(weaponAnimator, ReloadHash, AnimatorControllerParameterType.Trigger))
+            {
                 weaponAnimator.SetTrigger(ReloadHash);
+            }
             
             // ✅ REFACTOR: Use audioController for reload sound
             audioController?.PlayReloadSound();
@@ -1491,7 +1535,8 @@ namespace TacticalCombat.Combat
             
             // ✅ HIGH PRIORITY: Use hashed trigger (no string allocation)
             // ✅ FIX: Play weapon animation
-            if (weaponAnimator != null)
+            // ✅ FIX: Check if parameter exists before setting trigger
+            if (weaponAnimator != null && HasAnimatorParameter(weaponAnimator, FireHash, AnimatorControllerParameterType.Trigger))
             {
                 weaponAnimator.SetTrigger(FireHash);
             }
@@ -1862,6 +1907,23 @@ namespace TacticalCombat.Combat
         {
             get { return null; } // Controllers handle this internally
             set { } // Controllers handle this internally
+        }
+
+        /// <summary>
+        /// ✅ FIX: Check if animator has parameter before setting trigger
+        /// </summary>
+        private bool HasAnimatorParameter(Animator animator, int paramHash, AnimatorControllerParameterType paramType)
+        {
+            if (animator == null || animator.runtimeAnimatorController == null) return false;
+
+            foreach (AnimatorControllerParameter param in animator.parameters)
+            {
+                if (param.nameHash == paramHash && param.type == paramType)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
     }
     

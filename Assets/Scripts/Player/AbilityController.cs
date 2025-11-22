@@ -44,11 +44,25 @@ namespace TacticalCombat.Player
             base.OnStartLocalPlayer();
 
             var playerInput = GetComponent<PlayerInput>();
-            if (playerInput != null)
+            if (playerInput != null && playerInput.actions != null)
             {
                 var playerMap = playerInput.actions.FindActionMap("Player");
-                abilityAction = playerMap.FindAction("UseAbility");
-                abilityAction.performed += OnAbilityInput;
+                if (playerMap != null)
+                {
+                    abilityAction = playerMap.FindAction("UseAbility");
+                    if (abilityAction != null)
+                    {
+                        abilityAction.performed += OnAbilityInput;
+                    }
+                    else
+                    {
+                        Debug.LogWarning("[AbilityController] UseAbility action not found in Player action map");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("[AbilityController] Player action map not found");
+                }
             }
 
             // Load role definition based on player's role

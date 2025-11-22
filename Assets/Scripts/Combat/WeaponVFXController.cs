@@ -39,6 +39,11 @@ namespace TacticalCombat.Combat
                     }
                     muzzleFlashPool.Enqueue(flash);
                 }
+                Debug.Log($"✅ [WeaponVFXController] Initialized muzzle flash pool with {POOL_SIZE} objects");
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [WeaponVFXController] Muzzle Flash Prefab is NULL! Pool not initialized.");
             }
             
             // Hit effect pool - no parenting
@@ -54,6 +59,7 @@ namespace TacticalCombat.Combat
                     }
                     hitEffectPool.Enqueue(effect);
                 }
+                Debug.Log($"✅ [WeaponVFXController] Initialized hit effect pool with {POOL_SIZE} objects");
             }
         }
 
@@ -62,9 +68,16 @@ namespace TacticalCombat.Combat
             if (muzzleFlashPrefab == null)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning("⚠️ [WeaponVFXController] Muzzle Flash Prefab is missing!");
+                Debug.LogWarning("⚠️ [WeaponVFXController] Muzzle Flash Prefab is missing! Cannot play muzzle flash.");
                 #endif
                 return;
+            }
+            
+            // ✅ FIX: Ensure pool is initialized (in case Awake wasn't called)
+            if (muzzleFlashPool.Count == 0 && muzzleFlashPrefab != null)
+            {
+                Debug.LogWarning("⚠️ [WeaponVFXController] Pool not initialized! Initializing now...");
+                InitializeObjectPools();
             }
             
             GameObject flash = GetPooledMuzzleFlash();
@@ -83,29 +96,33 @@ namespace TacticalCombat.Combat
             else
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning("⚠️ [WeaponVFXController] Failed to get muzzle flash from pool!");
+                Debug.LogWarning($"⚠️ [WeaponVFXController] Failed to get muzzle flash from pool! Pool size: {muzzleFlashPool.Count}, Prefab: {(muzzleFlashPrefab != null ? muzzleFlashPrefab.name : "NULL")}");
                 #endif
             }
         }
 
         private GameObject GetPooledMuzzleFlash()
         {
+            // Try to get from pool first
             if (muzzleFlashPool.Count > 0)
             {
                 return muzzleFlashPool.Dequeue();
             }
             
-            // Expand pool if needed
+            // ✅ FIX: Expand pool if needed (dynamic pool expansion)
             if (muzzleFlashPrefab != null)
             {
                 GameObject flash = Instantiate(muzzleFlashPrefab);
+                flash.SetActive(false);
                 if (flash.GetComponent<AutoDestroy>() == null)
                 {
                     flash.AddComponent<AutoDestroy>();
                 }
+                Debug.Log($"⚠️ [WeaponVFXController] Pool exhausted! Created new muzzle flash instance. Consider increasing POOL_SIZE.");
                 return flash;
             }
             
+            Debug.LogError("❌ [WeaponVFXController] Cannot create muzzle flash: Prefab is NULL!");
             return null;
         }
 

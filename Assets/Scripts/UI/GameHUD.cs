@@ -253,41 +253,63 @@ namespace TacticalCombat.UI
                     int teamBScore = 0;
                     
                     // ✅ PERFORMANCE FIX: Use NetworkServer.spawned (server) or NetworkClient.spawned (client)
-                    if (NetworkServer.active)
+                    if (NetworkServer.active && NetworkServer.spawned != null)
                     {
                         foreach (var kvp in NetworkServer.spawned)
                         {
+                            if (kvp.Value == null) continue;
+                            
                             var player = kvp.Value.GetComponent<Player.PlayerController>();
-                            if (player != null)
+                            if (player != null && MatchManager.Instance != null)
                             {
                                 // ✅ FIX: Server-side access (server can use GetPlayerMatchStats)
-                                var stats = MatchManager.Instance?.GetPlayerMatchStats(player.netId);
-                                if (stats != null)
+                                try
                                 {
-                                    if (player.GetPlayerTeam() == Team.TeamA)
-                                        teamAScore += stats.totalScore;
-                                    else if (player.GetPlayerTeam() == Team.TeamB)
-                                        teamBScore += stats.totalScore;
+                                    var stats = MatchManager.Instance.GetPlayerMatchStats(player.netId);
+                                    if (stats != null)
+                                    {
+                                        Team playerTeam = player.GetPlayerTeam();
+                                        if (playerTeam == Team.TeamA)
+                                            teamAScore += stats.totalScore;
+                                        else if (playerTeam == Team.TeamB)
+                                            teamBScore += stats.totalScore;
+                                    }
+                                }
+                                catch (System.Exception)
+                                {
+                                    // Silently skip - stats might not be ready yet
+                                    // This is expected during match initialization
                                 }
                             }
                         }
                     }
-                    else if (NetworkClient.active)
+                    else if (NetworkClient.active && NetworkClient.spawned != null)
                     {
                         // Client-side: Use NetworkClient.spawned
                         foreach (var kvp in NetworkClient.spawned)
                         {
+                            if (kvp.Value == null) continue;
+                            
                             var player = kvp.Value.GetComponent<Player.PlayerController>();
-                            if (player != null)
+                            if (player != null && MatchManager.Instance != null)
                             {
                                 // ✅ FIX: Client-side access (use client cache)
-                                var stats = MatchManager.Instance?.GetPlayerMatchStatsClient(player.netId);
-                                if (stats != null)
+                                try
                                 {
-                                    if (player.GetPlayerTeam() == Team.TeamA)
-                                        teamAScore += stats.totalScore;
-                                    else if (player.GetPlayerTeam() == Team.TeamB)
-                                        teamBScore += stats.totalScore;
+                                    var stats = MatchManager.Instance.GetPlayerMatchStatsClient(player.netId);
+                                    if (stats != null)
+                                    {
+                                        Team playerTeam = player.GetPlayerTeam();
+                                        if (playerTeam == Team.TeamA)
+                                            teamAScore += stats.totalScore;
+                                        else if (playerTeam == Team.TeamB)
+                                            teamBScore += stats.totalScore;
+                                    }
+                                }
+                                catch (System.Exception)
+                                {
+                                    // Silently skip - stats might not be ready yet
+                                    // This is expected during match initialization
                                 }
                             }
                         }
