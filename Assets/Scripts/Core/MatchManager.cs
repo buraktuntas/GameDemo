@@ -51,6 +51,12 @@ namespace TacticalCombat.Core
         // Reference to ObjectiveManager (will be set when ObjectiveManager is created)
         private ObjectiveManager objectiveManager;
 
+        // ✅ MEMORY LEAK FIX: Track active coroutines for cleanup
+        private Coroutine activeBuildPhaseTimer = null;
+        private Coroutine activeCombatPhaseTimer = null;
+        private Coroutine activePeriodicStatsSync = null;
+        private Coroutine activeRoundEndDelay = null;
+
         private void Awake()
         {
             if (Instance == null)
@@ -61,6 +67,29 @@ namespace TacticalCombat.Core
             else
             {
                 Destroy(gameObject);
+            }
+            
+            // ✅ CRITICAL FIX: Force buildDuration to use GameConstants value (ignore Inspector override)
+            buildDuration = GameConstants.BUILD_DURATION;
+            LogInfo($"[MatchManager] Build duration forced to: {buildDuration} seconds (from GameConstants)");
+        }
+
+        // ✅ MEMORY LEAK FIX: Clean up coroutines and invokes on destroy
+        private void OnDestroy()
+        {
+            // Stop all active coroutines to prevent memory leaks
+            if (activeBuildPhaseTimer != null) StopCoroutine(activeBuildPhaseTimer);
+            if (activeCombatPhaseTimer != null) StopCoroutine(activeCombatPhaseTimer);
+            if (activePeriodicStatsSync != null) StopCoroutine(activePeriodicStatsSync);
+            if (activeRoundEndDelay != null) StopCoroutine(activeRoundEndDelay);
+
+            // Cancel all Invoke calls
+            CancelInvoke();
+
+            // Clear instance reference if this is the active instance
+            if (Instance == this)
+            {
+                Instance = null;
             }
         }
 
@@ -388,7 +417,8 @@ namespace TacticalCombat.Core
         [Server]
         private void StartBuildPhase()
         {
-            LogInfo("Starting Build Phase (3 minutes)");
+            // ✅ FIX: Use actual buildDuration value instead of hardcoded "3 minutes"
+            LogInfo($"Starting Build Phase ({buildDuration} seconds)");
             
             // Reset player states
             foreach (var state in playerStates.Values)
@@ -407,7 +437,7 @@ namespace TacticalCombat.Core
             }
 
             currentPhase = Phase.Build;
-            remainingTime = buildDuration;
+            remainingTime = buildDuration; // ✅ FIX: This uses buildDuration which is now 8 seconds
             suddenDeathActive = false;
             
             // ✅ CRITICAL: Notify phase change FIRST (before showing players)
@@ -429,11 +459,13 @@ namespace TacticalCombat.Core
             RpcEnablePlayerControls(true);
             
             LogInfo("Build phase started successfully");
-            
-            // ✅ NETWORK OPTIMIZATION: Start periodic stats sync coroutine
-            StartCoroutine(PeriodicStatsSync());
-            
-            StartCoroutine(BuildPhaseTimer());
+
+            // ✅ MEMORY LEAK FIX: Store coroutine references for cleanup
+            if (activePeriodicStatsSync != null) StopCoroutine(activePeriodicStatsSync);
+            activePeriodicStatsSync = StartCoroutine(PeriodicStatsSync());
+
+            if (activeBuildPhaseTimer != null) StopCoroutine(activeBuildPhaseTimer);
+            activeBuildPhaseTimer = StartCoroutine(BuildPhaseTimer());
         }
 
         [Server]
@@ -455,18 +487,67 @@ namespace TacticalCombat.Core
         private void RpcShowAllPlayers()
         {
             // Find all player GameObjects and show them
-            var players = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+            // ✅ CRITICAL: Use FindObjectsInactive to find inactive players too!
+            var players = FindObjectsByType<Player.PlayerController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            LogInfo($"[MatchManager] Found {players.Length} PlayerController(s) in scene (including inactive)");
+            
+            // ✅ CRITICAL FIX: Find local player using NetworkClient.localPlayer (more reliable)
+            Player.PlayerController localPlayerController = null;
+            
+            // Method 1: Use NetworkClient.localPlayer (most reliable)
+            if (NetworkClient.localPlayer != null)
+            {
+                localPlayerController = NetworkClient.localPlayer.GetComponent<Player.PlayerController>();
+                if (localPlayerController != null)
+                {
+                    LogInfo($"[MatchManager] 🔍 Found local player via NetworkClient.localPlayer: {localPlayerController.name}");
+                }
+            }
+            
+            // Method 2: Fallback - find by isLocalPlayer flag
+            if (localPlayerController == null)
+            {
+                foreach (var player in players)
+                {
+                    if (player.isLocalPlayer)
+                    {
+                        localPlayerController = player;
+                        LogInfo($"[MatchManager] 🔍 Found local player via isLocalPlayer flag: {player.name}");
+                        break;
+                    }
+                }
+            }
+            
+            // Method 3: Last resort - find by NetworkClient.connection.identity
+            if (localPlayerController == null && NetworkClient.connection != null && NetworkClient.connection.identity != null)
+            {
+                localPlayerController = NetworkClient.connection.identity.GetComponent<Player.PlayerController>();
+                if (localPlayerController != null)
+                {
+                    LogInfo($"[MatchManager] 🔍 Found local player via NetworkClient.connection.identity: {localPlayerController.name}");
+                }
+            }
+            
+            // ✅ CRITICAL FIX: Activate ALL players first
             foreach (var playerController in players)
             {
                 var player = playerController.gameObject;
-                
+
+                // ✅ CRITICAL FIX: Activate the GameObject itself (not just renderers/colliders)
+                bool wasInactive = !player.activeSelf;
+                if (wasInactive)
+                {
+                    player.SetActive(true);
+                    LogInfo($"[MatchManager] Activated player GameObject: {player.name}");
+                }
+
                 // Show renderers
                 var renderers = player.GetComponentsInChildren<Renderer>(true);
                 foreach (var renderer in renderers)
                 {
                     renderer.enabled = true;
                 }
-                
+
                 // Enable colliders
                 var colliders = player.GetComponentsInChildren<Collider>(true);
                 foreach (var collider in colliders)
@@ -475,7 +556,290 @@ namespace TacticalCombat.Core
                 }
             }
             
+            // ✅ CRITICAL FIX: Now handle local player camera
+            if (localPlayerController != null)
+            {
+                var player = localPlayerController.gameObject;
+                LogInfo($"[MatchManager] 🔍 Processing local player: {player.name}, Active: {player.activeSelf}");
+                
+                // ✅ CRITICAL FIX: Activate player GameObject FIRST (it's inactive!)
+                if (!player.activeSelf)
+                {
+                    player.SetActive(true);
+                    LogInfo($"[MatchManager] ✅ Activated local player GameObject: {player.name}");
+                }
+                
+                // ✅ CRITICAL FIX: Also activate all parent GameObjects
+                Transform current = localPlayerController.transform;
+                while (current != null && current.parent != null)
+                {
+                    if (!current.parent.gameObject.activeSelf)
+                    {
+                        current.parent.gameObject.SetActive(true);
+                        LogInfo($"[MatchManager] ✅ Activated parent GameObject: {current.parent.name}");
+                    }
+                    current = current.parent;
+                }
+                
+                var fpsController = localPlayerController.GetComponent<Player.FPSController>();
+                if (fpsController == null)
+                {
+                    LogError($"[MatchManager] ❌ FPSController not found on local player: {player.name}");
+                }
+                else
+                {
+                    LogInfo($"[MatchManager] ✅ FPSController found, playerCamera: {(fpsController.playerCamera != null ? fpsController.playerCamera.name : "NULL")}");
+                    
+                    // ✅ CRITICAL FIX: Setup camera first (before OnStartLocalPlayer)
+                    // This ensures camera exists before OnStartLocalPlayer tries to use it
+                    if (fpsController.playerCamera == null)
+                    {
+                        LogInfo($"[MatchManager] 🔧 Setting up camera for local player...");
+                        fpsController.SendMessage("SetupCamera", SendMessageOptions.DontRequireReceiver);
+                        
+                        // Wait a frame for SetupCamera to complete, then activate
+                        StartCoroutine(SetupCameraAndActivate(fpsController, player.name));
+                    }
+                    else
+                    {
+                        // Camera exists - activate it immediately
+                        ActivatePlayerCamera(fpsController, player.name);
+                        
+                        // Also retry with delay as backup
+                        StartCoroutine(EnsureCameraActiveDelayed(fpsController, player.name));
+                    }
+                    
+                    // Force camera setup retry by calling OnStartLocalPlayer again
+                    // This will properly initialize the camera that failed during inactive spawn
+                    fpsController.SendMessage("OnStartLocalPlayer", SendMessageOptions.DontRequireReceiver);
+                    
+                    LogInfo($"[MatchManager] Retried camera setup for local player: {player.name}");
+                }
+            }
+            else
+            {
+                LogError("[MatchManager] ❌ Local player NOT FOUND! Cannot activate camera!");
+                
+                // ✅ LAST RESORT: Try to find ANY FPSController with a camera (including inactive)
+                var allFPS = FindObjectsByType<Player.FPSController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+                foreach (var fps in allFPS)
+                {
+                    // ✅ CRITICAL: Activate FPSController GameObject first
+                    if (!fps.gameObject.activeSelf)
+                    {
+                        fps.gameObject.SetActive(true);
+                        LogWarning($"[MatchManager] ⚠️ LAST RESORT: Activated FPSController GameObject: {fps.name}");
+                    }
+                    
+                    if (fps.playerCamera != null)
+                    {
+                        LogWarning($"[MatchManager] ⚠️ LAST RESORT: Activating camera from FPSController: {fps.name}");
+                        ActivatePlayerCamera(fps, fps.name);
+                        break;
+                    }
+                }
+            }
+
+            // ✅ CRITICAL FIX: Disable BootstrapCamera when match starts
+            var bootstrapCameraObj = GameObject.Find("BootstrapCamera");
+            if (bootstrapCameraObj != null)
+            {
+                var bootstrapCamera = bootstrapCameraObj.GetComponent<Camera>();
+                if (bootstrapCamera != null)
+                {
+                    bootstrapCamera.enabled = false;
+                    LogInfo("[MatchManager] BootstrapCamera disabled");
+                }
+            }
+            
+            // ✅ CRITICAL FIX: Show GameHUD when match starts
+            var gameHUD = FindFirstObjectByType<TacticalCombat.UI.GameHUD>();
+            if (gameHUD != null)
+            {
+                gameHUD.gameObject.SetActive(true);
+                LogInfo("[MatchManager] GameHUD activated");
+            }
+            else
+            {
+                LogWarning("[MatchManager] GameHUD not found in scene!");
+            }
+
             LogInfo("[MatchManager] All players shown (match started)");
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Setup camera and then activate it
+        /// </summary>
+        private System.Collections.IEnumerator SetupCameraAndActivate(Player.FPSController fpsController, string playerName)
+        {
+            yield return null; // Wait a frame for SetupCamera to complete
+            
+            // Check if camera was created
+            if (fpsController != null && fpsController.playerCamera != null)
+            {
+                ActivatePlayerCamera(fpsController, playerName);
+            }
+            else
+            {
+                LogError($"[MatchManager] ❌ Camera setup failed for {playerName} - camera is still null!");
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Activate player camera with all necessary settings
+        /// </summary>
+        private void ActivatePlayerCamera(Player.FPSController fpsController, string playerName)
+        {
+            if (fpsController == null || fpsController.playerCamera == null)
+            {
+                LogError($"[MatchManager] ❌ Cannot activate camera - FPSController or camera is null!");
+                return;
+            }
+            
+            // ✅ CRITICAL FIX: Ensure FPSController GameObject is active
+            if (!fpsController.gameObject.activeSelf)
+            {
+                fpsController.gameObject.SetActive(true);
+                LogInfo($"[MatchManager] ✅ Activated FPSController GameObject: {fpsController.name}");
+            }
+            
+            var camera = fpsController.playerCamera;
+            
+            // ✅ CRITICAL: Ensure camera GameObject is active
+            if (!camera.gameObject.activeSelf)
+            {
+                camera.gameObject.SetActive(true);
+                LogInfo($"[MatchManager] ✅ Activated camera GameObject: {camera.name}");
+            }
+            
+            // ✅ CRITICAL: Disable BootstrapCamera first
+            var bootstrapCameraObj = GameObject.Find("BootstrapCamera");
+            if (bootstrapCameraObj != null)
+            {
+                var bootstrapCamera = bootstrapCameraObj.GetComponent<Camera>();
+                if (bootstrapCamera != null)
+                {
+                    bootstrapCamera.enabled = false;
+                    LogInfo("[MatchManager] BootstrapCamera disabled in ActivatePlayerCamera");
+                }
+            }
+            
+            // ✅ CRITICAL: Enable and activate camera
+            camera.enabled = true;
+            camera.gameObject.SetActive(true);
+            
+            // ✅ CRITICAL: Ensure camera GameObject and all parents are active
+            Transform camTransform = camera.transform;
+            while (camTransform != null)
+            {
+                if (!camTransform.gameObject.activeSelf)
+                {
+                    camTransform.gameObject.SetActive(true);
+                    LogInfo($"[MatchManager] ✅ Activated camera parent: {camTransform.name}");
+                }
+                camTransform = camTransform.parent;
+            }
+            
+            // ✅ CRITICAL: Set MainCamera tag
+            if (!camera.CompareTag("MainCamera"))
+            {
+                camera.tag = "MainCamera";
+            }
+            
+            // ✅ CRITICAL: Set camera depth (higher than bootstrap)
+            camera.depth = 0;
+            
+            // ✅ CRITICAL: Ensure URP camera data exists
+            if (camera.GetComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>() == null)
+            {
+                camera.gameObject.AddComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+            }
+            
+            // ✅ CRITICAL FIX: Force camera to render by setting target display
+            camera.targetDisplay = 0; // Display 1
+            
+            // ✅ CRITICAL FIX: Ensure camera has proper settings for rendering
+            // Check and log camera settings
+            int cullingMaskValue = camera.cullingMask; // LayerMask is an int
+            LogInfo($"[MatchManager] 📷 Camera Settings - Position: {camera.transform.position}, Rotation: {camera.transform.rotation.eulerAngles}");
+            LogInfo($"[MatchManager] 📷 Camera Settings - FOV: {camera.fieldOfView}, Near: {camera.nearClipPlane}, Far: {camera.farClipPlane}");
+            LogInfo($"[MatchManager] 📷 Camera Settings - CullingMask: {cullingMaskValue} (0x{cullingMaskValue:X8})");
+            LogInfo($"[MatchManager] 📷 Camera Settings - ClearFlags: {camera.clearFlags}, Background: {camera.backgroundColor}");
+            
+            // ✅ CRITICAL FIX: Ensure camera culling mask includes default layers (Everything = -1)
+            if (camera.cullingMask == 0)
+            {
+                camera.cullingMask = -1; // Everything
+                LogWarning("[MatchManager] ⚠️ Camera culling mask was 0! Set to Everything (-1)");
+            }
+            
+            // ✅ CRITICAL FIX: Ensure camera has proper clear flags (Skybox or Solid Color)
+            if (camera.clearFlags == CameraClearFlags.Nothing)
+            {
+                camera.clearFlags = CameraClearFlags.Skybox;
+                LogWarning("[MatchManager] ⚠️ Camera clear flags was Nothing! Set to Skybox");
+            }
+            
+            // ✅ CRITICAL FIX: Ensure camera is at a valid position (not at origin if player moved)
+            if (camera.transform.position == Vector3.zero && fpsController.transform.position != Vector3.zero)
+            {
+                LogWarning($"[MatchManager] ⚠️ Camera at origin but player at {fpsController.transform.position} - camera may need repositioning");
+            }
+            
+            // ✅ NOTE: Do NOT call camera.Render() manually in URP - URP handles rendering automatically
+            // Manual Render() calls cause "Not inside a Renderpass" errors in URP
+            
+            LogInfo($"[MatchManager] ✅ Camera activated for local player: {playerName} (Enabled: {camera.enabled}, Active: {camera.gameObject.activeSelf}, Depth: {camera.depth}, Tag: {camera.tag}, TargetDisplay: {camera.targetDisplay})");
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Ensure camera is active with retry (handles timing issues)
+        /// </summary>
+        private System.Collections.IEnumerator EnsureCameraActiveDelayed(Player.FPSController fpsController, string playerName)
+        {
+            // Wait a frame for OnStartLocalPlayer to complete
+            yield return null;
+            
+            // Retry up to 10 times (1 second total)
+            for (int i = 0; i < 10; i++)
+            {
+                if (fpsController != null && fpsController.playerCamera != null)
+                {
+                    // Use the centralized activation method
+                    ActivatePlayerCamera(fpsController, playerName);
+                    LogInfo($"[MatchManager] Camera activated for local player: {playerName} (attempt {i + 1})");
+                    yield break; // Success
+                }
+                
+                // If camera is still null, try to setup again
+                if (fpsController != null && fpsController.playerCamera == null)
+                {
+                    LogInfo($"[MatchManager] Camera still null, retrying SetupCamera (attempt {i + 1})");
+                    fpsController.SendMessage("SetupCamera", SendMessageOptions.DontRequireReceiver);
+                }
+                
+                yield return new WaitForSeconds(0.1f);
+            }
+            
+            LogError($"[MatchManager] ❌ Failed to activate camera for local player: {playerName} after 10 attempts!");
+            
+            // ✅ LAST RESORT: Try to find ANY camera in the scene and activate it
+            var allCameras = FindObjectsByType<Camera>(FindObjectsSortMode.None);
+            foreach (var cam in allCameras)
+            {
+                if (cam != null && cam.name.Contains("Player") && !cam.name.Contains("Bootstrap"))
+                {
+                    cam.enabled = true;
+                    cam.gameObject.SetActive(true);
+                    cam.depth = 0;
+                    if (!cam.CompareTag("MainCamera"))
+                    {
+                        cam.tag = "MainCamera";
+                    }
+                    LogWarning($"[MatchManager] ⚠️ LAST RESORT: Activated camera: {cam.name}");
+                    yield break;
+                }
+            }
         }
 
         [Server]
@@ -506,8 +870,10 @@ namespace TacticalCombat.Core
             }
             
             LogInfo("Combat phase started successfully");
-            
-            StartCoroutine(CombatPhaseTimer());
+
+            // ✅ MEMORY LEAK FIX: Store coroutine reference for cleanup
+            if (activeCombatPhaseTimer != null) StopCoroutine(activeCombatPhaseTimer);
+            activeCombatPhaseTimer = StartCoroutine(CombatPhaseTimer());
         }
 
         [Server]
@@ -804,6 +1170,9 @@ namespace TacticalCombat.Core
             remainingTime = endPhaseDuration;
             RpcOnPhaseChanged(currentPhase);
             RpcOnMatchWon(winner, awards);
+            
+            // ✅ CRITICAL FIX: Keep players visible in End phase (don't hide them)
+            RpcShowAllPlayers();
             
             // ✅ NEW: Update ranking system
             UpdateRankings(winner);

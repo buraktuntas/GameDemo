@@ -33,28 +33,35 @@ namespace TacticalCombat.UI
         // ✅ REMOVED: lobbySceneName - not currently used (future feature for lobby scene transition)
 
         private NetworkManager networkManager;
-        
+
+        // ✅ PERFORMANCE FIX: Throttle cursor checks to reduce CPU usage
+        private float lastCursorCheckTime = 0f;
+        private const float CURSOR_CHECK_INTERVAL = 0.1f; // Check every 0.1 seconds
+
         private void Update()
         {
-            // ✅ CRITICAL FIX: Continuously ensure cursor is unlocked when menu is visible
-            if (mainMenuPanel != null && mainMenuPanel.activeSelf)
+            // ✅ PERFORMANCE FIX: Only check/update cursor every 0.1 seconds instead of every frame
+            if (Time.time - lastCursorCheckTime >= CURSOR_CHECK_INTERVAL)
             {
-                if (Cursor.lockState != CursorLockMode.None || !Cursor.visible)
+                lastCursorCheckTime = Time.time;
+
+                // ✅ CRITICAL FIX: Continuously ensure cursor is unlocked when menu is visible
+                if (mainMenuPanel != null && mainMenuPanel.activeSelf)
                 {
-                    Cursor.lockState = CursorLockMode.None;
-                    Cursor.visible = true;
+                    if (Cursor.lockState != CursorLockMode.None || !Cursor.visible)
+                    {
+                        Cursor.lockState = CursorLockMode.None;
+                        Cursor.visible = true;
+                    }
                 }
-                
-                // ✅ PRODUCTION: Removed verbose debug logging from Update() (performance)
-                // Debug logging moved to GameLogger.LogUI() with #if UNITY_EDITOR guards
-            }
-            
-            if (joinPanel != null && joinPanel.activeSelf)
-            {
-                if (Cursor.lockState != CursorLockMode.None || !Cursor.visible)
+
+                if (joinPanel != null && joinPanel.activeSelf)
                 {
-                    Cursor.lockState = CursorLockMode.None;
-                    Cursor.visible = true;
+                    if (Cursor.lockState != CursorLockMode.None || !Cursor.visible)
+                    {
+                        Cursor.lockState = CursorLockMode.None;
+                        Cursor.visible = true;
+                    }
                 }
             }
         }
@@ -231,15 +238,16 @@ namespace TacticalCombat.UI
         }
 
         /// <summary>
-        /// ✅ NEW: Hide LobbyUI at start to prevent overlap
+        /// ✅ NEW: Hide LobbyUIController at start to prevent overlap
         /// </summary>
         private void HideLobbyUIAtStart()
         {
-            var lobbyUI = FindFirstObjectByType<LobbyUI>();
-            if (lobbyUI != null)
+            // ✅ NEW: Use LobbyUIController
+            LobbyUIController lobbyController = LobbyUIController.Instance;
+            if (lobbyController != null)
             {
-                lobbyUI.HidePanel();
-                Debug.Log("✅ [MainMenu] LobbyUI hidden at start");
+                lobbyController.HideLobby();
+                Debug.Log("✅ [MainMenu] LobbyUIController hidden at start");
             }
 
             // Also hide GameModeSelection
@@ -355,12 +363,14 @@ namespace TacticalCombat.UI
 
         private void OnHostButtonClicked()
         {
+            Debug.Log("🚀🚀🚀 [MainMenu] HOST BUTTON CLICKED! This should appear when you click Host!");
+
             // ✅ NEW: Play UI sound
             if (Audio.AudioManager.Instance != null)
             {
                 Audio.AudioManager.Instance.PlaySFX("button_click", 0.8f);
             }
-            
+
             GameLogger.LogUI("Host button clicked - showing lobby");
 
             // Hide Main Menu
@@ -501,6 +511,7 @@ namespace TacticalCombat.UI
 
         private void ShowLobby()
         {
+            Debug.Log("🎮🎮🎮 [MainMenu] ShowLobby called! This should be the first log you see.");
             GameLogger.LogUI("Looking for LobbyUIController");
             
             // ✅ NEW: Use new LobbyUIController (AAA quality, sıfırdan temiz)
@@ -723,11 +734,11 @@ namespace TacticalCombat.UI
         /// </summary>
         private void HideOtherUIs()
         {
-            // Hide LobbyUI
-            var lobbyUI = FindFirstObjectByType<LobbyUI>();
-            if (lobbyUI != null)
+            // ✅ NEW: Hide LobbyUIController
+            LobbyUIController lobbyController = LobbyUIController.Instance;
+            if (lobbyController != null)
             {
-                lobbyUI.HidePanel();
+                lobbyController.HideLobby();
             }
 
             // Hide GameModeSelection

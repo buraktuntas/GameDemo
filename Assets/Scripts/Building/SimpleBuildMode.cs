@@ -93,6 +93,9 @@ namespace TacticalCombat.Building
         private float lastToggleTime = 0f;
         private const float TOGGLE_COOLDOWN = 0.3f;
         private bool isTogglingBuildMode = false; // Prevents recursive toggle
+        
+        // ✅ FIX: Track initialization state
+        private bool isInitialized = false;
 
         // NonAlloc buffers
         private static readonly Collider[] stabilityBuffer = new Collider[256];
@@ -102,9 +105,40 @@ namespace TacticalCombat.Building
         private static readonly ProfilerMarker marker_UpdateGhostPreview = new ProfilerMarker("Build.Simple.UpdateGhostPreview");
         private static readonly ProfilerMarker marker_FindSupport = new ProfilerMarker("Build.Simple.FindNearestSupport");
         
+        public override void OnStartLocalPlayer()
+        {
+            base.OnStartLocalPlayer();
+            Debug.Log($"[SimpleBuildMode] OnStartLocalPlayer() called - GameObject: {gameObject.name}");
+            InitializeBuildMode();
+        }
+        
         private void Start()
         {
-            if (!isLocalPlayer) return;
+            // ✅ DEBUG: Always log Start() to verify component is active
+            Debug.Log($"[SimpleBuildMode] Start() called - isLocalPlayer: {isLocalPlayer}, GameObject: {gameObject.name}");
+            
+            // ✅ FIX: Don't initialize here - wait for OnStartLocalPlayer()
+            // NetworkBehaviour.isLocalPlayer is only set after OnStartLocalPlayer() is called
+            if (isLocalPlayer)
+            {
+                InitializeBuildMode();
+            }
+            else
+            {
+                Debug.LogWarning($"[SimpleBuildMode] Not local player in Start() - will wait for OnStartLocalPlayer()");
+            }
+        }
+        
+        private void InitializeBuildMode()
+        {
+            // ✅ FIX: Prevent double initialization using flag
+            if (isInitialized)
+            {
+                Debug.LogWarning("[SimpleBuildMode] Already initialized - skipping");
+                return;
+            }
+            
+            Debug.Log("[SimpleBuildMode] Initializing build mode...");
             
             // ✅ FIX: Get weapon system reference
             weaponSystem = GetComponent<WeaponSystem>();
@@ -163,6 +197,10 @@ namespace TacticalCombat.Building
             {
                 BuildValidator.Instance.SetPrefabs(wallPrefab, floorPrefab, stairsPrefab);
             }
+            
+            // ✅ CRITICAL FIX: Mark as initialized AFTER everything is set up
+            isInitialized = true;
+            Debug.Log("[SimpleBuildMode] ✅ Build mode initialized successfully!");
         }
         
         private void InitializeAvailableStructures()
@@ -273,7 +311,32 @@ namespace TacticalCombat.Building
         
         private void Update()
         {
-            if (!isLocalPlayer) return;
+            // ✅ DEBUG: Always log first 20 frames to verify Update() is being called
+            if (Time.frameCount <= 20)
+            {
+                Debug.Log($"[SimpleBuildMode] Update() frame {Time.frameCount} - isLocalPlayer: {isLocalPlayer}, isInitialized: {isInitialized}, GameObject: {gameObject.name}, enabled: {enabled}");
+            }
+            
+            // ✅ CRITICAL FIX: Check isLocalPlayer - it should be true after OnStartLocalPlayer()
+            if (!isLocalPlayer)
+            {
+                if (Time.frameCount <= 20)
+                {
+                    Debug.LogWarning($"[SimpleBuildMode] Update() skipped - not local player: {gameObject.name}");
+                }
+                return;
+            }
+            
+            // ✅ CRITICAL FIX: Ensure initialization happened
+            if (!isInitialized)
+            {
+                if (Time.frameCount <= 20)
+                {
+                    Debug.LogWarning("[SimpleBuildMode] Not initialized yet - calling InitializeBuildMode()");
+                }
+                InitializeBuildMode();
+                return; // Skip this frame, wait for next frame after initialization
+            }
             
             HandleBuildModeToggle();
             
@@ -304,7 +367,17 @@ namespace TacticalCombat.Building
 
             // ✅ FIX: Add cooldown to prevent rapid toggle causing state corruption
             // Check keyboard validity
-            if (Keyboard.current == null) return;
+            if (Keyboard.current == null)
+            {
+                Debug.LogWarning("⚠️ [SimpleBuildMode] Keyboard.current is null!");
+                return;
+            }
+
+            // ✅ DEBUG: Always log B key press attempts
+            if (Keyboard.current[buildModeKey].wasPressedThisFrame)
+            {
+                Debug.Log($"🏗️ [SimpleBuildMode] B key detected! isLocalPlayer: {isLocalPlayer}, Time check: {Time.time - lastToggleTime > TOGGLE_COOLDOWN}");
+            }
 
             if (Keyboard.current[buildModeKey].wasPressedThisFrame && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
             {

@@ -21,7 +21,8 @@ namespace TacticalCombat.Network
         [SerializeField] private bool requireAllReady = true;
 
         [Header("References")]
-        [SerializeField] private TacticalCombat.UI.LobbyUI lobbyUI;
+        // ✅ REMOVED: Old LobbyUI reference - now using LobbyUIController
+        // [SerializeField] private TacticalCombat.UI.LobbyUI lobbyUI;
 
         // ✅ NEW: Game mode (Individual = true, Team = false)
         [SyncVar(hook = nameof(OnGameModeChanged))]
@@ -30,8 +31,8 @@ namespace TacticalCombat.Network
         // Synchronized player list - only host can modify, all clients see
         private readonly SyncList<LobbyPlayerData> players = new SyncList<LobbyPlayerData>();
 
-        // ✅ NEW: Cache local connection ID (set by server via RPC)
-        [SyncVar(hook = nameof(OnLocalConnectionIdChanged))]
+        // ✅ CRITICAL FIX: Local connection ID (set by server via TargetRpc, NOT a SyncVar!)
+        // SyncVar would sync to ALL clients with same value - we need each client to know their OWN ID
         private uint localConnectionId = 0;
 
         // Events
@@ -42,11 +43,6 @@ namespace TacticalCombat.Network
 
         // Singleton instance
         public static LobbyManager Instance { get; private set; }
-        
-        private void OnLocalConnectionIdChanged(uint oldId, uint newId)
-        {
-            // Connection ID changed, update local cache
-        }
 
         #region Unity & Network Lifecycle
 
@@ -115,6 +111,22 @@ namespace TacticalCombat.Network
             players.Callback -= OnPlayersListChanged;
         }
 
+        // ✅ MEMORY LEAK FIX: Clean up on destroy
+        private void OnDestroy()
+        {
+            // Unsubscribe from SyncList callbacks
+            players.Callback -= OnPlayersListChanged;
+
+            // Stop all coroutines
+            StopAllCoroutines();
+
+            // Clear instance reference if this is the active instance
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+        }
+
         #endregion
 
         #region Player Management (Server Only)
@@ -167,12 +179,39 @@ namespace TacticalCombat.Network
 
             // Notify this specific client of their join
             RpcNotifyPlayerJoined(conn, newPlayer);
-            
-            // ✅ NEW: Send connection ID to client
-            RpcSetLocalConnectionId(conn, (uint)conn.connectionId);
-            
+
+            // ✅ CRITICAL: Send connection ID to client (retry mechanism)
+            uint connId = (uint)conn.connectionId;
+            Debug.Log($"[LobbyManager] 📡 Sending RpcSetLocalConnectionId to client (ConnectionID: {connId})");
+            RpcSetLocalConnectionId(conn, connId);
+
+            // ✅ CRITICAL: Retry RPC after a delay to ensure it arrives
+            StartCoroutine(RetrySetLocalConnectionId(conn, connId));
+
             // ✅ DISABLED: Auto-start removed - user must click "Start Game" button
             // CheckAutoStart(); // REMOVED - no auto-start
+        }
+
+        /// <summary>
+        /// ✅ AAA FIX: Retry mechanism for RpcSetLocalConnectionId
+        /// Mirror RPCs can sometimes be lost if client is not fully ready
+        /// </summary>
+        [Server]
+        private System.Collections.IEnumerator RetrySetLocalConnectionId(NetworkConnectionToClient conn, uint connectionId)
+        {
+            // Wait for client to fully initialize
+            yield return new WaitForSeconds(0.5f);
+
+            // Retry RPC
+            if (conn != null && conn.isReady)
+            {
+                Debug.Log($"[LobbyManager] 🔄 Retrying RpcSetLocalConnectionId (ConnectionID: {connectionId})");
+                RpcSetLocalConnectionId(conn, connectionId);
+            }
+            else
+            {
+                Debug.LogWarning($"[LobbyManager] ⚠️ Cannot retry RPC - connection lost or not ready");
+            }
         }
 
         /// <summary>
@@ -237,26 +276,76 @@ namespace TacticalCombat.Network
 
         /// <summary>
         /// Client toggles ready state
-        /// ✅ FIX: Get connectionId from Command context
+        /// ✅ AAA FIX: Robust command with multiple fallbacks for connection detection
         /// </summary>
         [Command(requiresAuthority = false)]
-        public void CmdSetReady(bool ready)
+        public void CmdSetReady(bool ready, NetworkConnectionToClient sender = null)
         {
-            if (connectionToClient == null) return;
-            
-            uint connectionId = (uint)connectionToClient.connectionId;
-            
+            // ✅ CRITICAL: Try multiple ways to get connection (Mirror can be inconsistent)
+            NetworkConnectionToClient conn = sender ?? connectionToClient;
+
+            if (conn == null)
+            {
+                Debug.LogError("[LobbyManager] ❌ CRITICAL: CmdSetReady called but no connection context available!");
+                Debug.LogError("[LobbyManager]   - sender parameter: null");
+                Debug.LogError("[LobbyManager]   - connectionToClient: null");
+                Debug.LogError("[LobbyManager]   - This should never happen in Mirror!");
+                return;
+            }
+
+            uint connectionId = (uint)conn.connectionId;
+            Debug.Log($"[LobbyManager] 🎮 CmdSetReady received: ready={ready}, connectionId={connectionId}, players.Count={players.Count}");
+            Debug.Log($"[LobbyManager]   Connection: {conn.address} (isReady: {conn.isReady}, isAuthenticated: {conn.isAuthenticated})");
+
+            // Find player by connectionId
+            int playerIndex = -1;
             for (int i = 0; i < players.Count; i++)
             {
                 if (players[i].connectionId == connectionId)
                 {
-                    var playerData = players[i];
-                    playerData.isReady = ready;
-                    players[i] = playerData;
-                    
-                    Debug.Log($"[LobbyManager] Player {playerData.playerName} ready: {ready}");
+                    playerIndex = i;
                     break;
                 }
+            }
+
+            if (playerIndex == -1)
+            {
+                Debug.LogError($"[LobbyManager] ❌ Player with connectionId {connectionId} not found in lobby! Players in lobby:");
+                for (int i = 0; i < players.Count; i++)
+                {
+                    Debug.LogError($"   [{i}] {players[i].playerName} (ID: {players[i].connectionId}, Ready: {players[i].isReady})");
+                }
+                return;
+            }
+
+            var oldPlayerData = players[playerIndex];
+            Debug.Log($"[LobbyManager] 🔍 Found player at index {playerIndex}: '{oldPlayerData.playerName}', current ready={oldPlayerData.isReady}, new ready={ready}");
+
+            // ✅ CRITICAL: Create new struct instance to ensure SyncList detects change
+            var newPlayerData = new LobbyPlayerData(
+                oldPlayerData.connectionId,
+                oldPlayerData.playerName,
+                oldPlayerData.teamId,
+                ready, // ✅ New ready state
+                oldPlayerData.isHost
+            );
+
+            // ✅ CRITICAL: Set the new struct - this MUST trigger OP_SET callback
+            players[playerIndex] = newPlayerData;
+
+            Debug.Log($"[LobbyManager] ✅ Player '{newPlayerData.playerName}' ready state changed: {oldPlayerData.isReady} -> {ready} (ConnectionID: {connectionId})");
+            Debug.Log($"[LobbyManager] 📡 SyncList updated at index {playerIndex}, waiting for OP_SET callback...");
+
+            // ✅ CRITICAL: Explicitly invoke event on server (callback will fire on clients)
+            // This ensures server-side UI also updates immediately
+            if (OnPlayerUpdated != null)
+            {
+                Debug.Log($"[LobbyManager] 🔔 Invoking OnPlayerUpdated event on server (subscribers: {OnPlayerUpdated.GetInvocationList().Length})");
+                OnPlayerUpdated.Invoke(newPlayerData);
+            }
+            else
+            {
+                Debug.LogWarning("[LobbyManager] ⚠️ OnPlayerUpdated event has no subscribers!");
             }
         }
 
@@ -294,73 +383,114 @@ namespace TacticalCombat.Network
 
         /// <summary>
         /// Host starts the game (only host can call this)
-        /// ✅ FIX: Mirror Command cannot have optional parameters
+        /// ✅ AAA FIX: Comprehensive validation and logging
         /// </summary>
         [Command(requiresAuthority = false)]
-        public void CmdStartGame()
+        public void CmdStartGame(NetworkConnectionToClient sender = null)
         {
-            // ✅ FIX: Get connection from Mirror's Command context
-            // Mirror automatically provides connection context via NetworkBehaviour.connectionToClient
-            if (connectionToClient == null)
+            Debug.Log("🎮 [LobbyManager] ========== CmdStartGame RECEIVED ==========");
+            Debug.Log($"[LobbyManager]   Players in lobby: {players.Count}");
+            Debug.Log($"[LobbyManager]   Server active: {isServer}");
+
+            // ✅ CRITICAL FIX: Try multiple ways to get connection (host uses LocalConnection, not connectionToClient)
+            NetworkConnectionToClient conn = sender ?? connectionToClient;
+
+            if (conn == null)
             {
-                Debug.LogWarning("[LobbyManager] Could not determine caller connection!");
-                return;
+                Debug.LogError("❌ [LobbyManager] CmdStartGame: No connection available!");
+                Debug.LogError($"   - sender: {sender}");
+                Debug.LogError($"   - connectionToClient: {connectionToClient}");
+                Debug.LogError($"   - NetworkServer.localConnection: {NetworkServer.localConnection}");
+
+                // ✅ FALLBACK: If we're server and it's the host calling, use local connection
+                if (NetworkServer.active && NetworkServer.localConnection != null)
+                {
+                    conn = NetworkServer.localConnection as NetworkConnectionToClient;
+                    Debug.Log($"✅ [LobbyManager] Using NetworkServer.localConnection (Host): {conn}");
+                }
+
+                if (conn == null)
+                {
+                    Debug.LogError("❌ [LobbyManager] Cannot determine caller - aborting!");
+                    return;
+                }
             }
 
-            uint callerConnectionId = (uint)connectionToClient.connectionId;
+            uint callerConnectionId = (uint)conn.connectionId;
+            Debug.Log($"[LobbyManager]   Caller connection ID: {callerConnectionId}");
 
             // Verify caller is host
             bool isHost = false;
+            string callerName = "Unknown";
             foreach (var player in players)
             {
-                if (player.connectionId == callerConnectionId && player.isHost)
+                if (player.connectionId == callerConnectionId)
                 {
-                    isHost = true;
+                    callerName = player.playerName;
+                    isHost = player.isHost;
+                    Debug.Log($"[LobbyManager]   Caller: {callerName} (Host: {isHost})");
                     break;
                 }
             }
 
             if (!isHost)
             {
-                Debug.LogWarning($"[LobbyManager] Non-host tried to start game!");
+                Debug.LogWarning($"❌ [LobbyManager] Non-host '{callerName}' tried to start game!");
+                RpcShowError(conn, "Only the host can start the game!");
                 return;
             }
 
+            Debug.Log("✅ [LobbyManager] Host verified - checking game start conditions...");
+
             // ✅ CRITICAL: Check minimum players before starting
-            // Allow 1 player for testing, but warn if less than minimum
+            Debug.Log($"[LobbyManager] Checking minimum players... (Current: {players.Count}, Min: {minPlayersToStart})");
             if (players.Count < minPlayersToStart)
             {
                 if (players.Count == 1)
                 {
                     // ✅ TEST MODE: Allow 1 player for testing
-                    Debug.Log("[LobbyManager] TEST MODE: Starting with 1 player (testing)");
+                    Debug.Log("⚠️ [LobbyManager] TEST MODE: Starting with 1 player (testing)");
                 }
                 else
                 {
-                    RpcShowError(connectionToClient, $"Need at least {minPlayersToStart} players to start! (Current: {players.Count})");
+                    string errorMsg = $"Need at least {minPlayersToStart} players to start! (Current: {players.Count})";
+                    Debug.LogWarning($"❌ [LobbyManager] {errorMsg}");
+                    RpcShowError(conn, errorMsg);
                     return;
                 }
             }
-            
+
             // ✅ CRITICAL: Check if all players are ready (if required)
+            Debug.Log($"[LobbyManager] Checking ready status... (RequireAllReady: {requireAllReady})");
+            Debug.Log($"[LobbyManager] Current player states:");
+            for (int i = 0; i < players.Count; i++)
+            {
+                Debug.Log($"   [{i}] {players[i].playerName} - Ready: {players[i].isReady}, Host: {players[i].isHost}");
+            }
+
             if (requireAllReady)
             {
                 List<string> notReadyPlayers = new List<string>();
                 foreach (var player in players)
                 {
-                    if (!player.isReady && !player.isHost) // Host doesn't need to be ready
+                    // ✅ CRITICAL: ALL players must be ready (including host)
+                    if (!player.isReady)
                     {
                         notReadyPlayers.Add(player.playerName);
                     }
                 }
-                
+
                 if (notReadyPlayers.Count > 0)
                 {
                     string notReadyList = string.Join(", ", notReadyPlayers);
-                    RpcShowError(connectionToClient, $"Players not ready: {notReadyList}");
+                    string errorMsg = $"Players not ready: {notReadyList}";
+                    Debug.LogWarning($"❌ [LobbyManager] {errorMsg}");
+                    RpcShowError(conn, errorMsg);
                     return;
                 }
             }
+
+            Debug.Log("✅ [LobbyManager] All conditions met - starting game!");
 
             // All checks passed - start the game!
             
@@ -457,11 +587,8 @@ namespace TacticalCombat.Network
         {
             Debug.Log($"[LobbyManager] Game mode changed: {(newMode ? "Individual" : "Team")}");
             
-            // Update UI if needed
-            if (lobbyUI != null)
-            {
-                lobbyUI.OnGameModeChanged(newMode);
-            }
+            // Update UI if needed - LobbyUIController will handle this via events
+            // No direct method call needed, events will trigger UI updates
         }
 
         #endregion
@@ -649,12 +776,144 @@ namespace TacticalCombat.Network
         /// </summary>
         private void ShowPlayerVisualsNow()
         {
-            var allPlayers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+            Debug.Log("[LobbyManager] ShowPlayerVisualsNow() called - showing all players and UI");
+            
+            // ✅ CRITICAL FIX: Find local player using NetworkClient.localPlayer (more reliable than isLocalPlayer flag)
+            Player.PlayerController localPlayerController = null;
+            
+            // Method 1: Use NetworkClient.localPlayer (most reliable)
+            if (NetworkClient.localPlayer != null)
+            {
+                localPlayerController = NetworkClient.localPlayer.GetComponent<Player.PlayerController>();
+                if (localPlayerController != null)
+                {
+                    Debug.Log($"[LobbyManager] 🔍 Found local player via NetworkClient.localPlayer: {localPlayerController.name}");
+                }
+            }
+            
+            // ✅ CRITICAL FIX: Get all players once (for both local player search and activation)
+            // ✅ CRITICAL: Use FindObjectsInactive to find inactive players too!
+            var allPlayers = FindObjectsByType<Player.PlayerController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            Debug.Log($"[LobbyManager] Found {allPlayers.Length} PlayerController(s) in scene (including inactive)");
+            
+            // Method 2: Fallback - find by isLocalPlayer flag
+            if (localPlayerController == null)
+            {
+                foreach (var player in allPlayers)
+                {
+                    if (player.isLocalPlayer)
+                    {
+                        localPlayerController = player;
+                        Debug.Log($"[LobbyManager] 🔍 Found local player via isLocalPlayer flag: {player.name}");
+                        break;
+                    }
+                }
+            }
+            
+            // Method 3: Last resort - find by NetworkClient.connection.identity
+            if (localPlayerController == null && NetworkClient.connection != null && NetworkClient.connection.identity != null)
+            {
+                localPlayerController = NetworkClient.connection.identity.GetComponent<Player.PlayerController>();
+                if (localPlayerController != null)
+                {
+                    Debug.Log($"[LobbyManager] 🔍 Found local player via NetworkClient.connection.identity: {localPlayerController.name}");
+                }
+            }
+            
+            // ✅ CRITICAL FIX: Activate ALL players first (for network sync)
             foreach (var player in allPlayers)
             {
+                // ✅ CRITICAL FIX: Activate player GameObject first
+                if (!player.gameObject.activeSelf)
+                {
+                    player.gameObject.SetActive(true);
+                    Debug.Log($"[LobbyManager] Activated player GameObject: {player.name}");
+                }
+                
                 // ✅ RACE CONDITION FIX: Call CheckAndUpdatePlayerControls first to ensure phase is handled
                 // This ensures PlayerController has already updated based on phase
                 player.CheckAndUpdatePlayerControls();
+            }
+            
+            // ✅ CRITICAL FIX: Now handle local player camera
+            if (localPlayerController != null)
+            {
+                Debug.Log($"[LobbyManager] 🔍 Processing local player: {localPlayerController.name}, Active: {localPlayerController.gameObject.activeSelf}");
+                
+                // ✅ CRITICAL FIX: Activate player GameObject FIRST (it's inactive!)
+                if (!localPlayerController.gameObject.activeSelf)
+                {
+                    localPlayerController.gameObject.SetActive(true);
+                    Debug.Log($"[LobbyManager] ✅ Activated local player GameObject: {localPlayerController.name}");
+                }
+                
+                // ✅ CRITICAL FIX: Also activate all parent GameObjects
+                Transform current = localPlayerController.transform;
+                while (current != null && current.parent != null)
+                {
+                    if (!current.parent.gameObject.activeSelf)
+                    {
+                        current.parent.gameObject.SetActive(true);
+                        Debug.Log($"[LobbyManager] ✅ Activated parent GameObject: {current.parent.name}");
+                    }
+                    current = current.parent;
+                }
+                
+                var fpsController = localPlayerController.GetComponent<Player.FPSController>();
+                if (fpsController == null)
+                {
+                    Debug.LogError($"[LobbyManager] ❌ FPSController not found on local player: {localPlayerController.name}");
+                }
+                else
+                {
+                    Debug.Log($"[LobbyManager] ✅ FPSController found, playerCamera: {(fpsController.playerCamera != null ? fpsController.playerCamera.name : "NULL")}");
+                    
+                    // ✅ CRITICAL FIX: Setup camera first if it doesn't exist
+                    if (fpsController.playerCamera == null)
+                    {
+                        Debug.Log($"[LobbyManager] 🔧 Setting up camera for local player...");
+                        fpsController.SendMessage("SetupCamera", SendMessageOptions.DontRequireReceiver);
+                        
+                        // Wait a frame for SetupCamera to complete
+                        StartCoroutine(SetupCameraAndActivate(fpsController, localPlayerController.name));
+                    }
+                    else
+                    {
+                        // Camera exists - activate it immediately
+                        ActivatePlayerCamera(fpsController, localPlayerController.name);
+                        
+                        // Also retry with delay as backup
+                        StartCoroutine(EnsureCameraActiveDelayed(fpsController, localPlayerController.name));
+                    }
+                }
+            }
+            else
+            {
+                Debug.LogError("[LobbyManager] ❌ Local player NOT FOUND! Cannot activate camera!");
+                
+                // ✅ LAST RESORT: Try to find ANY FPSController with a camera (including inactive)
+                var allFPS = FindObjectsByType<Player.FPSController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+                foreach (var fps in allFPS)
+                {
+                    // ✅ CRITICAL: Activate FPSController GameObject first
+                    if (!fps.gameObject.activeSelf)
+                    {
+                        fps.gameObject.SetActive(true);
+                        Debug.LogWarning($"[LobbyManager] ⚠️ LAST RESORT: Activated FPSController GameObject: {fps.name}");
+                    }
+                    
+                    if (fps.playerCamera != null)
+                    {
+                        Debug.LogWarning($"[LobbyManager] ⚠️ LAST RESORT: Activating camera from FPSController: {fps.name}");
+                        ActivatePlayerCamera(fps, fps.name);
+                        break;
+                    }
+                }
+            }
+            
+            // ✅ CRITICAL FIX: Also process all players for visuals (non-local players)
+            foreach (var player in allPlayers)
+            {
                 
                 // Ensure PlayerVisuals component is active
                 var playerVisuals = player.GetComponent<Player.PlayerVisuals>();
@@ -688,7 +947,219 @@ namespace TacticalCombat.Network
                 }
             }
             
+            // ✅ CRITICAL FIX: Disable BootstrapCamera when game starts
+            var bootstrapCameraObj = GameObject.Find("BootstrapCamera");
+            if (bootstrapCameraObj != null)
+            {
+                var bootstrapCamera = bootstrapCameraObj.GetComponent<Camera>();
+                if (bootstrapCamera != null)
+                {
+                    bootstrapCamera.enabled = false;
+                    Debug.Log("[LobbyManager] BootstrapCamera disabled");
+                }
+                // Don't destroy it - URPCameraBootstrap will handle that
+            }
+            
+            // ✅ CRITICAL FIX: Show GameHUD when game starts
+            var gameHUD = FindFirstObjectByType<TacticalCombat.UI.GameHUD>();
+            if (gameHUD != null)
+            {
+                gameHUD.gameObject.SetActive(true);
+                Debug.Log("[LobbyManager] GameHUD activated");
+            }
+            else
+            {
+                Debug.LogWarning("[LobbyManager] GameHUD not found in scene!");
+            }
+            
             Debug.Log("[LobbyManager] All player visuals shown - game starting");
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Setup camera and then activate it
+        /// </summary>
+        private System.Collections.IEnumerator SetupCameraAndActivate(Player.FPSController fpsController, string playerName)
+        {
+            yield return null; // Wait a frame for SetupCamera to complete
+            
+            // Check if camera was created
+            if (fpsController != null && fpsController.playerCamera != null)
+            {
+                ActivatePlayerCamera(fpsController, playerName);
+            }
+            else
+            {
+                Debug.LogError($"[LobbyManager] ❌ Camera setup failed for {playerName} - camera is still null!");
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Activate player camera with all necessary settings
+        /// </summary>
+        private void ActivatePlayerCamera(Player.FPSController fpsController, string playerName)
+        {
+            if (fpsController == null || fpsController.playerCamera == null)
+            {
+                Debug.LogError($"[LobbyManager] ❌ Cannot activate camera - FPSController or camera is null!");
+                return;
+            }
+            
+            // ✅ CRITICAL FIX: Ensure FPSController GameObject is active
+            if (!fpsController.gameObject.activeSelf)
+            {
+                fpsController.gameObject.SetActive(true);
+                Debug.Log($"[LobbyManager] ✅ Activated FPSController GameObject: {fpsController.name}");
+            }
+            
+            var camera = fpsController.playerCamera;
+            
+            // ✅ CRITICAL: Ensure camera GameObject is active
+            if (!camera.gameObject.activeSelf)
+            {
+                camera.gameObject.SetActive(true);
+                Debug.Log($"[LobbyManager] ✅ Activated camera GameObject: {camera.name}");
+            }
+            
+            // ✅ CRITICAL: Disable BootstrapCamera first
+            var bootstrapCameraObj = GameObject.Find("BootstrapCamera");
+            if (bootstrapCameraObj != null)
+            {
+                var bootstrapCamera = bootstrapCameraObj.GetComponent<Camera>();
+                if (bootstrapCamera != null)
+                {
+                    bootstrapCamera.enabled = false;
+                    Debug.Log("[LobbyManager] BootstrapCamera disabled in ActivatePlayerCamera");
+                }
+            }
+            
+            // ✅ CRITICAL: Enable and activate camera
+            camera.enabled = true;
+            camera.gameObject.SetActive(true);
+            
+            // ✅ CRITICAL: Ensure camera GameObject and all parents are active
+            Transform camTransform = camera.transform;
+            while (camTransform != null)
+            {
+                if (!camTransform.gameObject.activeSelf)
+                {
+                    camTransform.gameObject.SetActive(true);
+                    Debug.Log($"[LobbyManager] ✅ Activated camera parent: {camTransform.name}");
+                }
+                camTransform = camTransform.parent;
+            }
+            
+            // ✅ CRITICAL: Set MainCamera tag
+            if (!camera.CompareTag("MainCamera"))
+            {
+                camera.tag = "MainCamera";
+            }
+            
+            // ✅ CRITICAL: Set camera depth (higher than bootstrap)
+            camera.depth = 0;
+            
+            // ✅ CRITICAL: Ensure URP camera data exists
+            if (camera.GetComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>() == null)
+            {
+                camera.gameObject.AddComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+            }
+            
+            // ✅ CRITICAL FIX: Force camera to render by setting target display
+            camera.targetDisplay = 0; // Display 1
+            
+            // ✅ CRITICAL FIX: Ensure camera has proper settings for rendering
+            // Check and log camera settings
+            int cullingMaskValue = camera.cullingMask; // LayerMask is an int
+            Debug.Log($"[LobbyManager] 📷 Camera Settings - Position: {camera.transform.position}, Rotation: {camera.transform.rotation.eulerAngles}");
+            Debug.Log($"[LobbyManager] 📷 Camera Settings - FOV: {camera.fieldOfView}, Near: {camera.nearClipPlane}, Far: {camera.farClipPlane}");
+            Debug.Log($"[LobbyManager] 📷 Camera Settings - CullingMask: {cullingMaskValue} (0x{cullingMaskValue:X8})");
+            Debug.Log($"[LobbyManager] 📷 Camera Settings - ClearFlags: {camera.clearFlags}, Background: {camera.backgroundColor}");
+            
+            // ✅ CRITICAL FIX: Ensure camera culling mask includes default layers (Everything = -1)
+            if (camera.cullingMask == 0)
+            {
+                camera.cullingMask = -1; // Everything
+                Debug.LogWarning("[LobbyManager] ⚠️ Camera culling mask was 0! Set to Everything (-1)");
+            }
+            
+            // ✅ CRITICAL FIX: Ensure camera has proper clear flags (Skybox or Solid Color)
+            if (camera.clearFlags == CameraClearFlags.Nothing)
+            {
+                camera.clearFlags = CameraClearFlags.Skybox;
+                Debug.LogWarning("[LobbyManager] ⚠️ Camera clear flags was Nothing! Set to Skybox");
+            }
+            
+            // ✅ CRITICAL FIX: Ensure camera is at a valid position (not at origin if player moved)
+            if (camera.transform.position == Vector3.zero && fpsController.transform.position != Vector3.zero)
+            {
+                Debug.LogWarning($"[LobbyManager] ⚠️ Camera at origin but player at {fpsController.transform.position} - camera may need repositioning");
+            }
+            
+            // ✅ NOTE: Do NOT call camera.Render() manually in URP - URP handles rendering automatically
+            // Manual Render() calls cause "Not inside a Renderpass" errors in URP
+            
+            Debug.Log($"[LobbyManager] ✅ Camera activated for local player: {playerName} (Enabled: {camera.enabled}, Active: {camera.gameObject.activeSelf}, Depth: {camera.depth}, Tag: {camera.tag}, TargetDisplay: {camera.targetDisplay})");
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Ensure camera is active with retry (handles timing issues)
+        /// </summary>
+        private System.Collections.IEnumerator EnsureCameraActiveDelayed(Player.FPSController fpsController, string playerName)
+        {
+            // Wait a frame for SetupCamera/OnStartLocalPlayer to complete
+            yield return null;
+            
+            // ✅ CRITICAL FIX: Disable BootstrapCamera first
+            var bootstrapCameraObj = GameObject.Find("BootstrapCamera");
+            if (bootstrapCameraObj != null)
+            {
+                var bootstrapCamera = bootstrapCameraObj.GetComponent<Camera>();
+                if (bootstrapCamera != null)
+                {
+                    bootstrapCamera.enabled = false;
+                    Debug.Log("[LobbyManager] BootstrapCamera disabled in EnsureCameraActiveDelayed");
+                }
+            }
+            
+            // Retry up to 10 times (1 second total)
+            for (int i = 0; i < 10; i++)
+            {
+                if (fpsController != null && fpsController.playerCamera != null)
+                {
+                    // Use the centralized activation method
+                    ActivatePlayerCamera(fpsController, playerName);
+                    Debug.Log($"[LobbyManager] Camera activated for local player: {playerName} (attempt {i + 1})");
+                    yield break; // Success
+                }
+                
+                // If camera is still null, try to setup again
+                if (fpsController != null && fpsController.playerCamera == null)
+                {
+                    Debug.Log($"[LobbyManager] Camera still null, retrying SetupCamera (attempt {i + 1})");
+                    fpsController.SendMessage("SetupCamera", SendMessageOptions.DontRequireReceiver);
+                }
+                
+                yield return new WaitForSeconds(0.1f);
+            }
+            
+            Debug.LogError($"[LobbyManager] ❌ Failed to activate camera for local player: {playerName} after 10 attempts!");
+            
+            // ✅ LAST RESORT: Try to find ANY camera in the scene and activate it
+            var allCameras = FindObjectsByType<Camera>(FindObjectsSortMode.None);
+            foreach (var cam in allCameras)
+            {
+                if (cam != null && cam.name.Contains("Player") && !cam.name.Contains("Bootstrap"))
+                {
+                    cam.enabled = true;
+                    cam.gameObject.SetActive(true);
+                    cam.depth = 0;
+                    if (!cam.CompareTag("MainCamera"))
+                    {
+                        cam.tag = "MainCamera";
+                    }
+                    Debug.LogWarning($"[LobbyManager] ⚠️ LAST RESORT: Activated camera: {cam.name}");
+                    yield break;
+                }
+            }
         }
 
         #endregion
@@ -708,9 +1179,11 @@ namespace TacticalCombat.Network
             Debug.Log("[LobbyManager] Game is starting!");
             OnGameStarting?.Invoke();
             
-            if (lobbyUI != null)
+            // ✅ NEW: LobbyUIController subscribes to OnGameStarting event, no direct call needed
+            TacticalCombat.UI.LobbyUIController lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController != null)
             {
-                lobbyUI.ShowGameStarting();
+                // Event handler will handle this
             }
         }
 
@@ -719,9 +1192,11 @@ namespace TacticalCombat.Network
         {
             Debug.LogWarning($"[LobbyManager] Error: {errorMessage}");
             
-            if (lobbyUI != null)
+            // ✅ NEW: Use LobbyUIController
+            TacticalCombat.UI.LobbyUIController lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController != null)
             {
-                lobbyUI.ShowError(errorMessage);
+                lobbyController.ShowError(errorMessage);
             }
         }
 
@@ -730,7 +1205,18 @@ namespace TacticalCombat.Network
         {
             // ✅ NEW: Set local connection ID on client
             localConnectionId = connectionId;
-            Debug.Log($"[LobbyManager] Local connection ID set to: {connectionId}");
+            Debug.Log($"[LobbyManager] ✅ RpcSetLocalConnectionId: Local connection ID set to: {connectionId}");
+
+            // ✅ CRITICAL: Verify we can now find local player
+            var localPlayer = GetLocalPlayer();
+            if (localPlayer.HasValue)
+            {
+                Debug.Log($"[LobbyManager] ✅ Local player found after RPC: {localPlayer.Value.playerName}");
+            }
+            else
+            {
+                Debug.LogError($"[LobbyManager] ❌ Local player STILL not found after RPC! ConnectionID: {connectionId}");
+            }
         }
 
         /// <summary>
@@ -741,19 +1227,15 @@ namespace TacticalCombat.Network
         {
             Debug.LogWarning($"[LobbyManager] {errorMessage}");
             
-            // Show error in UI
-            if (lobbyUI != null)
+            // Show error in UI - use LobbyUIController
+            TacticalCombat.UI.LobbyUIController lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController != null)
             {
-                lobbyUI.ShowError(errorMessage);
+                lobbyController.ShowError(errorMessage);
             }
             else
             {
-                // Try to find LobbyUI
-                lobbyUI = TacticalCombat.UI.LobbyUI.Instance;
-                if (lobbyUI != null)
-                {
-                    lobbyUI.ShowError(errorMessage);
-                }
+                Debug.LogError($"[LobbyManager] Error: {errorMessage} (LobbyUIController not found)");
             }
         }
 
@@ -780,33 +1262,44 @@ namespace TacticalCombat.Network
         private void OnPlayersListChanged(SyncList<LobbyPlayerData>.Operation op, int index, LobbyPlayerData oldItem, LobbyPlayerData newItem)
         {
             // This runs on all clients when the players list changes
-            
+            Debug.Log($"[LobbyManager] 🔔 OnPlayersListChanged: op={op}, index={index}, isServer={isServer}, isClient={isClient}");
+            Debug.Log($"[LobbyManager]   Old: {oldItem.playerName} (Ready: {oldItem.isReady})");
+            Debug.Log($"[LobbyManager]   New: {newItem.playerName} (Ready: {newItem.isReady})");
+
             switch (op)
             {
                 case SyncList<LobbyPlayerData>.Operation.OP_ADD:
-                    Debug.Log($"[LobbyManager] Player added: {newItem.playerName}");
+                    Debug.Log($"[LobbyManager] ✅ Player added: {newItem.playerName}");
                     OnPlayerJoined?.Invoke(newItem);
                     break;
-                    
+
                 case SyncList<LobbyPlayerData>.Operation.OP_REMOVEAT:
-                    Debug.Log($"[LobbyManager] Player removed: {oldItem.playerName}");
+                    Debug.Log($"[LobbyManager] ✅ Player removed: {oldItem.playerName}");
                     OnPlayerLeft?.Invoke(oldItem);
                     break;
-                    
+
                 case SyncList<LobbyPlayerData>.Operation.OP_SET:
-                    Debug.Log($"[LobbyManager] Player updated: {newItem.playerName}");
+                    Debug.Log($"[LobbyManager] ✅ Player updated: {newItem.playerName} (Ready: {oldItem.isReady} -> {newItem.isReady})");
+                    Debug.Log($"[LobbyManager] 🔔 Invoking OnPlayerUpdated event (subscribers: {OnPlayerUpdated?.GetInvocationList()?.Length ?? 0})");
                     OnPlayerUpdated?.Invoke(newItem);
+                    Debug.Log($"[LobbyManager] ✅ OnPlayerUpdated event invoked");
                     break;
-                    
+
                 case SyncList<LobbyPlayerData>.Operation.OP_CLEAR:
-                    Debug.Log($"[LobbyManager] Player list cleared");
+                    Debug.Log($"[LobbyManager] ✅ Player list cleared");
                     break;
             }
 
-            // Refresh UI on any change
-            if (lobbyUI != null)
+            // ✅ CRITICAL FIX: LobbyUIController subscribes to events, so OnPlayerUpdated?.Invoke already triggered it
+            // No need to manually refresh - event handlers will handle it
+            TacticalCombat.UI.LobbyUIController lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController != null)
             {
-                lobbyUI.RefreshPlayerList(GetAllPlayers());
+                Debug.Log($"[LobbyManager] ✅ LobbyUIController found, event handlers should have been called for {op}");
+            }
+            else
+            {
+                Debug.LogWarning($"[LobbyManager] ⚠️ LobbyUIController not found! Event may not be handled.");
             }
         }
 
@@ -839,31 +1332,56 @@ namespace TacticalCombat.Network
 
         public LobbyPlayerData? GetLocalPlayer()
         {
-            if (!NetworkClient.active) return null;
-
-            // ✅ FIX: Use cached localConnectionId (set by server via RPC)
-            if (localConnectionId == 0)
+            if (!NetworkClient.active)
             {
-                // Fallback: Try to find host if we're on server
-                if (NetworkServer.active)
-                {
-                    foreach (var player in players)
-                    {
-                        if (player.isHost)
-                        {
-                            return player;
-                        }
-                    }
-                }
+                Debug.LogWarning("[LobbyManager] GetLocalPlayer: NetworkClient not active!");
                 return null;
             }
-            
-            foreach (var player in players)
+
+            // ✅ AAA FIX: Multiple fallback strategies to find local player
+
+            // Strategy 1: Use cached localConnectionId (set by server via RPC)
+            if (localConnectionId != 0)
             {
-                if (player.connectionId == localConnectionId)
+                foreach (var player in players)
                 {
-                    return player;
+                    if (player.connectionId == localConnectionId)
+                    {
+                        Debug.Log($"[LobbyManager] GetLocalPlayer: Found via localConnectionId ({localConnectionId}): {player.playerName}");
+                        return player;
+                    }
                 }
+                Debug.LogWarning($"[LobbyManager] GetLocalPlayer: localConnectionId ({localConnectionId}) set but player not found in list!");
+            }
+
+            // Strategy 2: If we're hosting, find the host player
+            if (NetworkServer.active)
+            {
+                foreach (var player in players)
+                {
+                    if (player.isHost)
+                    {
+                        Debug.Log($"[LobbyManager] GetLocalPlayer: Found host player: {player.playerName}");
+                        return player;
+                    }
+                }
+                Debug.LogWarning("[LobbyManager] GetLocalPlayer: We're server but no host player found!");
+            }
+
+            // Strategy 3: Try to get connection ID from NetworkClient
+            // ✅ FIX: NetworkClient.connection is NetworkConnectionToServer (client-side), doesn't have connectionId
+            // Client doesn't know its own connection ID directly - must be set by server via RPC
+            // If we reach here, localConnectionId is 0 and we're not server, so we can't determine local player
+            if (NetworkClient.connection != null && !NetworkServer.active)
+            {
+                Debug.LogWarning($"[LobbyManager] GetLocalPlayer: Client-side, but localConnectionId not set yet (RPC may not have arrived)");
+                Debug.LogWarning($"[LobbyManager]   Waiting for RpcSetLocalConnectionId from server...");
+            }
+
+            Debug.LogError($"[LobbyManager] GetLocalPlayer: Could not find local player! Players in lobby: {players.Count}");
+            for (int i = 0; i < players.Count; i++)
+            {
+                Debug.LogError($"  [{i}] {players[i].playerName} (ID: {players[i].connectionId}, Host: {players[i].isHost}, Ready: {players[i].isReady})");
             }
 
             return null;

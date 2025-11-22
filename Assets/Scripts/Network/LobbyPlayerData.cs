@@ -27,7 +27,11 @@ namespace TacticalCombat.Network
 
         public bool Equals(LobbyPlayerData other)
         {
-            return connectionId == other.connectionId;
+            return connectionId == other.connectionId &&
+                   playerName == other.playerName &&
+                   teamId == other.teamId &&
+                   isReady == other.isReady &&
+                   isHost == other.isHost;
         }
 
         public override bool Equals(object obj)
@@ -37,7 +41,17 @@ namespace TacticalCombat.Network
 
         public override int GetHashCode()
         {
-            return connectionId.GetHashCode();
+            // ✅ FIX: Include all fields in hash code for proper equality checking
+            unchecked
+            {
+                int hash = 17;
+                hash = hash * 31 + connectionId.GetHashCode();
+                hash = hash * 31 + (playerName?.GetHashCode() ?? 0);
+                hash = hash * 31 + teamId.GetHashCode();
+                hash = hash * 31 + isReady.GetHashCode();
+                hash = hash * 31 + isHost.GetHashCode();
+                return hash;
+            }
         }
     }
 
@@ -68,6 +82,7 @@ namespace TacticalCombat.Network
         }
     }
 }
+
 
 
 

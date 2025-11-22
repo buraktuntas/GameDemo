@@ -39,3 +39,4 @@ Tool'u çalıştırdıktan sonra mutlaka scene'i kaydedin!
 
 
 
+

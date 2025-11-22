@@ -45,6 +45,7 @@ namespace TacticalCombat.UI
         private float lastUpdateTime = 0f;
         private int lastPlayerCount = -1; // Track player count to only log on changes
         private bool cameraWasActive = false; // Track camera state to only log on changes
+        private bool buttonsSetup = false; // ✅ CRITICAL: Track if buttons have been setup
 
         private void Awake()
         {
@@ -59,8 +60,15 @@ namespace TacticalCombat.UI
 
         private void Start()
         {
-            // Hide initially
-            if (lobbyPanel != null)
+            Debug.Log("🔧 [LobbyUIController] Start() called");
+
+            // ✅ CRITICAL FIX: If lobby panel already exists (from previous scene), setup buttons
+            if (lobbyPanel != null && lobbyPanel.activeSelf)
+            {
+                Debug.Log("⚠️ [LobbyUIController] Lobby panel already active on Start - setting up buttons!");
+                SetupButtons();
+            }
+            else if (lobbyPanel != null)
             {
                 lobbyPanel.SetActive(false);
             }
@@ -70,6 +78,13 @@ namespace TacticalCombat.UI
         
         private void Update()
         {
+            // ✅ CRITICAL FIX: If lobby is active but buttons haven't been setup, setup now!
+            if (lobbyPanel != null && lobbyPanel.activeSelf && !buttonsSetup)
+            {
+                Debug.LogWarning("⚠️⚠️⚠️ [LobbyUIController] Lobby active but buttons NOT setup! Fixing now...");
+                SetupButtons();
+            }
+
             // ✅ CRITICAL FIX: Continuously ensure camera is active when lobby is open
             // ✅ PERFORMANCE: Throttle camera checks (every 1 second) to prevent spam
             if (lobbyPanel != null && lobbyPanel.activeSelf)
@@ -174,6 +189,14 @@ namespace TacticalCombat.UI
             {
                 lobbyPanel.SetActive(false);
             }
+        }
+
+        /// <summary>
+        /// Check if lobby UI is visible
+        /// </summary>
+        public bool IsLobbyVisible()
+        {
+            return lobbyPanel != null && lobbyPanel.activeSelf;
         }
 
         #region Canvas & Panel Setup
@@ -422,8 +445,11 @@ namespace TacticalCombat.UI
             // Viewport
             GameObject viewport = new GameObject("Viewport");
             viewport.transform.SetParent(scrollView.transform, false);
-            Mask viewportMask = viewport.AddComponent<Mask>();
-            viewportMask.showMaskGraphic = false; // ✅ CRITICAL: Don't show mask graphic
+            
+            // ✅ CRITICAL FIX: Use RectMask2D instead of Mask (more reliable for UI)
+            RectMask2D viewportMask = viewport.AddComponent<RectMask2D>();
+            viewportMask.padding = Vector4.zero; // No padding
+            
             Image viewportBg = viewport.AddComponent<Image>();
             viewportBg.color = Color.clear;
 
@@ -439,12 +465,17 @@ namespace TacticalCombat.UI
             content.transform.SetParent(viewport.transform, false);
 
             RectTransform contentRect = content.AddComponent<RectTransform>();
-            // ✅ CRITICAL: Content should stretch to fill viewport width, but height is controlled by ContentSizeFitter
+            // ✅ CRITICAL FIX: Content should stretch to fill viewport width, anchored at top
             contentRect.anchorMin = new Vector2(0, 1); // Top-left anchor
             contentRect.anchorMax = new Vector2(1, 1); // Top-right anchor
             contentRect.pivot = new Vector2(0.5f, 1f); // Top-center pivot
-            contentRect.sizeDelta = new Vector2(0, 0); // Width stretches, height starts at 0
-            contentRect.anchoredPosition = Vector2.zero; // ✅ CRITICAL: Start at top (0,0)
+            contentRect.anchoredPosition = Vector2.zero; // Position at top (0,0)
+            // ✅ CRITICAL: Initially set sizeDelta to 0, ContentSizeFitter will adjust height
+            contentRect.sizeDelta = new Vector2(0, 0);
+            // ✅ CRITICAL: Set offsets to stretch width (left=0, right=0 means full width)
+            // Bottom offset will be set by ContentSizeFitter as items are added
+            contentRect.offsetMin = new Vector2(0, 0); // Left, Bottom (will grow downward)
+            contentRect.offsetMax = new Vector2(0, 0); // Right, Top (at viewport top)
 
             VerticalLayoutGroup layout = content.AddComponent<VerticalLayoutGroup>();
             layout.spacing = 10f;
@@ -643,41 +674,156 @@ namespace TacticalCombat.UI
 
         private void SetupButtons()
         {
+            Debug.Log("🔧 [LobbyUIController] SetupButtons called");
+
             if (startGameButton != null)
             {
                 startGameButton.onClick.RemoveAllListeners();
                 startGameButton.onClick.AddListener(OnStartGameClicked);
+                Debug.Log($"✅ [LobbyUIController] Start Game button listener registered (Button: {startGameButton.name}, Interactable: {startGameButton.interactable})");
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [LobbyUIController] startGameButton is NULL - cannot register listener!");
             }
 
             if (readyButton != null)
             {
                 readyButton.onClick.RemoveAllListeners();
                 readyButton.onClick.AddListener(OnReadyClicked);
+                Debug.Log($"✅ [LobbyUIController] Ready button listener registered (Button: {readyButton.name}, Interactable: {readyButton.interactable})");
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [LobbyUIController] readyButton is NULL - cannot register listener!");
             }
 
             if (leaveButton != null)
             {
                 leaveButton.onClick.RemoveAllListeners();
                 leaveButton.onClick.AddListener(OnLeaveClicked);
+                Debug.Log($"✅ [LobbyUIController] Leave button listener registered");
             }
+            else
+            {
+                Debug.LogWarning("⚠️ [LobbyUIController] leaveButton is NULL - cannot register listener!");
+            }
+
+            // ✅ CRITICAL: Mark buttons as setup
+            buttonsSetup = true;
+            Debug.Log("✅ [LobbyUIController] Buttons setup complete - flag set to true");
         }
 
         private void OnStartGameClicked()
         {
-            if (lobbyManager != null)
+            Debug.Log("🎮🎮🎮 [LobbyUIController] ==================== START GAME BUTTON CLICKED ====================");
+            Debug.Log("🎮 [LobbyUIController] Start Game button clicked!");
+
+            if (lobbyManager == null)
+            {
+                Debug.LogError("❌ [LobbyUIController] Cannot start game - lobbyManager is null!");
+                ShowError("Connection error!");
+                return;
+            }
+
+            if (!NetworkClient.ready)
+            {
+                Debug.LogError("❌ [LobbyUIController] Cannot start game - NetworkClient not ready!");
+                ShowError("Not connected to server!");
+                return;
+            }
+
+            // Check if we're the host
+            if (!lobbyManager.IsLocalPlayerHost())
+            {
+                Debug.LogWarning("⚠️ [LobbyUIController] Only host can start the game!");
+                ShowError("Only host can start the game!");
+                return;
+            }
+
+            Debug.Log("✅ [LobbyUIController] Sending CmdStartGame to server...");
+            try
             {
                 lobbyManager.CmdStartGame();
+                Debug.Log("✅ [LobbyUIController] CmdStartGame sent successfully");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"❌ [LobbyUIController] Failed to send CmdStartGame: {ex.Message}");
+                ShowError("Failed to start game!");
             }
         }
 
         private void OnReadyClicked()
         {
-            if (lobbyManager != null)
+            if (lobbyManager == null)
             {
-                isLocalPlayerReady = !isLocalPlayerReady;
-                lobbyManager.CmdSetReady(isLocalPlayerReady);
-                UpdateReadyButton();
+                Debug.LogError("❌ [LobbyUIController] Ready button clicked but lobbyManager is null!");
+                return;
             }
+
+            if (!NetworkClient.ready)
+            {
+                Debug.LogError("❌ [LobbyUIController] Ready button clicked but NetworkClient is not ready!");
+                ShowError("Not connected to server!");
+                return;
+            }
+
+            // ✅ FIX: Get current ready state from server (don't rely on local state)
+            var localPlayer = lobbyManager.GetLocalPlayer();
+            if (!localPlayer.HasValue)
+            {
+                Debug.LogError("❌ [LobbyUIController] Ready button clicked but local player not found!");
+                ShowError("Player not registered in lobby!");
+                return;
+            }
+
+            bool currentReadyState = localPlayer.Value.isReady;
+            bool newReadyState = !currentReadyState;
+
+            Debug.Log($"🔍 [LobbyUIController] Ready button clicked - Player: {localPlayer.Value.playerName}, ConnectionID: {localPlayer.Value.connectionId}, Current: {currentReadyState}, New: {newReadyState}");
+
+            // Send to server
+            try
+            {
+                lobbyManager.CmdSetReady(newReadyState);
+                Debug.Log($"✅ [LobbyUIController] CmdSetReady sent to server: {newReadyState}");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"❌ [LobbyUIController] Failed to send CmdSetReady: {ex.Message}");
+                ShowError("Failed to update ready state!");
+                return;
+            }
+
+            // Update local state (for immediate UI feedback)
+            isLocalPlayerReady = newReadyState;
+            UpdateReadyButton();
+
+            // ✅ CRITICAL: Force refresh player list to update ready status immediately
+            // Note: OnPlayerUpdated event should also trigger, but this ensures immediate update
+            StartCoroutine(DelayedRefreshPlayerList());
+        }
+        
+        private IEnumerator DelayedRefreshPlayerList()
+        {
+            // Wait multiple frames for network sync to propagate through Mirror
+            yield return null; // Frame 1: Command sent
+            yield return null; // Frame 2: Server processes
+            yield return new WaitForSeconds(0.1f); // 100ms: SyncList should have updated
+
+            Debug.Log("🔄 [LobbyUIController] DelayedRefreshPlayerList: Starting update sequence");
+
+            // ✅ CRITICAL: Update ready status immediately
+            UpdateReadyStatusDirectly();
+
+            // Wait another frame for UI update
+            yield return null;
+
+            // Full refresh as backup
+            RefreshPlayerList();
+
+            Debug.Log("✅ [LobbyUIController] DelayedRefreshPlayerList: Update sequence complete");
         }
 
         private void OnLeaveClicked()
@@ -756,22 +902,54 @@ namespace TacticalCombat.UI
             // Subscribe to events
             SubscribeToLobbyManagerEvents();
 
-            // ✅ CRITICAL: Wait a moment for host to register (if host)
-            if (NetworkServer.active)
+            // ✅ CRITICAL FIX: Wait for NetworkClient to be ready before calling Commands
+            Debug.Log("⏳ [LobbyUIController] Waiting for NetworkClient to be ready...");
+            timeout = 5f;
+            elapsed = 0f;
+            while (!NetworkClient.ready && elapsed < timeout)
             {
-                yield return new WaitForSeconds(0.5f);
+                yield return new WaitForSeconds(0.1f);
+                elapsed += 0.1f;
             }
+
+            if (!NetworkClient.ready)
+            {
+                Debug.LogWarning("⚠️ [LobbyUIController] NetworkClient not ready after timeout - skipping manual registration");
+                // Don't register manually, let the server handle it via OnServerAddPlayer
+                UpdateUI();
+                RefreshPlayerList();
+                yield break;
+            }
+
+            Debug.Log("✅ [LobbyUIController] NetworkClient is ready!");
+
+            // ✅ CRITICAL FIX: Register player to lobby
+            // Generate player name (could use saved name from PlayerPrefs later)
+            string playerName = PlayerPrefs.GetString("PlayerName", $"Player{Random.Range(1000, 9999)}");
+            Debug.Log($"🎮 [LobbyUIController] Registering player: {playerName}");
+
+            // Call Command to register player on server
+            lobbyManager.CmdRegisterPlayer(playerName);
+
+            // ✅ CRITICAL: Wait a moment for registration to complete
+            yield return new WaitForSeconds(0.3f);
 
             // Update UI
             UpdateUI();
-            
-            // ✅ CRITICAL: Force refresh player list to ensure host is visible
+
+            // ✅ CRITICAL: Force refresh player list to ensure player is visible
             RefreshPlayerList();
         }
 
         private void SubscribeToLobbyManagerEvents()
         {
-            if (lobbyManager == null) return;
+            if (lobbyManager == null)
+            {
+                Debug.LogError("❌ [LobbyUIController] SubscribeToLobbyManagerEvents: lobbyManager is null!");
+                return;
+            }
+
+            Debug.Log("🔗 [LobbyUIController] Subscribing to LobbyManager events...");
 
             // Unsubscribe first to avoid duplicates
             lobbyManager.OnPlayerJoined -= OnPlayerJoined;
@@ -784,6 +962,12 @@ namespace TacticalCombat.UI
             lobbyManager.OnPlayerLeft += OnPlayerLeft;
             lobbyManager.OnPlayerUpdated += OnPlayerUpdated;
             lobbyManager.OnGameStarting += OnGameStarting;
+
+            Debug.Log($"✅ [LobbyUIController] Subscribed to all events. Testing event subscribers count:");
+            Debug.Log($"   - OnPlayerJoined: {lobbyManager.OnPlayerJoined?.GetInvocationList()?.Length ?? 0} subscribers");
+            Debug.Log($"   - OnPlayerLeft: {lobbyManager.OnPlayerLeft?.GetInvocationList()?.Length ?? 0} subscribers");
+            Debug.Log($"   - OnPlayerUpdated: {lobbyManager.OnPlayerUpdated?.GetInvocationList()?.Length ?? 0} subscribers");
+            Debug.Log($"   - OnGameStarting: {lobbyManager.OnGameStarting?.GetInvocationList()?.Length ?? 0} subscribers");
         }
 
         private IEnumerator PeriodicLobbyManagerCheck()
@@ -797,13 +981,29 @@ namespace TacticalCombat.UI
                 {
                     Debug.Log("✅ [LobbyUIController] LobbyManager found! Connecting...");
                     SubscribeToLobbyManagerEvents();
-                    
-                    // ✅ CRITICAL: Wait a moment for host to register (if host)
-                    if (NetworkServer.active)
+
+                    // Wait for NetworkClient to be ready
+                    float timeout = 5f;
+                    float elapsed = 0f;
+                    while (!NetworkClient.ready && elapsed < timeout)
                     {
-                        yield return new WaitForSeconds(0.5f);
+                        yield return new WaitForSeconds(0.1f);
+                        elapsed += 0.1f;
                     }
-                    
+
+                    if (NetworkClient.ready)
+                    {
+                        // ✅ CRITICAL FIX: Register player to lobby
+                        string playerName = PlayerPrefs.GetString("PlayerName", $"Player{Random.Range(1000, 9999)}");
+                        Debug.Log($"🎮 [LobbyUIController] Registering player (delayed): {playerName}");
+                        lobbyManager.CmdRegisterPlayer(playerName);
+                        yield return new WaitForSeconds(0.3f);
+                    }
+                    else
+                    {
+                        Debug.LogWarning("⚠️ [LobbyUIController] NetworkClient not ready - skipping manual registration");
+                    }
+
                     UpdateUI();
                     RefreshPlayerList(); // Force refresh
                     break;
@@ -818,7 +1018,18 @@ namespace TacticalCombat.UI
         private void UpdateUI()
         {
             Debug.Log($"🔍 [LobbyUIController] UpdateUI called - lobbyManager: {lobbyManager != null}, lobbyPanel: {lobbyPanel != null}, playerListContainer: {playerListContainer != null}");
-            
+
+            // ✅ CRITICAL DEBUG: Check if buttons exist and have listeners
+            if (startGameButton != null)
+            {
+                int listenerCount = startGameButton.onClick.GetPersistentEventCount();
+                Debug.Log($"🔍 [LobbyUIController] Start Game button exists, persistent listeners: {listenerCount}");
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [LobbyUIController] startGameButton is NULL in UpdateUI!");
+            }
+
             if (lobbyManager == null)
             {
                 Debug.LogWarning("⚠️ [LobbyUIController] UpdateUI - lobbyManager is null");
@@ -889,10 +1100,29 @@ namespace TacticalCombat.UI
             }
 
             // Update host controls visibility
-            bool isHost = NetworkServer.active;
+            // ✅ CRITICAL FIX: Check if LOCAL PLAYER is host, not if we're running server
+            // (Client can be host in listen server model)
+            var localPlayer = lobbyManager.GetLocalPlayer();
+            bool isHost = localPlayer?.isHost ?? false;
+
+            Debug.Log($"🔍 [LobbyUIController] UpdateUI - Local player: {localPlayer?.playerName}, isHost: {isHost}, NetworkServer.active: {NetworkServer.active}");
+
             if (startGameButton != null)
             {
                 startGameButton.gameObject.SetActive(isHost);
+                if (isHost)
+                {
+                    startGameButton.interactable = true;
+                    Debug.Log("✅ [LobbyUIController] Start Game button enabled for host");
+                }
+                else
+                {
+                    Debug.Log("ℹ️ [LobbyUIController] Start Game button hidden (not host)");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [LobbyUIController] startGameButton is NULL in UpdateUI!");
             }
 
             // ✅ FIX: Ready button should always be visible and interactable for all players
@@ -910,8 +1140,81 @@ namespace TacticalCombat.UI
                 waitingPanel.SetActive(false);
             }
 
+            // ✅ CRITICAL: Update ready status directly before refresh
+            UpdateReadyStatusDirectly();
+            
             // Refresh player list
             RefreshPlayerList();
+        }
+
+        /// <summary>
+        /// ✅ CRITICAL: Update ready status directly without full refresh
+        /// </summary>
+        private void UpdateReadyStatusDirectly()
+        {
+            if (lobbyManager == null || playerListContainer == null)
+            {
+                Debug.LogWarning("⚠️ [LobbyUIController] UpdateReadyStatusDirectly: lobbyManager or container is null");
+                return;
+            }
+            
+            var players = lobbyManager.GetAllPlayers();
+            Debug.Log($"🔍 [LobbyUIController] UpdateReadyStatusDirectly: {players.Count} players, {playerListItems.Count} items");
+            
+            // ✅ CRITICAL: Match by connectionId, not by index (order might change)
+            foreach (var playerData in players)
+            {
+                // Find item by connectionId in name
+                GameObject item = null;
+                foreach (var itemObj in playerListItems)
+                {
+                    if (itemObj != null && itemObj.name.Contains($"_{playerData.connectionId}"))
+                    {
+                        item = itemObj;
+                        break;
+                    }
+                }
+                
+                if (item == null)
+                {
+                    Debug.LogWarning($"⚠️ [LobbyUIController] Item not found for player {playerData.playerName} (ID: {playerData.connectionId})");
+                    continue;
+                }
+                
+                Transform readyTextTransform = item.transform.Find("ReadyText");
+                if (readyTextTransform != null)
+                {
+                    TextMeshProUGUI readyText = readyTextTransform.GetComponent<TextMeshProUGUI>();
+                    if (readyText != null)
+                    {
+                        string expectedText = playerData.isReady ? "[READY]" : "[NOT READY]";
+                        if (readyText.text != expectedText)
+                        {
+                            Debug.Log($"🔍 [LobbyUIController] ✅ Updating ready status for {playerData.playerName}: '{readyText.text}' -> '{expectedText}'");
+                            readyText.text = expectedText;
+                            Color readyTextColor = playerData.isReady ? readyColor : notReadyColor;
+                            readyTextColor.a = 1f;
+                            readyText.color = readyTextColor;
+                            readyText.alpha = 1f;
+                            
+                            // ✅ CRITICAL: Force canvas update
+                            Canvas.ForceUpdateCanvases();
+                        }
+                        else
+                        {
+                            Debug.Log($"🔍 [LobbyUIController] Ready status already correct for {playerData.playerName}: {expectedText}");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"⚠️ [LobbyUIController] ReadyText component not found on {readyTextTransform.name}");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning($"⚠️ [LobbyUIController] ReadyText Transform not found in {item.name}");
+                }
+            }
         }
 
         private void RefreshPlayerList()
@@ -963,7 +1266,7 @@ namespace TacticalCombat.UI
             }
             else
             {
-                // Check if any player data changed (connection IDs don't match)
+                // Check if any player data changed (connection IDs, ready status, team, etc.)
                 for (int i = 0; i < players.Count && i < playerListItems.Count; i++)
                 {
                     if (playerListItems[i] == null || 
@@ -973,12 +1276,67 @@ namespace TacticalCombat.UI
                         needsRefresh = true;
                         break;
                     }
+                    
+                    // ✅ CRITICAL: Check if ready status changed by looking at the ReadyText component
+                    Transform readyTextTransform = playerListItems[i].transform.Find("ReadyText");
+                    if (readyTextTransform != null)
+                    {
+                        TextMeshProUGUI readyText = readyTextTransform.GetComponent<TextMeshProUGUI>();
+                        if (readyText != null)
+                        {
+                            string expectedText = players[i].isReady ? "[READY]" : "[NOT READY]";
+                            if (readyText.text != expectedText)
+                            {
+                                Debug.Log($"🔍 [LobbyUIController] Ready status changed for player {i} ({players[i].playerName}): {readyText.text} -> {expectedText}");
+                                needsRefresh = true;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"⚠️ [LobbyUIController] ReadyText component not found on {readyTextTransform.name}");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"⚠️ [LobbyUIController] ReadyText Transform not found in {playerListItems[i].name}");
+                    }
                 }
             }
             
             if (!needsRefresh)
             {
-                Debug.Log($"🔍 [LobbyUIController] No refresh needed - checking visibility");
+                Debug.Log($"🔍 [LobbyUIController] No refresh needed - checking ready status and visibility");
+                
+                // ✅ CRITICAL: First check if ready status changed - if so, update directly without full refresh
+                bool readyStatusChanged = false;
+                for (int i = 0; i < players.Count && i < playerListItems.Count; i++)
+                {
+                    if (playerListItems[i] != null)
+                    {
+                        TextMeshProUGUI readyText = playerListItems[i].transform.Find("ReadyText")?.GetComponent<TextMeshProUGUI>();
+                        if (readyText != null)
+                        {
+                            string expectedText = players[i].isReady ? "[READY]" : "[NOT READY]";
+                            if (readyText.text != expectedText)
+                            {
+                                Debug.Log($"🔍 [LobbyUIController] Ready status changed for player {i} ({players[i].playerName}) - updating directly");
+                                readyText.text = expectedText;
+                                Color readyTextColor = players[i].isReady ? readyColor : notReadyColor;
+                                readyTextColor.a = 1f;
+                                readyText.color = readyTextColor;
+                                readyText.alpha = 1f;
+                                readyStatusChanged = true;
+                            }
+                        }
+                    }
+                }
+                
+                if (readyStatusChanged)
+                {
+                    Debug.Log($"✅ [LobbyUIController] Ready status updated directly");
+                    return; // Ready durumu güncellendi, full refresh gerekmez
+                }
                 
                 // ✅ CRITICAL: Check if items are actually visible
                 bool anyItemVisible = false;
@@ -1145,7 +1503,7 @@ namespace TacticalCombat.UI
             HorizontalLayoutGroup layout = itemObj.AddComponent<HorizontalLayoutGroup>();
             layout.spacing = 20f;
             layout.padding = new RectOffset(20, 20, 10, 10);
-            layout.childControlWidth = false;
+            layout.childControlWidth = false; // ✅ CRITICAL: We control width manually
             layout.childControlHeight = true;
             layout.childForceExpandWidth = false;
             layout.childForceExpandHeight = false;
@@ -1154,14 +1512,13 @@ namespace TacticalCombat.UI
             GameObject nameObj = new GameObject("NameText");
             nameObj.transform.SetParent(itemObj.transform, false);
             RectTransform nameRect = nameObj.AddComponent<RectTransform>();
-            // ✅ CRITICAL: For HorizontalLayoutGroup children, use left anchor
-            nameRect.anchorMin = new Vector2(0, 0);
-            nameRect.anchorMax = new Vector2(0, 1);
-            nameRect.pivot = new Vector2(0, 0.5f);
-            nameRect.sizeDelta = new Vector2(300, 0);
-            nameRect.anchoredPosition = Vector2.zero;
-            nameRect.offsetMin = Vector2.zero;
-            nameRect.offsetMax = Vector2.zero;
+            // ✅ CRITICAL FIX: Top Left anchor preset (anchorMin = anchorMax = (0,1))
+            nameRect.anchorMin = new Vector2(0, 1); // Top Left
+            nameRect.anchorMax = new Vector2(0, 1); // Top Left (single point)
+            nameRect.pivot = new Vector2(0, 1); // Top Left pivot
+            nameRect.anchoredPosition = Vector2.zero; // Pos X = 0, Pos Y = 0
+            nameRect.sizeDelta = new Vector2(300, 30); // Width = 300, Height = 30
+            nameRect.localScale = Vector3.one; // Scale = (1,1,1)
             
             TextMeshProUGUI nameText = nameObj.AddComponent<TextMeshProUGUI>();
             if (TMPro.TMP_Settings.defaultFontAsset != null)
@@ -1178,13 +1535,13 @@ namespace TacticalCombat.UI
             GameObject teamObj = new GameObject("TeamText");
             teamObj.transform.SetParent(itemObj.transform, false);
             RectTransform teamRect = teamObj.AddComponent<RectTransform>();
-            teamRect.anchorMin = new Vector2(0, 0);
-            teamRect.anchorMax = new Vector2(0, 1);
-            teamRect.pivot = new Vector2(0, 0.5f);
-            teamRect.sizeDelta = new Vector2(150, 0);
-            teamRect.anchoredPosition = Vector2.zero;
-            teamRect.offsetMin = Vector2.zero;
-            teamRect.offsetMax = Vector2.zero;
+            // ✅ CRITICAL FIX: Top Left anchor preset (anchorMin = anchorMax = (0,1))
+            teamRect.anchorMin = new Vector2(0, 1); // Top Left
+            teamRect.anchorMax = new Vector2(0, 1); // Top Left (single point)
+            teamRect.pivot = new Vector2(0, 1); // Top Left pivot
+            teamRect.anchoredPosition = Vector2.zero; // Pos X = 0, Pos Y = 0
+            teamRect.sizeDelta = new Vector2(150, 30); // Width = 150, Height = 30
+            teamRect.localScale = Vector3.one; // Scale = (1,1,1)
             
             TextMeshProUGUI teamText = teamObj.AddComponent<TextMeshProUGUI>();
             if (TMPro.TMP_Settings.defaultFontAsset != null)
@@ -1201,14 +1558,13 @@ namespace TacticalCombat.UI
             GameObject readyObj = new GameObject("ReadyText");
             readyObj.transform.SetParent(itemObj.transform, false);
             RectTransform readyRect = readyObj.AddComponent<RectTransform>();
-            // ✅ CRITICAL: For HorizontalLayoutGroup, use left anchor (layout handles positioning)
-            readyRect.anchorMin = new Vector2(0, 0);
-            readyRect.anchorMax = new Vector2(0, 1);
-            readyRect.pivot = new Vector2(0, 0.5f);
-            readyRect.sizeDelta = new Vector2(200, 0);
-            readyRect.anchoredPosition = Vector2.zero;
-            readyRect.offsetMin = Vector2.zero;
-            readyRect.offsetMax = Vector2.zero;
+            // ✅ CRITICAL FIX: Top Left anchor preset (anchorMin = anchorMax = (0,1))
+            readyRect.anchorMin = new Vector2(0, 1); // Top Left
+            readyRect.anchorMax = new Vector2(0, 1); // Top Left (single point)
+            readyRect.pivot = new Vector2(0, 1); // Top Left pivot
+            readyRect.anchoredPosition = Vector2.zero; // Pos X = 0, Pos Y = 0
+            readyRect.sizeDelta = new Vector2(200, 30); // Width = 200, Height = 30
+            readyRect.localScale = Vector3.one; // Scale = (1,1,1)
             
             TextMeshProUGUI readyText = readyObj.AddComponent<TextMeshProUGUI>();
             if (TMPro.TMP_Settings.defaultFontAsset != null)
@@ -1325,8 +1681,29 @@ namespace TacticalCombat.UI
 
         private void OnPlayerUpdated(LobbyPlayerData playerData)
         {
+            Debug.Log($"✅ [LobbyUIController] 🔔 OnPlayerUpdated EVENT FIRED: {playerData.playerName}, Ready: {playerData.isReady}, ConnectionID: {playerData.connectionId}");
+
+            // ✅ CRITICAL: Update local ready state if this is the local player
+            var localPlayer = lobbyManager?.GetLocalPlayer();
+            if (localPlayer.HasValue && localPlayer.Value.connectionId == playerData.connectionId)
+            {
+                isLocalPlayerReady = playerData.isReady;
+                UpdateReadyButton();
+                Debug.Log($"🔍 [LobbyUIController] Local player ready state updated: {isLocalPlayerReady}");
+            }
+
+            // ✅ CRITICAL: Update ready status immediately (BEFORE refresh)
+            Debug.Log($"🔍 [LobbyUIController] Calling UpdateReadyStatusDirectly for {playerData.playerName}");
+            UpdateReadyStatusDirectly();
+
+            // ✅ CRITICAL: Force refresh to ensure UI is updated
+            Debug.Log($"🔍 [LobbyUIController] Calling RefreshPlayerList after ready update");
             RefreshPlayerList();
+            
+            // ✅ CRITICAL: Also update UI
             UpdateUI();
+            
+            Debug.Log($"✅ [LobbyUIController] OnPlayerUpdated completed for {playerData.playerName}");
         }
 
         private void OnGameStarting()

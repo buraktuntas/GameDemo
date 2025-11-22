@@ -16,7 +16,8 @@ namespace TacticalCombat.UI
         [Header("UI References")]
         [SerializeField] private MainMenu mainMenu;
         [SerializeField] private GameModeSelectionUI gameModeSelection;
-        [SerializeField] private LobbyUI lobbyUI;
+        // ✅ REMOVED: Old LobbyUI reference - now using LobbyUIController
+        // [SerializeField] private LobbyUI lobbyUI;
         [SerializeField] private EndGameScoreboard endGameScoreboard;
 
         private void Awake()
@@ -36,8 +37,7 @@ namespace TacticalCombat.UI
                 mainMenu = FindFirstObjectByType<MainMenu>();
             if (gameModeSelection == null)
                 gameModeSelection = FindFirstObjectByType<GameModeSelectionUI>();
-            if (lobbyUI == null)
-                lobbyUI = FindFirstObjectByType<LobbyUI>();
+            // ✅ REMOVED: Old LobbyUI - now using LobbyUIController (singleton, no need to find)
             if (endGameScoreboard == null)
                 endGameScoreboard = FindFirstObjectByType<EndGameScoreboard>();
 
@@ -92,40 +92,15 @@ namespace TacticalCombat.UI
             // ✅ FIX: DON'T hide GameModeSelection - keep it visible with lobby
             // HideGameModeSelection(); // REMOVED - keep GameModeSelection visible
 
-            // ✅ FIX: Try to find LobbyUI if not assigned
-            if (lobbyUI == null)
+            // ✅ NEW: Use LobbyUIController (singleton)
+            LobbyUIController lobbyController = LobbyUIController.Instance;
+            if (lobbyController != null)
             {
-                lobbyUI = FindFirstObjectByType<LobbyUI>();
-                
-                // If still not found, search in Canvas hierarchy
-                if (lobbyUI == null)
-                {
-                    Canvas canvas = FindFirstObjectByType<Canvas>();
-                    if (canvas != null)
-                    {
-                        lobbyUI = canvas.GetComponentInChildren<LobbyUI>(true); // true = include inactive
-                    }
-                }
-                
-                // If still not found, search by GameObject name
-                if (lobbyUI == null)
-                {
-                    GameObject lobbyPanel = GameObject.Find("LobbyPanel");
-                    if (lobbyPanel != null)
-                    {
-                        lobbyUI = lobbyPanel.GetComponent<LobbyUI>();
-                    }
-                }
-            }
-
-            if (lobbyUI != null)
-            {
-                lobbyUI.ShowPanel();
+                lobbyController.ShowLobby();
             }
             else
             {
-                Debug.LogError("❌ [UIFlowManager] LobbyUI not found!");
-                Debug.LogError("💡 ÇÖZÜM: Unity Editor'da Tools > Tactical Combat > 🎮 Auto Setup Lobby System çalıştırın!");
+                Debug.LogWarning("⚠️ [UIFlowManager] LobbyUIController not found - it will be created automatically when needed");
             }
         }
 
@@ -139,6 +114,24 @@ namespace TacticalCombat.UI
             HideMainMenu();
             HideGameModeSelection();
             HideLobby();
+            
+            // ✅ CRITICAL FIX: Ensure GameHUD is shown when game starts
+            // GameHUD will be shown by OnPhaseChanged event, but we ensure it's active here too
+            var gameHUD = FindFirstObjectByType<GameHUD>();
+            if (gameHUD != null)
+            {
+                // GameHUD will show itself when phase changes to Build/Combat
+                // But we ensure the GameObject is active
+                if (!gameHUD.gameObject.activeSelf)
+                {
+                    gameHUD.gameObject.SetActive(true);
+                    Debug.Log("✅ [UIFlowManager] GameHUD GameObject activated");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ [UIFlowManager] GameHUD not found in scene!");
+            }
         }
 
         /// <summary>
@@ -165,6 +158,7 @@ namespace TacticalCombat.UI
         {
             if (mainMenu != null)
             {
+                // ✅ CRITICAL FIX: Hide MainMenu panels
                 var mainMenuPanel = mainMenu.transform.Find("MainMenuPanel");
                 if (mainMenuPanel != null)
                     mainMenuPanel.gameObject.SetActive(false);
@@ -172,6 +166,35 @@ namespace TacticalCombat.UI
                 var joinPanel = mainMenu.transform.Find("JoinPanel");
                 if (joinPanel != null)
                     joinPanel.gameObject.SetActive(false);
+                
+                // ✅ CRITICAL FIX: Also hide/disable the MainMenu GameObject itself
+                // This prevents MainMenu Canvas from blocking the game view
+                if (mainMenu.gameObject.activeSelf)
+                {
+                    mainMenu.gameObject.SetActive(false);
+                    Debug.Log("✅ [UIFlowManager] MainMenu GameObject disabled");
+                }
+                
+                // ✅ CRITICAL FIX: Also disable MainMenu Canvas if it exists
+                Canvas mainMenuCanvas = mainMenu.GetComponent<Canvas>();
+                if (mainMenuCanvas != null && mainMenuCanvas.gameObject.activeSelf)
+                {
+                    mainMenuCanvas.gameObject.SetActive(false);
+                    Debug.Log("✅ [UIFlowManager] MainMenu Canvas disabled");
+                }
+            }
+            else
+            {
+                // ✅ CRITICAL FIX: Fallback - find MainMenu by type if reference is null
+                var foundMainMenu = FindFirstObjectByType<MainMenu>();
+                if (foundMainMenu != null)
+                {
+                    if (foundMainMenu.gameObject.activeSelf)
+                    {
+                        foundMainMenu.gameObject.SetActive(false);
+                        Debug.Log("✅ [UIFlowManager] MainMenu GameObject disabled (found by type)");
+                    }
+                }
             }
         }
 
@@ -185,9 +208,11 @@ namespace TacticalCombat.UI
 
         private void HideLobby()
         {
-            if (lobbyUI != null)
+            // ✅ NEW: Use LobbyUIController (singleton)
+            LobbyUIController lobbyController = LobbyUIController.Instance;
+            if (lobbyController != null)
             {
-                lobbyUI.HidePanel();
+                lobbyController.HideLobby();
             }
         }
     }

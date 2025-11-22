@@ -75,20 +75,24 @@ namespace TacticalCombat.Core
             // Check if cached FPS controller has camera ready
             if (cachedLocalFPS != null && cachedLocalFPS.playerCamera != null)
             {
-                EnsureUrpAdditionalCameraData(cachedLocalFPS.playerCamera);
-
-                // ✅ FIX: Immediately disable bootstrap camera before destroying
-                if (bootstrapCamera != null)
+                // ✅ CRITICAL FIX: Check if player camera is actually enabled and active
+                if (cachedLocalFPS.playerCamera.enabled && cachedLocalFPS.playerCamera.gameObject.activeInHierarchy)
                 {
-                    bootstrapCamera.enabled = false;
-                    Destroy(bootstrapCamera.gameObject);
-                    bootstrapCamera = null;
+                    EnsureUrpAdditionalCameraData(cachedLocalFPS.playerCamera);
 
-                    Debug.Log("🎥 [URPCameraBootstrap] Bootstrap camera destroyed - player camera is ready");
+                    // ✅ FIX: Immediately disable bootstrap camera before destroying
+                    if (bootstrapCamera != null)
+                    {
+                        bootstrapCamera.enabled = false;
+                        Destroy(bootstrapCamera.gameObject);
+                        bootstrapCamera = null;
+
+                        Debug.Log("🎥 [URPCameraBootstrap] Bootstrap camera destroyed - player camera is ready");
+                    }
+
+                    Destroy(gameObject); // ✅ FIX: Destroy bootstrap completely
+                    return;
                 }
-
-                Destroy(gameObject); // ✅ FIX: Destroy bootstrap completely
-                return;
             }
         }
 

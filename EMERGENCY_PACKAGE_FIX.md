@@ -70,3 +70,4 @@ Aksi halde dosya kilitlenir ve silinemez.
 
 
 
+

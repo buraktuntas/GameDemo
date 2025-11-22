@@ -164,7 +164,46 @@ namespace TacticalCombat.UI
                 UpdateTimer();
                 UpdateGameModeInfo();
                 UpdateCoreCarrying();
+                UpdateHealthAndAmmo(); // ✅ CRITICAL FIX: Update health and ammo from local player
                 lastUIUpdateTime = Time.time;
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Update health and ammo from local player components
+        /// This ensures UI stays updated even if PlayerHUDController events fail
+        /// </summary>
+        private void UpdateHealthAndAmmo()
+        {
+            // ✅ CRITICAL FIX: Cache local player reference to avoid FindFirstObjectByType every frame
+            if (cachedLocalPlayer == null)
+            {
+                var players = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+                foreach (var player in players)
+                {
+                    if (player.isLocalPlayer)
+                    {
+                        cachedLocalPlayer = player;
+                        break;
+                    }
+                }
+            }
+            
+            if (cachedLocalPlayer == null) return;
+            
+            // ✅ CRITICAL FIX: Update health from Health component
+            var health = cachedLocalPlayer.GetComponent<Combat.Health>();
+            if (health != null)
+            {
+                UpdateHealth(health.CurrentHealth, health.MaxHealth);
+            }
+            
+            // ✅ CRITICAL FIX: Update ammo from WeaponSystem component
+            var weaponSystem = cachedLocalPlayer.GetComponent<Combat.WeaponSystem>();
+            if (weaponSystem != null)
+            {
+                // ✅ FIX: Use public methods instead of private fields
+                UpdateAmmo(weaponSystem.GetCurrentAmmo(), weaponSystem.GetReserveAmmo());
             }
         }
 
@@ -370,7 +409,18 @@ namespace TacticalCombat.UI
             // Show/hide ammo panel based on phase
             if (ammoPanel != null)
             {
-                ammoPanel.SetActive(newPhase == Phase.Combat || newPhase == Phase.SuddenDeath);
+                bool shouldShowAmmo = (newPhase == Phase.Combat || newPhase == Phase.SuddenDeath);
+                ammoPanel.SetActive(shouldShowAmmo);
+                Debug.Log($"[GameHUD] Ammo panel {(shouldShowAmmo ? "shown" : "hidden")} (phase: {newPhase})");
+            }
+            
+            // ✅ CRITICAL FIX: Ensure health panel is always visible during gameplay
+            if (healthSlider != null && healthText != null)
+            {
+                bool shouldShowHealth = (newPhase == Phase.Build || newPhase == Phase.Combat || newPhase == Phase.SuddenDeath);
+                healthSlider.gameObject.SetActive(shouldShowHealth);
+                healthText.gameObject.SetActive(shouldShowHealth);
+                Debug.Log($"[GameHUD] Health panel {(shouldShowHealth ? "shown" : "hidden")} (phase: {newPhase})");
             }
         }
 
@@ -731,6 +781,9 @@ namespace TacticalCombat.UI
 
         private void OnDestroy()
         {
+            // ✅ MEMORY LEAK FIX: Cancel all pending Invoke calls
+            CancelInvoke();
+
             if (Instance == this)
             {
                 Instance = null;

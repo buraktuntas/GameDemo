@@ -673,11 +673,11 @@ namespace TacticalCombat.UI
                 }
             }
 
-            // Hide LobbyUI (we're using integrated lobby now)
-            var lobbyUI = FindFirstObjectByType<LobbyUI>();
-            if (lobbyUI != null)
+            // ✅ NEW: Hide LobbyUIController (we're using integrated lobby now)
+            LobbyUIController lobbyController = LobbyUIController.Instance;
+            if (lobbyController != null)
             {
-                lobbyUI.HidePanel();
+                lobbyController.HideLobby();
             }
 
             // Hide TeamSelectionUI and RoleSelectionUI

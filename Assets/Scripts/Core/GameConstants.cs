@@ -3,7 +3,7 @@ namespace TacticalCombat.Core
     public static class GameConstants
     {
         // Phase Durations - Updated for new game structure
-        public const float BUILD_DURATION = 180f; // 3:00 minutes
+        public const float BUILD_DURATION = 8f; // ✅ TEST: 8 seconds (was 180f = 3:00 minutes)
         public const float COMBAT_DURATION = 900f; // 15:00 minutes
         public const float SUDDEN_DEATH_DURATION = 120f; // 2:00 minutes (final 2 minutes of combat)
         public const float END_PHASE_DURATION = 10f; // 10 seconds to show scoreboard

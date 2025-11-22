@@ -312,6 +312,12 @@ namespace TacticalCombat.Player
             if (playerCamera != null)
             {
                 playerCamera.enabled = true;
+                
+                // ✅ CRITICAL FIX: Set MainCamera tag so Unity recognizes it as the main camera
+                if (!playerCamera.CompareTag("MainCamera"))
+                {
+                    playerCamera.tag = "MainCamera";
+                }
 
                 // Make camera child of player if not already
                 if (playerCamera.transform.parent != transform)
@@ -369,7 +375,12 @@ namespace TacticalCombat.Player
             }
         }
         
-        private void Update()
+                // ✅ PERFORMANCE FIX: Cache UI state to prevent 420 FindFirstObjectByType calls per second
+        private bool cachedUIState = false;
+        private float lastUICheckTime = 0f;
+        private const float UI_CHECK_INTERVAL = 0.2f; // Check every 0.2 seconds instead of every frame
+
+private void Update()
         {
             // ✅ PROFESSIONAL FIX: Smooth interpolation for remote players
             if (!isLocalPlayer && hasTargetPosition)
@@ -389,9 +400,13 @@ namespace TacticalCombat.Player
 
             if (!isLocalPlayer || Time.timeScale == 0f) return;
 
-            // ✅ CRITICAL FIX: Don't interfere with UI clicks!
-            // Only handle cursor lock/unlock if no UI is open
-            bool uiIsOpen = IsAnyUIOpen();
+                        // ✅ CRITICAL PERFORMANCE FIX: Cache UI state check (was calling 7x FindFirstObjectByType every frame!)
+            if (Time.time - lastUICheckTime >= UI_CHECK_INTERVAL)
+            {
+                cachedUIState = IsAnyUIOpen();
+                lastUICheckTime = Time.time;
+            }
+            bool uiIsOpen = cachedUIState;
 
             if (!uiIsOpen)
             {
@@ -1192,9 +1207,9 @@ namespace TacticalCombat.Player
                 return true;
             }
 
-            // ✅ NEW: Check LobbyUI using public method (CRITICAL - this was missing!)
-            var lobbyUI = FindFirstObjectByType<TacticalCombat.UI.LobbyUI>();
-            if (lobbyUI != null && lobbyUI.IsPanelOpen())
+            // ✅ NEW: Check LobbyUIController (CRITICAL - this was missing!)
+            var lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController != null && lobbyController.IsLobbyVisible())
             {
                 return true;
             }
