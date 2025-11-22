@@ -554,6 +554,28 @@ namespace TacticalCombat.Core
                 {
                     collider.enabled = true;
                 }
+                
+                // ✅ CRITICAL FIX: Activate CurrentWeapon GameObject if it exists
+                Transform weaponHolder = player.transform.Find("WeaponHolder");
+                if (weaponHolder == null)
+                {
+                    // Try to find in PlayerVisual
+                    var playerVisual = player.transform.Find("PlayerVisual");
+                    if (playerVisual != null)
+                    {
+                        weaponHolder = playerVisual.Find("WeaponHolder");
+                    }
+                }
+                
+                if (weaponHolder != null)
+                {
+                    Transform currentWeapon = weaponHolder.Find("CurrentWeapon");
+                    if (currentWeapon != null && !currentWeapon.gameObject.activeSelf)
+                    {
+                        currentWeapon.gameObject.SetActive(true);
+                        LogInfo($"[MatchManager] Activated CurrentWeapon for player: {player.name}");
+                    }
+                }
             }
             
             // ✅ CRITICAL FIX: Now handle local player camera

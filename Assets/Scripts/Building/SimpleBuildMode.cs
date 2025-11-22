@@ -369,22 +369,38 @@ namespace TacticalCombat.Building
             // Check keyboard validity
             if (Keyboard.current == null)
             {
-                Debug.LogWarning("⚠️ [SimpleBuildMode] Keyboard.current is null!");
                 return;
             }
 
-            // ✅ DEBUG: Always log B key press attempts
-            if (Keyboard.current[buildModeKey].wasPressedThisFrame)
-            {
-                Debug.Log($"🏗️ [SimpleBuildMode] B key detected! isLocalPlayer: {isLocalPlayer}, Time check: {Time.time - lastToggleTime > TOGGLE_COOLDOWN}");
-            }
+            // ✅ CRITICAL FIX: Check for B key press DIRECTLY from InputSystem
+            // This bypasses any InputManager blocking logic for the toggle itself
+            bool togglePressed = Keyboard.current[buildModeKey].wasPressedThisFrame;
+            
+            // ESC also exits build mode
+            bool escapePressed = Keyboard.current.escapeKey.wasPressedThisFrame;
 
-            if (Keyboard.current[buildModeKey].wasPressedThisFrame && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
+            if ((togglePressed || (isBuildModeActive && escapePressed)) && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
             {
+                // ✅ CRITICAL: Only allow entering build mode in Build Phase (or if no MatchManager exists for testing)
+                if (!isBuildModeActive && MatchManager.Instance != null)
+                {
+                    Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                    if (currentPhase != Phase.Build)
+                    {
+                        // Optional: Allow in Combat phase if design permits, but for now restrict to Build
+                        // If user wants to build in combat, remove this check
+                        #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                        Debug.Log($"⚠️ [SimpleBuildMode] Cannot enter build mode in {currentPhase} phase");
+                        #endif
+                        return;
+                    }
+                }
+
                 isTogglingBuildMode = true;
                 lastToggleTime = Time.time;
+                
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.Log($"🏗️ [SimpleBuildMode] B key pressed - Current state: {isBuildModeActive}");
+                Debug.Log($"🏗️ [SimpleBuildMode] Toggle Input Detected! Current State: {isBuildModeActive}, Key: {(togglePressed ? "B" : "ESC")}");
                 #endif
 
                 try
@@ -398,21 +414,11 @@ namespace TacticalCombat.Building
                         EnterBuildMode();
                     }
                 }
-                finally
+                catch (System.Exception e)
                 {
-                    isTogglingBuildMode = false;
-                }
-            }
-
-            // ESC also exits build mode (with same cooldown and guard)
-            if (isBuildModeActive && Keyboard.current.escapeKey.wasPressedThisFrame && Time.time - lastToggleTime > TOGGLE_COOLDOWN && !isTogglingBuildMode)
-            {
-                isTogglingBuildMode = true;
-                lastToggleTime = Time.time;
-
-                try
-                {
-                    ExitBuildMode();
+                    Debug.LogError($"❌ [SimpleBuildMode] Error toggling build mode: {e.Message}\n{e.StackTrace}");
+                    // Force exit on error to prevent getting stuck
+                    if (isBuildModeActive) ExitBuildMode();
                 }
                 finally
                 {

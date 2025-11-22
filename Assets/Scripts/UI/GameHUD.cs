@@ -389,6 +389,7 @@ namespace TacticalCombat.UI
             }
 
             // ✅ CRITICAL: Hide GameHUD in Lobby and End phases
+            // Show in Build, Combat, and SuddenDeath
             if (newPhase == Phase.Lobby || newPhase == Phase.End)
             {
                 gameObject.SetActive(false);
@@ -396,17 +397,18 @@ namespace TacticalCombat.UI
             }
             else
             {
+                // ✅ CRITICAL FIX: Ensure GameObject is active for Build/Combat/SuddenDeath
                 gameObject.SetActive(true);
                 Debug.Log($"✅ [GameHUD] Shown (phase: {newPhase})");
             }
 
-            // Show/hide resource panel based on phase
+            // Show/hide resource panel based on phase (Build only)
             if (resourcePanel != null)
             {
                 resourcePanel.SetActive(newPhase == Phase.Build);
             }
 
-            // Show/hide ammo panel based on phase
+            // Show/hide ammo panel based on phase (Combat/SuddenDeath)
             if (ammoPanel != null)
             {
                 bool shouldShowAmmo = (newPhase == Phase.Combat || newPhase == Phase.SuddenDeath);
@@ -414,10 +416,17 @@ namespace TacticalCombat.UI
                 Debug.Log($"[GameHUD] Ammo panel {(shouldShowAmmo ? "shown" : "hidden")} (phase: {newPhase})");
             }
             
-            // ✅ CRITICAL FIX: Ensure health panel is always visible during gameplay
+            // ✅ CRITICAL FIX: Ensure health panel is always visible during gameplay (Build/Combat/SuddenDeath)
             if (healthSlider != null && healthText != null)
             {
                 bool shouldShowHealth = (newPhase == Phase.Build || newPhase == Phase.Combat || newPhase == Phase.SuddenDeath);
+                
+                // Force activate parent if needed
+                if (healthSlider.transform.parent != transform && healthSlider.transform.parent != null)
+                {
+                    healthSlider.transform.parent.gameObject.SetActive(shouldShowHealth);
+                }
+
                 healthSlider.gameObject.SetActive(shouldShowHealth);
                 healthText.gameObject.SetActive(shouldShowHealth);
                 Debug.Log($"[GameHUD] Health panel {(shouldShowHealth ? "shown" : "hidden")} (phase: {newPhase})");

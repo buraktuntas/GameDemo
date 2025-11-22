@@ -104,6 +104,28 @@ namespace TacticalCombat.Combat
             if (audioController == null) audioController = gameObject.AddComponent<WeaponAudioController>();
             if (vfxController == null) vfxController = gameObject.AddComponent<WeaponVFXController>();
             
+            // ✅ FIX: Fallback for weaponHolder
+            if (weaponHolder == null)
+            {
+                // Try to find a child named "WeaponHolder" or "WeaponPosition"
+                var childHolder = transform.Find("WeaponHolder");
+                if (childHolder == null) childHolder = transform.Find("Camera/WeaponHolder");
+                if (childHolder == null) childHolder = transform.Find("MainCamera/WeaponHolder");
+                
+                if (childHolder != null)
+                {
+                    weaponHolder = childHolder;
+                }
+                else
+                {
+                    // Fallback to transform (will fire from player center, but better than nothing)
+                    weaponHolder = transform;
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogWarning("[WeaponSystem] WeaponHolder not assigned! Using player transform as fallback.");
+                    #endif
+                }
+            }
+
             // ✅ FIX: Get weapon animator (optional)
             weaponAnimator = GetComponent<Animator>();
             if (weaponAnimator == null && weaponHolder != null)
@@ -114,7 +136,22 @@ namespace TacticalCombat.Combat
             // ✅ PERFORMANCE: Initialize PlayerInput once in Awake (shared with FPSController)
             // This avoids runtime AddComponent calls in OnEnable/OnStartLocalPlayer
             InitializePlayerInput();
+            
+            // ✅ CRITICAL FIX: Initialize original weapon position and rotation to prevent NaN errors
+            if (weaponHolder != null)
+            {
+                originalWeaponPos = weaponHolder.localPosition;
+                originalWeaponRot = weaponHolder.localRotation;
+            }
+            else
+            {
+                // Fallback: Set to default values if weaponHolder is not found yet
+                originalWeaponPos = Vector3.zero;
+                originalWeaponRot = Quaternion.identity;
+            }
         }
+
+
         
         private void InitializePlayerInput()
         {
@@ -184,6 +221,27 @@ namespace TacticalCombat.Combat
                     // Retry camera assignment in coroutine (FPSController.OnStartLocalPlayer runs after Start)
                     retryCameraCoroutine = StartCoroutine(RetryCameraAssignment());
                     // Continue with initialization - coroutine will handle camera assignment
+                }
+            }
+            
+            // ✅ CRITICAL FIX: Initialize original weapon position and rotation in Start() if not already set
+            // This ensures weaponHolder is found and original values are captured
+            if (weaponHolder != null && (originalWeaponPos == Vector3.zero && originalWeaponRot == Quaternion.identity || 
+                float.IsNaN(originalWeaponPos.x) || float.IsNaN(originalWeaponRot.x)))
+            {
+                originalWeaponPos = weaponHolder.localPosition;
+                originalWeaponRot = weaponHolder.localRotation;
+                LogInfo($"[WeaponSystem] Original weapon position/rotation initialized: Pos={originalWeaponPos}, Rot={originalWeaponRot}");
+            }
+            
+            // ✅ CRITICAL FIX: Activate CurrentWeapon GameObject if it exists
+            if (weaponHolder != null)
+            {
+                Transform currentWeapon = weaponHolder.Find("CurrentWeapon");
+                if (currentWeapon != null && !currentWeapon.gameObject.activeSelf)
+                {
+                    currentWeapon.gameObject.SetActive(true);
+                    LogInfo($"[WeaponSystem] Activated CurrentWeapon GameObject");
                 }
             }
                 
@@ -1210,10 +1268,31 @@ namespace TacticalCombat.Combat
         {
             if (weaponHolder == null) return;
             
+            // ✅ CRITICAL FIX: Check for NaN values before using Lerp
+            if (float.IsNaN(originalWeaponPos.x) || float.IsNaN(originalWeaponPos.y) || float.IsNaN(originalWeaponPos.z))
+            {
+                // Re-initialize if NaN detected
+                originalWeaponPos = weaponHolder.localPosition;
+                LogWarning("[WeaponSystem] originalWeaponPos was NaN, re-initialized");
+            }
+            
+            if (float.IsNaN(originalWeaponRot.x) || float.IsNaN(originalWeaponRot.y) || 
+                float.IsNaN(originalWeaponRot.z) || float.IsNaN(originalWeaponRot.w))
+            {
+                // Re-initialize if NaN detected
+                originalWeaponRot = weaponHolder.localRotation;
+                LogWarning("[WeaponSystem] originalWeaponRot was NaN, re-initialized");
+            }
+            
             // Smooth recovery
             recoilAmount = Mathf.Lerp(recoilAmount, 0, Time.deltaTime * 5f);
             weaponHolder.localPosition = Vector3.Lerp(weaponHolder.localPosition, originalWeaponPos, Time.deltaTime * 10f);
-            weaponHolder.localRotation = Quaternion.Lerp(weaponHolder.localRotation, originalWeaponRot, Time.deltaTime * 10f);
+            
+            // ✅ CRITICAL FIX: Use Slerp for rotation (more accurate) and check for valid quaternion
+            if (originalWeaponRot != Quaternion.identity || weaponHolder.localRotation != Quaternion.identity)
+            {
+                weaponHolder.localRotation = Quaternion.Slerp(weaponHolder.localRotation, originalWeaponRot, Time.deltaTime * 10f);
+            }
         }
         
         // ═══════════════════════════════════════════════════════════
@@ -1454,6 +1533,7 @@ namespace TacticalCombat.Combat
         /// </summary>
         public void EnableWeapon()
         {
+            this.enabled = true;
             Debug.Log("✅ [WeaponSystem] Weapon enabled");
         }
         
@@ -1463,6 +1543,7 @@ namespace TacticalCombat.Combat
         public void DisableWeapon()
         {
             ResetWeaponState();
+            this.enabled = false;
             Debug.Log("🚫 [WeaponSystem] Weapon disabled");
         }
         

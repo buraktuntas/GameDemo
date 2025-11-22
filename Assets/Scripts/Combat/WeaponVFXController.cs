@@ -59,7 +59,13 @@ namespace TacticalCombat.Combat
 
         public void PlayMuzzleFlashAt(Vector3 position, Vector3 direction)
         {
-            if (muzzleFlashPrefab == null) return;
+            if (muzzleFlashPrefab == null)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("⚠️ [WeaponVFXController] Muzzle Flash Prefab is missing!");
+                #endif
+                return;
+            }
             
             GameObject flash = GetPooledMuzzleFlash();
             if (flash != null)
@@ -68,7 +74,17 @@ namespace TacticalCombat.Combat
                 flash.transform.rotation = Quaternion.LookRotation(direction);
                 flash.SetActive(true);
                 
+                // Ensure particle system plays
+                var ps = flash.GetComponent<ParticleSystem>();
+                if (ps != null) ps.Play();
+                
                 StartCoroutine(ReturnMuzzleFlashToPool(flash, 0.1f));
+            }
+            else
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("⚠️ [WeaponVFXController] Failed to get muzzle flash from pool!");
+                #endif
             }
         }
 
