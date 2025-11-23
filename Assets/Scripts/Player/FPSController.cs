@@ -212,9 +212,12 @@ namespace TacticalCombat.Player
             // ✅ AAA FIX: Track spawn time to ignore initial movement commands (prevents false speed warnings)
             lastSpawnTime = Time.time;
             
-            // ✅ AAA FIX: Reset last sent position/rotation to prevent false movement detection
+            // ✅ CRITICAL FIX: Reset last sent position/rotation to prevent false movement detection
             lastSentPosition = transform.position;
             lastSentRotation = transform.rotation;
+
+            // ✅ CRITICAL FIX: Reset server-side Command timing
+            lastCmdMoveTime = 0f;
             
             // ✅ AAA FIX: Ensure canMove is properly set (will be set by PlayerController, but ensure it's not stuck)
             // Don't force canMove here - let PlayerController handle it based on phase
@@ -544,6 +547,9 @@ private void Update()
         private Quaternion lastSentRotation;
         private const float POSITION_THRESHOLD = 0.1f; // 10cm değişiklik olursa gönder (AAA quality precision)
         private const float ROTATION_THRESHOLD = 5f; // 5 derece değişiklik olursa gönder
+
+        // ✅ CRITICAL FIX: Track server-side Command timing
+        private float lastCmdMoveTime = 0f;
         
         // ✅ AAA FIX: Track spawn time to ignore initial movement commands (prevents false speed warnings)
         private float lastSpawnTime = 0f;
@@ -653,22 +659,35 @@ private void Update()
         }
         
         /// <summary>
-        /// ✅ AAA QUALITY: Server-validated movement with proper client-side prediction reconciliation
+        /// ✅ CRITICAL FIX: Server-validated movement with proper timing-based validation
         /// </summary>
         [Command]
         private void CmdMove(Vector3 predictedPosition, Quaternion predictedRotation, Vector3 input)
         {
-            // ✅ AAA FIX: Use client's predicted position (trust but verify)
-            // This is proper client-side prediction - server validates but accepts client position
+            // ✅ CRITICAL FIX: Calculate actual time since last Command
+            float currentTime = Time.time;
+            float deltaTime = currentTime - lastCmdMoveTime;
+
+            // ✅ CRITICAL FIX: Handle first Command or very fast Commands
+            if (lastCmdMoveTime == 0f || deltaTime < 0.001f)
+            {
+                deltaTime = MOVEMENT_RPC_INTERVAL; // Use expected interval
+            }
+
+            // ✅ CRITICAL FIX: Clamp deltaTime to reasonable range (prevent huge jumps)
+            deltaTime = Mathf.Clamp(deltaTime, 0.001f, 0.5f); // 1ms to 500ms
+
+            lastCmdMoveTime = currentTime;
+
+            // ✅ CRITICAL FIX: Calculate distance from LAST SERVER POSITION
             float distance = Vector3.Distance(transform.position, predictedPosition);
 
-            // ✅ AAA FIX: Calculate time since last update (proper lag compensation)
-            const float MOVE_TIME_WINDOW = 0.1f; // 100ms movement window
-            float maxAllowedMove = runSpeed * MOVE_TIME_WINDOW * 3.0f; // Allow 3x for lag compensation (increased for smoothness)
+            // ✅ CRITICAL FIX: Use ACTUAL deltaTime for validation (not fixed 0.1f)
+            float maxAllowedMove = runSpeed * deltaTime * 2.5f; // Allow 2.5x for lag/sprint
 
-            // ✅ AAA FIX: Validate movement speed (anti-cheat)
-            float predictedSpeed = distance / MOVE_TIME_WINDOW;
-            float maxAllowedSpeed = runSpeed * 2.0f; // 2x max speed (allows sprint + lag)
+            // ✅ CRITICAL FIX: Validate movement speed based on ACTUAL deltaTime
+            float predictedSpeed = distance / deltaTime;
+            float maxAllowedSpeed = runSpeed * 2.5f; // 2.5x max speed (sprint + lag)
             
             // ✅ AAA FIX: Ignore speed validation during spawn grace period (prevents false warnings)
             float timeSinceSpawn = Time.time - lastSpawnTime;
@@ -743,14 +762,26 @@ private void Update()
                 transform.rotation = predictedRotation;
             }
             
-            // ✅ CRITICAL FIX: ALWAYS send position update to other clients (ghost player fix)
-            // Throttling causes ghost player issue - other clients don't see real position!
-            // Server is authoritative, so we MUST broadcast position to all clients
-            RpcSetPosition(transform.position, transform.rotation);
+            // ✅ CRITICAL FIX: Smart throttling - broadcast ONLY if position actually changed
+            // This prevents RPC flood while ensuring other clients see real position
+            float positionDelta = Vector3.Distance(transform.position, lastBroadcastPosition);
+            float rotationDelta = Quaternion.Angle(transform.rotation, lastBroadcastRotation);
+            float timeSinceBroadcast = currentTime - lastBroadcastTime;
+
+            // Broadcast if: significant movement OR rotation OR timeout (max 100ms without update)
+            if (positionDelta > 0.01f || rotationDelta > 1f || timeSinceBroadcast >= 0.1f)
+            {
+                RpcSetPosition(transform.position, transform.rotation);
+                lastBroadcastPosition = transform.position;
+                lastBroadcastRotation = transform.rotation;
+                lastBroadcastTime = currentTime;
+            }
         }
 
-        // ✅ CRITICAL FIX: Removed aggressive throttling (was causing ghost player bug)
-        // Server should ALWAYS broadcast validated position to all clients
+        // ✅ CRITICAL FIX: Track server broadcast timing to prevent RPC flood
+        private Vector3 lastBroadcastPosition;
+        private Quaternion lastBroadcastRotation;
+        private float lastBroadcastTime = 0f;
         
         /// <summary>
         /// ✅ CRITICAL FIX: Server-side movement calculation (authoritative)
