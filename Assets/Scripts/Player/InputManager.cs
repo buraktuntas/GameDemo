@@ -1,17 +1,44 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using TacticalCombat.Core; // ✅ FIX: For MatchManager and Phase
 
 namespace TacticalCombat.Player
 {
     /// <summary>
+    /// ✅ AAA QUALITY: Single Source of Truth for ALL Input
     /// Professional Input Manager - Production Ready
     /// Manages input states, cursor modes, pause menu, and events
-    /// Her player'ın kendi InputManager'ı olmalı (singleton değil)
     /// </summary>
     public class InputManager : MonoBehaviour
     {
-        // Singleton kaldırıldı - multiplayer için her player kendi input'unu almalı
-        // Her player'ın kendi InputManager component'i var
+        // ═══════════════════════════════════════════════════════════
+        // ✅ AAA: INPUT PROPERTIES - Single Source of Truth
+        // ═══════════════════════════════════════════════════════════
+        
+        /// <summary>Movement input (WASD/Left Stick) - Normalized Vector2</summary>
+        public Vector2 MoveInput { get; private set; }
+        
+        /// <summary>Look input (Mouse Delta/Right Stick) - Raw delta values</summary>
+        public Vector2 LookInput { get; private set; }
+        
+        /// <summary>Jump pressed this frame</summary>
+        public bool JumpPressed { get; private set; }
+        
+        /// <summary>Sprint held (Shift/Left Trigger)</summary>
+        public bool SprintHeld { get; private set; }
+        
+        /// <summary>Fire pressed (Mouse Left/Right Trigger)</summary>
+        public bool FirePressed { get; private set; }
+        
+        /// <summary>Fire held (for auto-fire weapons)</summary>
+        public bool FireHeld { get; private set; }
+        
+        /// <summary>Reload pressed (R/X Button)</summary>
+        public bool ReloadPressed { get; private set; }
+        
+        // ═══════════════════════════════════════════════════════════
+        // CURSOR MODES
+        // ═══════════════════════════════════════════════════════════
         
         // Cursor modes
         public enum CursorMode
@@ -53,15 +80,18 @@ namespace TacticalCombat.Player
         
         private void Awake()
         {
-            // Her player'ın kendi InputManager'ı var - singleton değil
-            Debug.Log("✅ InputManager initialized for this player");
+            Debug.Log("✅ InputManager initialized - Single Source of Truth");
+        }
+        
+        private void Update()
+        {
+            // ✅ AAA: Read ALL input here - Single Source of Truth
+            ReadAllInput();
         }
 
         private void OnEnable()
         {
             // ✅ CRITICAL FIX: Reset state when enabled (e.g. on respawn)
-            // This prevents "stuck" states if player was in menu/build mode when disabled
-            currentMode = CursorMode.Locked;
             IsInBuildMode = false;
             IsInMenu = false;
             IsPaused = false;
@@ -70,9 +100,112 @@ namespace TacticalCombat.Player
             BlockMovementInput = false;
             UnblockGameplayInput();
             
-            // Force cursor update
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
+            // ✅ CRITICAL FIX: Don't force lock cursor on enable - check UI state first
+            // UI might be open (lobby, menu, etc.) - let UI systems manage cursor
+            // Only lock if we're actually in gameplay (not in lobby/menu)
+            if (MatchManager.Instance != null)
+            {
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                if (currentPhase != Phase.Lobby && currentPhase != Phase.End)
+                {
+                    // In gameplay - lock cursor
+                    currentMode = CursorMode.Locked;
+                    Cursor.lockState = CursorLockMode.Locked;
+                    Cursor.visible = false;
+                }
+                else
+                {
+                    // In lobby/menu - unlock cursor
+                    currentMode = CursorMode.Menu;
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
+                }
+            }
+            else
+            {
+                // MatchManager not ready yet - default to Menu mode (safe)
+                currentMode = CursorMode.Menu;
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+        }
+        
+        // ═══════════════════════════════════════════════════════════
+        // ✅ AAA: INPUT READING - Single Source of Truth
+        // ═══════════════════════════════════════════════════════════
+        
+        private void ReadAllInput()
+        {
+            // Reset per-frame inputs
+            JumpPressed = false;
+            FirePressed = false;
+            ReloadPressed = false;
+            
+            // ✅ Movement Input (WASD / Left Stick)
+            if (!BlockMovementInput && Keyboard.current != null)
+            {
+                float h = 0, v = 0;
+                if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) h -= 1;
+                if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) h += 1;
+                if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) v -= 1;
+                if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed) v += 1;
+                
+                MoveInput = new Vector2(h, v);
+                
+                // Normalize to prevent diagonal speed boost
+                if (MoveInput.magnitude > 1f)
+                {
+                    MoveInput = MoveInput.normalized;
+                }
+            }
+            else
+            {
+                MoveInput = Vector2.zero;
+            }
+            
+            // ✅ Look Input (Mouse Delta / Right Stick)
+            if (!BlockCameraInput && Mouse.current != null)
+            {
+                LookInput = Mouse.current.delta.ReadValue();
+            }
+            else
+            {
+                LookInput = Vector2.zero;
+            }
+            
+            // ✅ Jump Input (Space / A Button)
+            if (!BlockJumpInput && Keyboard.current != null)
+            {
+                JumpPressed = Keyboard.current.spaceKey.wasPressedThisFrame;
+            }
+            
+            // ✅ Sprint Input (Shift / Left Trigger)
+            if (!BlockSprintInput && Keyboard.current != null)
+            {
+                SprintHeld = Keyboard.current.leftShiftKey.isPressed;
+            }
+            else
+            {
+                SprintHeld = false;
+            }
+            
+            // ✅ Fire Input (Mouse Left / Right Trigger)
+            if (!BlockShootInput && Mouse.current != null)
+            {
+                FirePressed = Mouse.current.leftButton.wasPressedThisFrame;
+                FireHeld = Mouse.current.leftButton.isPressed;
+            }
+            else
+            {
+                FirePressed = false;
+                FireHeld = false;
+            }
+            
+            // ✅ Reload Input (R / X Button)
+            if (!BlockShootInput && Keyboard.current != null)
+            {
+                ReloadPressed = Keyboard.current.rKey.wasPressedThisFrame;
+            }
         }
         
         // ═══════════════════════════════════════════════════════════
@@ -143,17 +276,19 @@ namespace TacticalCombat.Player
         {
             IsInBuildMode = true;
             
-            // Fortnite tarzı: Build mode'da durarak yapı yerleştir
-            Cursor.lockState = CursorLockMode.Confined;
-            Cursor.visible = true;
-            BlockCameraInput = true;   // Kamerayı durdur
-            BlockMovementInput = true; // Hareketi durdur
-            BlockJumpInput = true;
-            BlockSprintInput = true;
+            // ✅ FORTNITE STYLE: Build while moving!
+            // Players can walk and build, but can't sprint (balance)
+            Cursor.lockState = CursorLockMode.Locked; // ✅ Keep cursor locked for camera control
+            Cursor.visible = false; // ✅ Hide cursor (crosshair visible)
+            BlockCameraInput = false;   // ✅ Allow camera movement
+            BlockMovementInput = false; // ✅ Allow walking (Fortnite style!)
+            BlockJumpInput = false;     // ✅ Allow jumping
+            BlockSprintInput = true;    // ❌ Disable sprint (balance - can't run while building)
             
-            Debug.Log("🏗️ Build Mode: Fortnite tarzı - Hareket durduruldu, Cursor confined");
+            Debug.Log("🏗️ Build Mode: Fortnite style - Walk + Build enabled, Sprint disabled");
             OnBuildModeEnter?.Invoke();
         }
+
         
         public void ExitBuildMode()
         {

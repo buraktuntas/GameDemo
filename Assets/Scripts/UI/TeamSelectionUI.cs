@@ -232,6 +232,34 @@ namespace TacticalCombat.UI
             
             // ✅ CRITICAL FIX: Force cursor unlock (FPSController might have locked it)
             StartCoroutine(ForceCursorUnlock());
+            
+            // ✅ CRITICAL FIX: Unlock cursor via InputManager
+            UnlockCursorForMenu();
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Unlock cursor for menu UI interaction
+        /// </summary>
+        private void UnlockCursorForMenu()
+        {
+            // Find local player's InputManager
+            var inputManagers = FindObjectsByType<Player.InputManager>(FindObjectsSortMode.None);
+            foreach (var inputManager in inputManagers)
+            {
+                var networkBehaviour = inputManager.GetComponent<Mirror.NetworkBehaviour>();
+                if (networkBehaviour != null && networkBehaviour.isLocalPlayer)
+                {
+                    // Set to Menu mode (cursor unlocked, all input blocked)
+                    inputManager.SetCursorMode(Player.InputManager.CursorMode.Menu);
+                    Debug.Log("✅ [TeamSelectionUI] Cursor unlocked for menu (Menu mode)");
+                    return;
+                }
+            }
+            
+            // Fallback: Direct cursor unlock if InputManager not found
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            Debug.Log("✅ [TeamSelectionUI] Cursor unlocked (fallback - InputManager not found)");
         }
         
         private System.Collections.IEnumerator ForceCursorUnlock()

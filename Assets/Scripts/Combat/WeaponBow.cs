@@ -38,9 +38,11 @@ namespace TacticalCombat.Combat
                 }
             }
 
-            if (cachedCamera == null)
+            // \u2705 PERFORMANCE FIX: Get camera from FPSController (not Camera.main)
+            var fpsController = GetComponentInParent<TacticalCombat.Player.FPSController>();
+            if (fpsController != null)
             {
-                cachedCamera = Camera.main;
+                cachedCamera = fpsController.playerCamera;
             }
         }
 
@@ -51,9 +53,8 @@ namespace TacticalCombat.Combat
             lastFireTime = Time.time;
 
             Vector3 origin = arrowSpawnPoint != null ? arrowSpawnPoint.position : transform.position;
-            // Unity 6: Cache camera reference for better performance
-            Camera cam = cachedCamera != null ? cachedCamera : Camera.main;
-            Vector3 direction = cam != null ? cam.transform.forward : transform.forward;
+            // \u2705 PERFORMANCE: Use cached camera (no Camera.main)
+            Vector3 direction = cachedCamera != null ? cachedCamera.transform.forward : transform.forward;
 
             // send only intent; server derives secure origin
             CmdFire(direction, isScoutArrow);

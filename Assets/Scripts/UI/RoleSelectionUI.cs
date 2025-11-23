@@ -212,10 +212,12 @@ namespace TacticalCombat.UI
                 Debug.Log("✅ [RoleSelectionUI] No active blockers found");
             }
             
-            // Lock cursor for gameplay
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-            Debug.Log("🔒 [RoleSelectionUI] Cursor locked for gameplay");
+            // ✅ CRITICAL FIX: DON'T lock cursor here - game hasn't started yet!
+            // Cursor will be locked when game actually starts (MatchManager will handle it)
+            // Keep cursor unlocked for now (we're still in lobby/selection phase)
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            Debug.Log("🔓 [RoleSelectionUI] Cursor unlocked (game not started yet)");
             
             // Wait one more frame for camera setup
             yield return null;

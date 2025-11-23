@@ -35,14 +35,19 @@ namespace TacticalCombat.UI
                 CreateCostText();
             }
 
-            // Find player camera
-            playerCamera = Camera.main;
-            if (playerCamera == null)
+            // ✅ PERFORMANCE FIX: Get camera from local player's FPSController (not Camera.main)
+            var localPlayer = GameObject.FindGameObjectWithTag("Player");
+            if (localPlayer != null)
             {
-                var player = GameObject.FindGameObjectWithTag("Player");
-                if (player != null)
+                var fpsController = localPlayer.GetComponent<TacticalCombat.Player.FPSController>();
+                if (fpsController != null)
                 {
-                    playerCamera = player.GetComponentInChildren<Camera>();
+                    playerCamera = fpsController.playerCamera;
+                }
+                else
+                {
+                    // Fallback: search in children
+                    playerCamera = localPlayer.GetComponentInChildren<Camera>();
                 }
             }
         }

@@ -2,11 +2,11 @@ namespace TacticalCombat.Core
 {
     public static class GameConstants
     {
-        // Phase Durations - Updated for new game structure
-        public const float BUILD_DURATION = 8f; // ✅ TEST: 8 seconds (was 180f = 3:00 minutes)
+        // ✅ BALANCED PHASE DURATIONS (Valheim/Raft + Valorant hybrid)
+        public const float BUILD_DURATION = 120f; // 2:00 minutes - enough time for strategy
         public const float COMBAT_TRANSITION_DURATION = 3f; // 3 seconds transition countdown
-        public const float COMBAT_DURATION = 600f; // 10:00 minutes (was 900f = 15:00 minutes)
-        public const float SUDDEN_DEATH_DURATION = 120f; // 2:00 minutes (final 2 minutes of combat)
+        public const float COMBAT_DURATION = 300f; // 5:00 minutes - Valorant-style rounds (was 10:00)
+        public const float SUDDEN_DEATH_DURATION = 60f; // 1:00 minute - intense finale (was 2:00)
         public const float END_PHASE_DURATION = 10f; // 10 seconds to show scoreboard
 
         // Game Mode Settings

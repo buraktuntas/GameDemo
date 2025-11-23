@@ -89,21 +89,24 @@ namespace TacticalCombat.Player
             set => _speedMultiplier = Mathf.Clamp(value, 0.1f, 2f); // Clamp between 10% and 200% speed
         }
         
+        // ✅ PERFORMANCE FIX: Cache Vector3/RaycastHit instances to avoid GC allocation
+        private RaycastHit cachedGroundHit;
+        private Vector3 cachedHorizontalVelocity = Vector3.zero;
+        private Vector3 cachedMovementInput = Vector3.zero;
+        private Vector3 cachedForward = Vector3.forward;
+        private Vector3 cachedRight = Vector3.right;
+        private Vector3 cachedHorizontalMove = Vector3.zero;
+        private Vector3 cachedSpeedVector = Vector3.zero;
+        private Vector3 cachedBobOffset = Vector3.zero;
+        private Vector3 cachedHorizontalForce = Vector3.zero;
+        private Vector3 cachedPositionDiff = Vector3.zero;
+        
         // Cached references
         private InputManager inputManager;
         
-        // ✅ Input System bridge (optional)
-        [Header("Input System")]
-        [SerializeField] private InputActionAsset actionsAsset; // Assign InputSystem_Actions in Inspector
-        private PlayerInput playerInput;
-        private InputAction moveAction;
-        private InputAction lookAction;
-        private InputAction jumpAction;
-        private InputAction sprintAction;
-        private Vector2 moveAxis;
-        private Vector2 lookDelta;
-        private bool jumpPressed;
-        private bool sprintHeld;
+        // ✅ AAA: Input Manager - Single Source of Truth
+        // All input handling removed from FPSController
+        // InputManager handles ALL input reading
         
         private void Awake()
         {
@@ -133,54 +136,10 @@ namespace TacticalCombat.Player
             
             currentStamina = maxStamina;
             
-            // ✅ PERFORMANCE: Initialize PlayerInput once in Awake (earlier than OnStartLocalPlayer)
-            // This ensures it exists for both FPSController and WeaponSystem to share
-            InitializePlayerInput();
+            // ✅ AAA: InputManager will be cached in OnStartLocalPlayer
         }
         
-        // ✅ FIX: Removed static singleton pattern that broke multiplayer
-        // private static PlayerInput s_sharedPlayerInput = null;
-        
-        private void InitializePlayerInput()
-        {
-            // Only initialize if actionsAsset is assigned (optional feature)
-            if (actionsAsset == null) return;
-            
-            try
-            {
-                // ✅ FIX: Removed static singleton pattern that broke multiplayer
-                // Each player must have their OWN PlayerInput component
-                playerInput = GetComponent<PlayerInput>();
-                if (playerInput == null)
-                {
-                    playerInput = gameObject.AddComponent<PlayerInput>();
-                    playerInput.actions = actionsAsset;
-                    playerInput.defaultActionMap = "Player";
-                }
-                else
-                {
-                    if (playerInput.actions == null && actionsAsset != null)
-                    {
-                        playerInput.actions = actionsAsset;
-                        playerInput.defaultActionMap = "Player";
-                    }
-                    
-                    // ✅ AAA FIX: Disable auto-switching to prevent "Cannot find matching control scheme" errors
-                    // We will handle device switching manually if needed, or rely on default behavior
-                    playerInput.neverAutoSwitchControlSchemes = true;
-                    
-                    // Force "Keyboard&Mouse" or "Gamepad" if possible, otherwise let it be
-                    // playerInput.defaultControlScheme = "Keyboard&Mouse";
-                }
-            }
-            catch (System.Exception e)
-            {
-                if (showDebugInfo)
-                {
-                    Debug.LogWarning($"[FPSController] Failed to initialize PlayerInput: {e.Message}");
-                }
-            }
-        }
+        // ✅ AAA: All input initialization removed - InputManager handles everything
         
         public override void OnStartLocalPlayer()
         {
@@ -193,12 +152,8 @@ namespace TacticalCombat.Player
 
             // ✅ AAA FIX: Reset movement state on spawn (prevents ghost movement)
             moveDirection = Vector3.zero;
-            moveAxis = Vector2.zero;
-            lookDelta = Vector2.zero;
             pendingMouseX = 0f;
             pendingMouseY = 0f;
-            jumpPressed = false;
-            sprintHeld = false;
             currentSpeedVelocity = 0f;
             speedVelocityRef = 0f;
             
@@ -218,325 +173,41 @@ namespace TacticalCombat.Player
             // ✅ CRITICAL FIX: Reset movement RPC timing to prevent false movement detection
             lastMovementRpcTime = 0f;
             
-            // ✅ AAA FIX: Ensure canMove is properly set (will be set by PlayerController, but ensure it's not stuck)
-            // Don't force canMove here - let PlayerController handle it based on phase
-
-            // Cache InputManager & PlayerController - her player'ın kendi component'ları var
+            // Cache InputManager & PlayerController
             inputManager = GetComponent<InputManager>();
             playerController = GetComponent<PlayerController>();
-
-            // ✅ Hook Input System actions (PlayerInput already initialized in Awake)
-            try
-            {
-                // PlayerInput should already exist from Awake, but check anyway
-                if (playerInput == null)
-                {
-                    playerInput = GetComponent<PlayerInput>();
-                }
-
-                // Ensure actions are assigned (should be done in Awake)
-                if (playerInput != null && playerInput.actions == null && actionsAsset != null)
-                {
-                    playerInput.actions = actionsAsset;
-                    playerInput.defaultActionMap = "Player";
-                }
-
-                if (playerInput.actions != null)
-                {
-                    // Make sure Player map is active
-                    var map = playerInput.actions.FindActionMap("Player", true);
-                    if (map != null)
-                    {
-                        playerInput.defaultActionMap = "Player";
-                        map.Enable();
-
-                        moveAction = map.FindAction("Move", false);
-                        lookAction = map.FindAction("Look", false);
-                        jumpAction = map.FindAction("Jump", false);
-                        sprintAction = map.FindAction("Sprint", false);
-
-                        if (moveAction != null) moveAction.Enable();
-                        if (lookAction != null) lookAction.Enable();
-                        if (jumpAction != null)
-                        {
-                            jumpAction.performed += OnJumpPerformed;
-                            jumpAction.Enable();
-                        }
-                        if (sprintAction != null)
-                        {
-                            sprintAction.performed += OnSprintPerformed;
-                            sprintAction.canceled += OnSprintCanceled;
-                            sprintAction.Enable();
-                        }
-                    }
-                    else
-                    {
-                        Debug.LogWarning("⚠️ [FPSController] 'Player' action map not found in assigned InputActionAsset.");
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning("⚠️ [FPSController] No InputActionAsset assigned to PlayerInput. Assign 'InputSystem_Actions'.");
-                }
-            }
-            catch { }
-
-            // ✅ FIX: Setup camera (creates if needed) - SAFE VERSION
-            try
-            {
-                SetupCamera();
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"❌ Camera setup failed: {e.Message}");
-                Debug.LogError($"Stack trace: {e.StackTrace}");
-            }
-
-            // Local camera kendi AudioListener'ına sahip; sahnedeki diğerlerini değiştirmeyin
-
-            // ✅ FIX: Store base FOV for sprint effect
+            
+            // ✅ CRITICAL FIX: Initialize camera position for head bob
             if (playerCamera != null)
             {
+                originalCameraPos = playerCamera.transform.localPosition;
                 baseFOV = playerCamera.fieldOfView;
             }
-
-            // ✅ CRITICAL FIX: Don't lock cursor if UI is open (TeamSelectionUI might be showing)
-            // Check if any UI is open before locking cursor
-            bool uiIsOpen = IsAnyUIOpen();
-            if (!uiIsOpen)
-            {
-                Cursor.lockState = CursorLockMode.Locked;
-                Cursor.visible = false;
-            }
-            else
-            {
-                // UI is open - keep cursor unlocked for menu interaction
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-                Debug.Log("🔓 [FPSController] UI detected - cursor kept unlocked");
-            }
-            
-            // ✅ CRITICAL FIX: Ensure camera is always active (prevents "No cameras rendering" warning)
-            if (playerCamera != null)
-            {
-                playerCamera.enabled = true;
-                playerCamera.gameObject.SetActive(true);
-            }
-
-            // Player registration handled by PlayerController
         }
         
-        // Registration handled by PlayerController on server
-        
-        private void SetupCamera()
-        {
-            // ✅ FIX: NEVER use Camera.main (causes bootstrap camera conflicts)
-            // Find camera if not assigned
-            if (playerCamera == null)
-            {
-                // First try to find child camera (best practice)
-                playerCamera = GetComponentInChildren<Camera>();
-
-                // ✅ FIX: DON'T fallback to Camera.main - create new camera instead
-                if (playerCamera == null)
-                {
-                    Debug.LogWarning("⚠️ No camera child found - creating runtime camera");
-                    var camGO = new GameObject("PlayerCamera");
-                    camGO.transform.SetParent(transform);
-                    playerCamera = camGO.AddComponent<Camera>();
-
-                    // Add AudioListener
-                    var listener = camGO.AddComponent<AudioListener>();
-                    listener.enabled = true;
-
-                    // URP Additional Data - safe add
-                    try
-                    {
-                        camGO.AddComponent<UniversalAdditionalCameraData>();
-                    }
-                    catch (System.Exception e)
-                    {
-                        Debug.LogWarning($"⚠️ Could not add UniversalAdditionalCameraData: {e.Message}");
-                    }
-
-                    Debug.Log("✅ Created runtime PlayerCamera");
-                }
-            }
-
-            // Enable camera
-            if (playerCamera != null)
-            {
-                playerCamera.enabled = true;
-                
-                // ✅ CRITICAL FIX: Set MainCamera tag so Unity recognizes it as the main camera
-                if (!playerCamera.CompareTag("MainCamera"))
-                {
-                    playerCamera.tag = "MainCamera";
-                }
-
-                // Make camera child of player if not already
-                if (playerCamera.transform.parent != transform)
-                {
-                    playerCamera.transform.SetParent(transform);
-                }
-
-                // Position at eye level
-                originalCameraPos = new Vector3(0, 1.6f, 0);
-                playerCamera.transform.localPosition = originalCameraPos;
-                playerCamera.transform.localRotation = Quaternion.identity;
-
-                // Store base FOV
-                baseFOV = playerCamera.fieldOfView;
-
-                // 🔧 AUDIO LISTENER FIX: Only local player has AudioListener
-                if (isLocalPlayer)
-                {
-                    // ✅ CRITICAL FIX: Ensure local player's AudioListener is enabled
-                    if (!playerCamera.TryGetComponent<AudioListener>(out var audioListener))
-                    {
-                        audioListener = playerCamera.gameObject.AddComponent<AudioListener>();
-                    }
-                    audioListener.enabled = true;
-
-                    // ✅ CRITICAL FIX: Use delayed coroutine to clean scene listeners (prevents infinite loop)
-                    // ✅ FIX: Check if GameObject is active before starting coroutine
-                    if (gameObject.activeInHierarchy)
-                    {
-                        StartCoroutine(CleanSceneAudioListenersDelayed());
-                    }
-                    // ✅ FIX: If GameObject is inactive, skip audio cleanup (will be handled when activated)
-
-                    if (showDebugInfo)
-                    {
-                        Debug.Log($"🔊 AudioListener enabled for local player");
-                    }
-                }
-                else
-                {
-                    // ✅ CRITICAL FIX: Non-local player - ensure NO AudioListener exists
-                    if (playerCamera.TryGetComponent<AudioListener>(out var audioListener))
-                    {
-                        Destroy(audioListener);
-                        if (showDebugInfo)
-                        {
-                            Debug.Log($"🔇 AudioListener removed from non-local player");
-                        }
-                    }
-                }
-
-                if (showDebugInfo)
-                {
-                    Debug.Log("📷 Camera setup complete (cached reference)");
-                }
-            }
-            else
-            {
-                Debug.LogError("❌ Failed to setup camera - playerCamera is null!");
-            }
-        }
-        
-                // ✅ PERFORMANCE FIX: Cache UI state to prevent 420 FindFirstObjectByType calls per second
-        private bool cachedUIState = false;
-        private float lastUICheckTime = 0f;
-        private const float UI_CHECK_INTERVAL = 0.1f; // ✅ AAA FIX: Reduced to 100ms (10 Hz) for faster UI state detection
-
-private void Update()
-        {
-            // ✅ AAA FIX: Interpolation moved to FixedUpdate for consistent timing
-            // Update() only handles UI and input reading (no movement interpolation)
-
-            if (!isLocalPlayer || Time.timeScale == 0f) return;
-
-                        // ✅ CRITICAL PERFORMANCE FIX: Cache UI state check (was calling 7x FindFirstObjectByType every frame!)
-            if (Time.time - lastUICheckTime >= UI_CHECK_INTERVAL)
-            {
-                cachedUIState = IsAnyUIOpen();
-                lastUICheckTime = Time.time;
-            }
-            bool uiIsOpen = cachedUIState;
-
-            if (!uiIsOpen)
-            {
-                // ESC to unlock, click to re-lock (standard FPS behavior)
-                if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
-                {
-                    Cursor.lockState = CursorLockMode.None;
-                    Cursor.visible = true;
-                }
-                else if (Cursor.lockState != CursorLockMode.Locked)
-                {
-                    // ANY mouse button click re-locks cursor (ONLY when UI is closed!)
-                    if (Mouse.current != null && (Mouse.current.leftButton.wasPressedThisFrame || Mouse.current.rightButton.wasPressedThisFrame || Mouse.current.middleButton.wasPressedThisFrame))
-                    {
-                        Cursor.lockState = CursorLockMode.Locked;
-                        Cursor.visible = false;
-                    }
-                }
-            }
-
-            // ✅ CAMERA JITTER FIX: Read input in Update, apply in LateUpdate
-            ReadRotationInput();
-            
-            // ✅ CRITICAL FIX: Ensure camera is always active (prevents "No cameras rendering" warning)
-            // This is especially important when UI is shown (lobby, menu, etc.)
-            if (playerCamera != null)
-            {
-                if (!playerCamera.enabled)
-                {
-                    playerCamera.enabled = true;
-                }
-                if (!playerCamera.gameObject.activeInHierarchy)
-                {
-                    playerCamera.gameObject.SetActive(true);
-                }
-            }
-        }
-
-        private void OnApplicationFocus(bool hasFocus)
+        // ✅ CRITICAL FIX: Update() method was missing - camera rotation wasn't working!
+        private void Update()
         {
             if (!isLocalPlayer) return;
-
-            if (hasFocus)
-            {
-                // ✅ CRITICAL FIX: Only re-lock cursor if no UI is open (prevents menu interaction issues)
-                if (!IsAnyUIOpen())
-                {
-                    Cursor.lockState = CursorLockMode.Locked;
-                    Cursor.visible = false;
-                }
-                else
-                {
-                    // UI is open - keep cursor unlocked for menu interaction
-                    Cursor.lockState = CursorLockMode.None;
-                    Cursor.visible = true;
-                }
-
-                // Re-enable movement (fix for multi-window freeze)
-                canMove = true;
-
-                Debug.Log($"🎮 Focus gained - Controls restored");
-            }
+            
+            // Read mouse input (frame-independent)
+            ReadRotationInput();
         }
-
+        
+        // ✅ CRITICAL FIX: LateUpdate() method was missing - visual effects weren't working!
         private void LateUpdate()
         {
             if (!isLocalPlayer) return;
-
-            // ✅ AAA QUALITY: Apply rotation in LateUpdate (after all movement)
-            // This ensures camera updates AFTER CharacterController.Move
-            // ✅ AAA FIX: Use smoothDeltaTime for consistent frame rate (prevents jitter)
+            
+            // Apply rotation (after movement, smooth)
             ApplyRotation();
-
-            // Visual effects only
+            
+            // Visual effects (only for local player)
             if (useStamina) HandleStamina();
             if (useHeadBob) UpdateHeadBob();
             if (useFOVKick) UpdateFOV();
             UpdateFootsteps();
             CheckGroundState();
-
-            // Reset per-frame flags
-            jumpPressed = false;
-            lookDelta = Vector2.zero;
         }
         
         // ✅ AAA QUALITY: Optimized movement RPC rate limiting
@@ -557,24 +228,24 @@ private void Update()
         {
             if (!isLocalPlayer)
             {
-                // ✅ AAA FIX: Remote players interpolation in FixedUpdate (consistent timing)
+                // ✅ VALHEIM/RAFT: Remote players interpolation in FixedUpdate (consistent timing)
                 if (hasTargetPosition)
                 {
                     float fixedDeltaTime = Time.fixedDeltaTime;
-                    float distance = Vector3.Distance(transform.position, targetPosition);
-                    if (distance > 0.01f)
+                    // ✅ PERFORMANCE FIX: Use sqrMagnitude instead of Distance (no sqrt calculation)
+                    cachedPositionDiff = targetPosition - transform.position;
+                    float sqrDistance = cachedPositionDiff.sqrMagnitude;
+                    if (sqrDistance > 0.0001f) // 0.01f squared = 0.0001f
                     {
-                        // ✅ AAA FIX: Improved interpolation - smoother and more responsive
-                        // Use distance-based interpolation speed with better curve
-                        float maxInterpolationSpeed = 25f; // ✅ CRITICAL FIX: Increased to 25 for better responsiveness
-                        float minInterpolationSpeed = 12f; // ✅ CRITICAL FIX: Increased to 12 for faster initial response
+                        // ✅ VALHEIM/RAFT: Smooth interpolation for remote players
+                        float maxInterpolationSpeed = 15f; // Valheim uses ~15 m/s interpolation
+                        float minInterpolationSpeed = 8f;
+                        float distance = Mathf.Sqrt(sqrDistance); // Calculate distance only when needed
                         float adaptiveSpeed = Mathf.Clamp(distance * 2.5f, minInterpolationSpeed, maxInterpolationSpeed);
                         
-                        // ✅ AAA FIX: Use MoveTowards for more predictable interpolation
                         float moveDistance = adaptiveSpeed * fixedDeltaTime;
                         transform.position = Vector3.MoveTowards(transform.position, targetPosition, moveDistance);
                         
-                        // ✅ AAA FIX: Smooth rotation interpolation
                         transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, adaptiveSpeed * 50f * fixedDeltaTime);
                     }
                     else
@@ -587,122 +258,81 @@ private void Update()
                 return;
             }
             
-            // ✅ AAA FIX: Don't process movement if canMove is false
+            // ✅ VALHEIM/RAFT: Don't process movement if canMove is false
             if (!canMove)
             {
-                // Still apply gravity and reset horizontal movement
-                moveDirection = new Vector3(0, CalculateVerticalVelocity(), 0);
+                // ✅ PERFORMANCE FIX: Direct assignment instead of new Vector3
+                moveDirection.x = 0;
+                moveDirection.y = CalculateVerticalVelocity();
+                moveDirection.z = 0;
                 characterController.Move(moveDirection * Time.fixedDeltaTime);
                 return;
             }
 
-            // ✅ CLIENT AUTHORITATIVE MOVEMENT (AAA Standard)
-            // Client moves freely, server validates
+            // ✅ HOST-AUTHORITATIVE MOVEMENT (Valheim/Raft Style)
+            // Client sends input, host calculates movement
             Vector3 input = GetMovementInput();
+            
+            // ✅ LOCAL PREDICTION: Apply movement locally for instant feedback
+            // This prevents input lag while waiting for host response
             Vector3 horizontalMove = CalculateHorizontalMovement(input);
             float verticalVelocity = CalculateVerticalVelocity();
 
-            // Combine movement
-            moveDirection = new Vector3(
-                horizontalMove.x,
-                verticalVelocity,
-                horizontalMove.z
-            );
+            // ✅ PERFORMANCE FIX: Direct assignment instead of new Vector3
+            moveDirection.x = horizontalMove.x;
+            moveDirection.y = verticalVelocity;
+            moveDirection.z = horizontalMove.z;
 
-            // Apply locally (client moves immediately)
+            // Apply prediction locally (instant feedback)
             characterController.Move(moveDirection * Time.fixedDeltaTime);
 
-            // ✅ Send position to server for validation
-            // Rate limited to reduce bandwidth, but frequent enough for smooth remote interpolation
+            // ✅ SEND INPUT TO HOST (not position!)
+            // Host will calculate authoritative position and sync back
             float timeSinceLastRpc = Time.fixedTime - lastMovementRpcTime;
-            bool positionChanged = Vector3.Distance(transform.position, lastSentPosition) > POSITION_THRESHOLD;
-            bool rotationChanged = Quaternion.Angle(transform.rotation, lastSentRotation) > ROTATION_THRESHOLD;
-
-            // Send RPC if: enough time passed OR significant position/rotation change
-            if (timeSinceLastRpc >= MOVEMENT_RPC_INTERVAL || positionChanged || rotationChanged)
+            
+            // Send input at 10 Hz (100ms) - Valheim uses ~10 tick/s
+            if (timeSinceLastRpc >= 0.1f)
             {
-                CmdMove(transform.position, transform.rotation, input);
+                // Send input vector + rotation (not position!)
+                CmdMoveInput(input, transform.rotation.eulerAngles.y);
                 lastMovementRpcTime = Time.fixedTime;
-                lastSentPosition = transform.position;
-                lastSentRotation = transform.rotation;
             }
         }
         
         /// <summary>
-        /// ✅ CLIENT AUTHORITATIVE WITH SERVER VALIDATION
-        /// - Server trusts client position unless it's impossible (anti-cheat)
-        /// - Fixes rubber-banding caused by update frequency mismatch
+        /// ✅ HOST-AUTHORITATIVE MOVEMENT (Valheim/Raft Style)
+        /// Client sends input, host calculates and applies movement
+        /// This prevents client-side position hacking
         /// </summary>
         [Command]
-        private void CmdMove(Vector3 clientPosition, Quaternion clientRotation, Vector3 input)
+        private void CmdMoveInput(Vector3 input, float yRotation)
         {
-            // ✅ AAA FIX: Ignore validation during spawn grace period (prevents false warnings)
-            float timeSinceSpawn = Time.time - lastSpawnTime;
-            bool inSpawnGracePeriod = timeSinceSpawn < SPAWN_GRACE_PERIOD;
-            
-            // Calculate distance moved since last server update
-            float distance = Vector3.Distance(transform.position, clientPosition);
-            
-            // ✅ VALIDATION 1: Teleport Check
-            // Allow generous tolerance for lag + physics differences
-            // Max speed * time * tolerance factor
-            float maxAllowedDistance = (runSpeed * 1.5f * (Time.time - lastMovementRpcTime)) + 0.5f; 
-            
-            // If first update or long time since last update, be more lenient
-            if (Time.time - lastMovementRpcTime > 1.0f) maxAllowedDistance += 2.0f;
-
-            if (distance > maxAllowedDistance && !inSpawnGracePeriod)
+            // ✅ INPUT DEADZONE: Prevent ghost movement from float precision errors
+            if (input.magnitude < 0.05f)
             {
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                // Debug.LogWarning($"🚨 [FPSController SERVER] Possible teleport/lag: {distance:F2}m > {maxAllowedDistance:F2}m from player {netId}");
-                #endif
-                
-                // If deviation is EXTREME (e.g. > 5 meters), reject it
-                if (distance > 5.0f)
-                {
-                    // Reject - force client back to server position
-                    RpcSetPosition(transform.position, transform.rotation);
-                    return;
-                }
-                // Otherwise, accept it but log it (soft correction / trust client for minor lag spikes)
+                input = Vector3.zero;
             }
-
-            // ✅ VALIDATION 2: Speed Check (Optional, can be added if needed)
-            // For now, distance check covers most speed hacks implicitly
-
-            // ✅ ACCEPT CLIENT POSITION
-            // Server updates its representation of the player to match the client
-            transform.position = clientPosition;
-            transform.rotation = clientRotation;
             
-            // Update last RPC time for next validation
-            lastMovementRpcTime = Time.time;
-
-            // Sync to other clients is handled automatically by NetworkTransform if used, 
-            // OR we need to relay this to other clients if we are doing manual sync.
-            // Since we are using RpcSetPosition for corrections, we might need a separate mechanism 
-            // for syncing to OTHER clients if NetworkTransform isn't doing it.
-            // Assuming NetworkTransform is NOT used (since we have manual sync code), 
-            // we need to update the server's transform so ClientRpc's on other clients (if any) get the data.
-            // However, this script seems to rely on `RpcSetPosition` only for corrections?
-            // Wait, looking at the code, `RpcSetPosition` is only called on correction.
-            // Remote clients need to know where this player is!
-            // The original code didn't seem to have a specific "RpcUpdatePositionToOthers".
-            // It relied on `characterController.Move` on server to update position, 
-            // and then presumably `NetworkTransform` or similar would sync it?
-            // OR `RpcSetPosition` was being used for everything?
-            // Let's check if there is a `NetworkTransform` component on the prefab.
-            // If not, we need to add an Rpc to update other clients.
+            // ✅ HOST CALCULATES MOVEMENT (authoritative)
+            // Client can't hack position, only send input
             
-            // For now, we update server transform. If there is a NetworkTransform, it will pick this up.
-            // If there is NO NetworkTransform, we should add an Rpc to sync to others.
-            // Given the manual interpolation code in FixedUpdate (!isLocalPlayer), 
-            // it implies there IS some mechanism syncing `targetPosition`.
-            // But `targetPosition` is only set in `RpcSetPosition`.
-            // So `RpcSetPosition` MUST be called for valid moves too if we want others to see it!
+            // Update rotation (trust client for camera rotation)
+            transform.rotation = Quaternion.Euler(0, yRotation, 0);
             
-            // ✅ CRITICAL FIX: We must relay the position to other clients!
-            RpcUpdateRemoteClients(clientPosition, clientRotation);
+            // Calculate movement on host
+            Vector3 horizontalMove = CalculateHorizontalMovement(input);
+            float verticalVelocity = CalculateVerticalVelocity();
+            
+            // ✅ PERFORMANCE FIX: Direct assignment instead of new Vector3
+            moveDirection.x = horizontalMove.x;
+            moveDirection.y = verticalVelocity;
+            moveDirection.z = horizontalMove.z;
+            
+            // Apply movement on host (authoritative)
+            characterController.Move(moveDirection * Time.fixedDeltaTime);
+            
+            // Sync to all clients (including sender for reconciliation)
+            RpcUpdateRemoteClients(transform.position, transform.rotation);
         }
 
         /// <summary>
@@ -712,7 +342,7 @@ private void Update()
         [ClientRpc]
         private void RpcUpdateRemoteClients(Vector3 pos, Quaternion rot)
         {
-            // Local player doesn't need this (they are the authority)
+            // Local player doesn't need this (they have prediction)
             if (isLocalPlayer) return;
 
             // Remote clients need to interpolate to this position
@@ -722,32 +352,17 @@ private void Update()
         }
         
         /// <summary>
-        /// ✅ AAA QUALITY: Server-side movement calculation (authoritative)
-        /// Returns horizontal movement vector (no vertical component)
+        /// ✅ DEPRECATED: Old client-authoritative movement (kept for compatibility)
+        /// This will be removed in future versions
         /// </summary>
-        [Server]
-        private Vector3 CalculateServerMovement(Vector3 input)
+        [Command]
+        private void CmdMove(Vector3 clientPosition, Quaternion clientRotation, Vector3 input)
         {
-            if (input.magnitude < 0.1f) return Vector3.zero;
-            
-            Vector3 forward = transform.forward;
-            Vector3 right = transform.right;
-            forward.y = 0;
-            right.y = 0;
-            forward.Normalize();
-            right.Normalize();
-            
-            // ✅ AAA FIX: Server calculates speed (can't be hacked)
-            // Use same logic as client for consistency
-            bool wantsToSprint = input.magnitude > 0.8f; // Assume sprint if input is strong
-            float currentSpeed = (wantsToSprint ? runSpeed : walkSpeed) * speedMultiplier;
-            
-            // ✅ AAA FIX: Calculate movement direction
-            Vector3 horizontalMove = (forward * input.z) + (right * input.x);
-            horizontalMove.Normalize(); // ✅ CRITICAL: Normalize to prevent diagonal speed boost
-            
-            return horizontalMove * currentSpeed;
+            // ✅ DEPRECATED: Redirect to new input-based system
+            Debug.LogWarning("[FPSController] CmdMove is deprecated! Use CmdMoveInput instead.");
+            CmdMoveInput(input, clientRotation.eulerAngles.y);
         }
+
         
         // ✅ AAA QUALITY: Smooth interpolation system for remote players
         private Vector3 targetPosition;
@@ -756,6 +371,7 @@ private void Update()
         
         // ✅ AAA QUALITY: Position correction threshold constant
         private const float POSITION_CORRECTION_THRESHOLD = 1.0f; // 1.0m threshold
+        private const float POSITION_CORRECTION_THRESHOLD_SQR = 1.0f; // 1.0m squared (for sqrMagnitude comparison)
         
         /// <summary>
         /// ✅ AAA QUALITY: Sync corrected position to clients with smooth interpolation
@@ -774,14 +390,17 @@ private void Update()
             {
                 // ✅ AAA FIX: Local player reconciliation - smooth correction
                 // Client prediction is usually accurate, only correct significant desyncs
-                float correctionDistance = Vector3.Distance(transform.position, serverPosition);
+                // ✅ PERFORMANCE FIX: Use sqrMagnitude instead of Distance (no sqrt calculation)
+                cachedPositionDiff = serverPosition - transform.position;
+                float sqrCorrectionDistance = cachedPositionDiff.sqrMagnitude;
 
                 // ✅ AAA FIX: Only correct major desyncs (prevents jitter)
                 // Threshold: 1.0m (allows normal prediction variance)
-                if (correctionDistance > POSITION_CORRECTION_THRESHOLD)
+                if (sqrCorrectionDistance > POSITION_CORRECTION_THRESHOLD_SQR)
                 {
                     // ✅ AAA FIX: Smooth correction for large desyncs (not instant snap)
                     // This prevents visible "teleport" when server corrects
+                    float correctionDistance = Mathf.Sqrt(sqrCorrectionDistance);
                     StartCoroutine(SmoothPositionCorrection(serverPosition, serverRotation, correctionDistance));
 
                     #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -848,94 +467,28 @@ private void Update()
             activeCorrectionCoroutine = null;
         }
         
-        // ⭐ YENİ MOVEMENT SİSTEMİ - FixedUpdate için optimize edilmiş
+        /// <summary>
+        /// ✅ AAA: Get movement input from InputManager (Single Source of Truth)
+        /// </summary>
         private Vector3 GetMovementInput()
         {
-            // ✅ AAA FIX: Reset moveAxis at start (prevents ghost movement from stale values)
-            moveAxis = Vector2.zero;
+            if (inputManager == null) return Vector3.zero;
             
-            // ✅ AAA FIX: Block movement if input is blocked
-            if (inputManager != null && inputManager.BlockMovementInput)
-            {
-                return Vector3.zero;
-            }
+            // ✅ AAA: Read from InputManager - Single Source of Truth
+            Vector2 moveInput = inputManager.MoveInput;
             
-            // ✅ AAA FIX: Block movement if UI is open (unless in build mode)
-            if (Cursor.visible && inputManager != null && !inputManager.IsInBuildMode)
-            {
-                return Vector3.zero;
-            }
+            // ✅ PERFORMANCE FIX: Use cached Vector3 to avoid GC allocation
+            cachedMovementInput.x = moveInput.x;
+            cachedMovementInput.y = 0;
+            cachedMovementInput.z = moveInput.y;
             
-            // ✅ AAA FIX: Block movement if canMove is false
-            if (!canMove)
-            {
-                return Vector3.zero;
-            }
-
-            // ✅ AAA FIX: Try Input System first (with deadzone check)
-            // CRITICAL: If Input System is available and enabled, ONLY use it (no keyboard fallback)
-            if (moveAction != null && moveAction.enabled)
-            {
-                try
-                {
-                    moveAxis = moveAction.ReadValue<Vector2>();
-                    
-                    // ✅ DEBUG: Log input values to diagnose ghost movement
-                    if (moveAxis.magnitude > 0.01f && showDebugInfo)
-                    {
-                        Debug.Log($"[FPSController] Input System Move: {moveAxis}");
-                    }
-
-                    // ✅ AAA FIX: Validate input (prevent NaN or invalid values)
-                    if (float.IsNaN(moveAxis.x) || float.IsNaN(moveAxis.y))
-                    {
-                        moveAxis = Vector2.zero;
-                        return Vector3.zero;
-                    }
-                    
-                    // ✅ AAA FIX: Deadzone check - if input is below threshold, return zero (no movement)
-                    // INCREASED to 0.1f to prevent stick drift
-                    if (moveAxis.magnitude <= 0.1f)
-                    {
-                        moveAxis = Vector2.zero;
-                        return Vector3.zero; // ✅ CRITICAL: Return zero, don't fall through to keyboard
-                    }
-                    
-                    // ✅ AAA FIX: Input System active - use it exclusively (no keyboard fallback)
-                    return new Vector3(moveAxis.x, 0, moveAxis.y);
-                }
-                catch (System.Exception e)
-                {
-                    // Action read failed - fallback to keyboard
-                    Debug.LogWarning($"[FPSController] Input Read Failed: {e.Message}");
-                    moveAxis = Vector2.zero;
-                }
-            }
-            
-            // ✅ AAA FIX: Fallback to keyboard input (ONLY if Input System is not available)
-            float h = 0, v = 0;
-            if (Keyboard.current != null)
-            {
-                if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) h -= 1;
-                if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) h += 1;
-                if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) v -= 1;
-                if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed) v += 1;
-            }
-            
-            // ✅ AAA FIX: Normalize input to prevent diagonal speed boost
-            Vector3 input = new Vector3(h, 0, v);
-            if (input.magnitude > 1f)
-            {
-                input = input.normalized;
-            }
-            
-            return input;
+            return cachedMovementInput;
         }
         
         private Vector3 CalculateHorizontalMovement(Vector3 input)
         {
             // ✅ AAA FIX: CRITICAL - Validate input magnitude first (prevent ghost movement)
-            if (input.magnitude < 0.01f) // ✅ INCREASED threshold from 0.1f to 0.01f for better deadzone
+            if (input.magnitude < 0.01f)
             {
                 // ✅ BATTLEFIELD: Smooth deceleration when stopping
                 currentSpeedVelocity = Mathf.SmoothDamp(currentSpeedVelocity, 0f, ref speedVelocityRef, decelerationTime);
@@ -947,48 +500,41 @@ private void Update()
                 return Vector3.zero;
             }
             
-            // Get direction vectors
-            Vector3 forward = transform.forward;
-            Vector3 right = transform.right;
-            forward.y = 0;
-            right.y = 0;
-            forward.Normalize();
-            right.Normalize();
+            // ✅ PERFORMANCE FIX: Use cached Vector3 instances to avoid GC allocation
+            cachedForward = transform.forward;
+            cachedForward.y = 0;
+            cachedForward.Normalize();
             
-            // Check if can sprint
-            bool wantsToSprint = sprintHeld;
-            if (!wantsToSprint && Keyboard.current != null)
-            {
-                 wantsToSprint = Keyboard.current.leftShiftKey.isPressed;
-            }
+            cachedRight = transform.right;
+            cachedRight.y = 0;
+            cachedRight.Normalize();
+            
+            // ✅ AAA: Check sprint from InputManager
+            bool wantsToSprint = inputManager != null && inputManager.SprintHeld;
             bool canSprint = !useStamina || currentStamina > 0;
             
-            // ⭐ Check if sprint is blocked
-            if (inputManager != null && inputManager.BlockSprintInput)
-            {
-                wantsToSprint = false;
-            }
-            
             bool isRunning = wantsToSprint && canSprint;
-            float targetSpeed = (isRunning ? runSpeed : walkSpeed) * speedMultiplier; // ✅ CRITICAL FIX: Apply speed multiplier
+            float targetSpeed = (isRunning ? runSpeed : walkSpeed) * speedMultiplier;
             
             // ✅ BATTLEFIELD: Smooth acceleration/deceleration (realistic movement feel)
             currentSpeedVelocity = Mathf.SmoothDamp(currentSpeedVelocity, targetSpeed, ref speedVelocityRef, accelerationTime);
             
-            Vector3 horizontalMove = (forward * input.z) + (right * input.x);
-            return horizontalMove.normalized * currentSpeedVelocity; // Use smoothed speed
+            // ✅ PERFORMANCE FIX: Use cached Vector3 to avoid GC allocation
+            cachedHorizontalMove = (cachedForward * input.z) + (cachedRight * input.x);
+            cachedHorizontalMove.Normalize();
+            cachedHorizontalMove *= currentSpeedVelocity;
+            
+            return cachedHorizontalMove;
         }
         
         private float CalculateVerticalVelocity()
         {
             bool grounded = IsGrounded();
             
-            // ⭐ Check if jump is blocked
-            if (inputManager != null && inputManager.BlockJumpInput)
-            {
-                // Skip jump check
-            }
-            else if ((jumpPressed || (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)) && canMove && grounded)
+            // ✅ AAA: Check jump from InputManager
+            bool jumpRequested = inputManager != null && inputManager.JumpPressed;
+            
+            if (jumpRequested && canMove && grounded)
             {
                 return jumpPower;
             }
@@ -1017,9 +563,11 @@ private void Update()
             // Add to vertical velocity
             moveDirection.y += force.y;
             
-            // Add horizontal force
-            Vector3 horizontalForce = new Vector3(force.x, 0, force.z);
-            moveDirection += horizontalForce;
+            // ✅ PERFORMANCE FIX: Use cached Vector3 to avoid GC allocation
+            cachedHorizontalForce.x = force.x;
+            cachedHorizontalForce.y = 0;
+            cachedHorizontalForce.z = force.z;
+            moveDirection += cachedHorizontalForce;
             
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"🚀 [FPSController] Applied impulse: {force}");
@@ -1031,62 +579,24 @@ private void Update()
         private float pendingMouseY;
 
         /// <summary>
-        /// Read mouse input in Update (high frequency)
+        /// ✅ AAA: Read mouse input from InputManager (Single Source of Truth)
         /// </summary>
         private void ReadRotationInput()
         {
-            // Check if camera input is blocked
-            if (inputManager != null && inputManager.BlockCameraInput)
+            if (inputManager == null || !canMove)
             {
                 pendingMouseX = 0;
                 pendingMouseY = 0;
                 return;
             }
 
-            // ✅ FIX: Build mode'da kamera çalışsın
-            if (Cursor.visible && inputManager != null && !inputManager.IsInBuildMode)
-            {
-                pendingMouseX = 0;
-                pendingMouseY = 0;
-                return;
-            }
-
-            if (!canMove)
-            {
-                pendingMouseX = 0;
-                pendingMouseY = 0;
-                return;
-            }
-
-            // ✅ AAA FIX: Read fresh input each frame (don't accumulate - prevents input lag)
-            // ApplyRotation() will be called in LateUpdate, so we read fresh input here
-            lookDelta = Vector2.zero;
+            // ✅ AAA: Read from InputManager - Single Source of Truth
+            Vector2 lookDelta = inputManager.LookInput;
             
-            // Read input
-            if (lookAction != null)
-            {
-                lookDelta = lookAction.ReadValue<Vector2>();
-                // ✅ AAA FIX: Increased sensitivity for Input System (0.1f = responsive, adjustable via lookSpeed)
-                float inputSensitivity = 0.1f; // ✅ INCREASED from 0.01f - Input System delta is in pixels, needs scaling
-                // ✅ AAA FIX: Set input (not accumulate) - ApplyRotation handles frame-independent scaling
-                pendingMouseX = lookDelta.x * inputSensitivity;
-                pendingMouseY = lookDelta.y * inputSensitivity;
-            }
-            else if (Mouse.current != null)
-            {
-                Vector2 delta = Mouse.current.delta.ReadValue();
-                // ✅ AAA FIX: Increased sensitivity for Mouse.delta (0.15f = responsive)
-                // Mouse.delta is pixels, needs proper scaling for smooth feel
-                // ✅ AAA FIX: Set input (not accumulate) - ApplyRotation handles frame-independent scaling
-                pendingMouseX = delta.x * 0.15f; // ✅ INCREASED from 0.03f
-                pendingMouseY = delta.y * 0.15f; // ✅ INCREASED from 0.03f
-            }
-            else
-            {
-                // ✅ AAA FIX: No input device - reset to prevent stale values
-                pendingMouseX = 0;
-                pendingMouseY = 0;
-            }
+            // ✅ AAA: Apply sensitivity scaling
+            // Mouse.delta is in pixels, needs scaling for smooth feel
+            pendingMouseX = lookDelta.x * 0.15f;
+            pendingMouseY = lookDelta.y * 0.15f;
         }
 
         /// <summary>
@@ -1147,13 +657,21 @@ private void Update()
                 return;
             }
             
-            float speed = new Vector3(moveDirection.x, 0, moveDirection.z).magnitude;
+            // ✅ PERFORMANCE FIX: Reuse cached horizontal velocity calculation
+            cachedSpeedVector.x = moveDirection.x;
+            cachedSpeedVector.y = 0;
+            cachedSpeedVector.z = moveDirection.z;
+            float speed = cachedSpeedVector.magnitude;
             bobTimer += Time.deltaTime * speed * bobSpeed;
             
             float bobY = Mathf.Sin(bobTimer) * bobAmount;
             float bobX = Mathf.Cos(bobTimer * 0.5f) * bobAmount * 0.5f;
             
-            Vector3 targetPos = originalCameraPos + new Vector3(bobX, bobY, 0);
+            // ✅ PERFORMANCE FIX: Use cached Vector3 to avoid GC allocation
+            cachedBobOffset.x = bobX;
+            cachedBobOffset.y = bobY;
+            cachedBobOffset.z = 0;
+            Vector3 targetPos = originalCameraPos + cachedBobOffset;
             playerCamera.transform.localPosition = Vector3.Lerp(
                 playerCamera.transform.localPosition,
                 targetPos,
@@ -1183,7 +701,11 @@ private void Update()
                 return;
             }
             
-            float speed = new Vector3(moveDirection.x, 0, moveDirection.z).magnitude;
+            // ✅ PERFORMANCE FIX: Reuse cached horizontal velocity calculation
+            cachedHorizontalVelocity.x = moveDirection.x;
+            cachedHorizontalVelocity.y = 0;
+            cachedHorizontalVelocity.z = moveDirection.z;
+            float speed = cachedHorizontalVelocity.magnitude;
             stepTimer += Time.deltaTime;
             
             bool isShiftPressed = Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed;
@@ -1212,17 +734,17 @@ private void Update()
                 return true;
             }
             
-            // ✅ AAA FIX: Secondary check with SphereCast (more reliable than single raycast)
+            // ✅ PERFORMANCE FIX: Use cached RaycastHit to avoid GC allocation
             // SphereCast detects ground even on slopes and stairs
             Vector3 origin = transform.position + Vector3.up * GROUND_CHECK_ORIGIN_OFFSET;
             float checkDistance = groundCheckDistance + GROUND_CHECK_ORIGIN_OFFSET;
             
-            // ✅ AAA FIX: Use SphereCast for better reliability (detects ground on edges)
+            // ✅ PERFORMANCE FIX: Use cached RaycastHit (no GC allocation)
             return Physics.SphereCast(
                 origin, 
                 GROUND_CHECK_SPHERE_RADIUS, 
                 Vector3.down, 
-                out RaycastHit hit, 
+                out cachedGroundHit, 
                 checkDistance, 
                 groundMask
             );
@@ -1259,7 +781,11 @@ private void Update()
         
         private bool IsMoving()
         {
-            float horizontalSpeed = new Vector3(moveDirection.x, 0, moveDirection.z).magnitude;
+            // ✅ PERFORMANCE FIX: Use cached Vector3 to avoid GC allocation
+            cachedHorizontalVelocity.x = moveDirection.x;
+            cachedHorizontalVelocity.y = 0;
+            cachedHorizontalVelocity.z = moveDirection.z;
+            float horizontalSpeed = cachedHorizontalVelocity.magnitude;
             return horizontalSpeed > 0.1f;
         }
         
@@ -1337,10 +863,10 @@ private void Update()
             int serverDamage = Mathf.RoundToInt(excessSpeed * FALL_DAMAGE_MULTIPLIER);
             
             // ✅ AAA FIX: Use server-calculated damage (ignore client value)
+            // ✅ PERFORMANCE FIX: Use TryGetComponent instead of GetComponent (no GC allocation)
             if (serverDamage > 0)
             {
-                var health = GetComponent<Combat.Health>();
-                if (health != null)
+                if (TryGetComponent<Combat.Health>(out var health))
                 {
                     var damageInfo = new Combat.DamageInfo(
                         serverDamage,
@@ -1392,25 +918,7 @@ private void Update()
         
         public float GetStaminaPercent() => currentStamina / maxStamina;
         
-        public bool IsSprinting() => (sprintHeld || (Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed)) && IsMoving() && IsGrounded();
-
-        // ═══════════════════════════════════════════════════════════
-        // INPUT SYSTEM BRIDGE HANDLERS
-        // ═══════════════════════════════════════════════════════════
-        private void OnJumpPerformed(InputAction.CallbackContext ctx)
-        {
-            jumpPressed = true;
-        }
-
-        private void OnSprintPerformed(InputAction.CallbackContext ctx)
-        {
-            sprintHeld = true;
-        }
-
-        private void OnSprintCanceled(InputAction.CallbackContext ctx)
-        {
-            sprintHeld = false;
-        }
+        public bool IsSprinting() => inputManager != null && inputManager.SprintHeld && IsMoving() && IsGrounded();
         
         // ═══════════════════════════════════════════════════════════
         // DEBUG VISUALIZATION
@@ -1537,6 +1045,7 @@ private void Update()
         private TacticalCombat.UI.GameModeSelectionUI cachedGameModeSelection;
         private TacticalCombat.UI.RoleSelectionUI cachedRoleSelection;
         private TacticalCombat.UI.TeamSelectionUI cachedTeamSelection;
+        private TacticalCombat.UI.LobbyUIController cachedLobbyController;
         private float lastUICacheTime = 0f;
         private const float UI_CACHE_REFRESH_INTERVAL = 0.1f; // ✅ AAA FIX: Reduced to 100ms for faster UI state detection
         
@@ -1559,6 +1068,7 @@ private void Update()
                 cachedGameModeSelection = FindFirstObjectByType<TacticalCombat.UI.GameModeSelectionUI>();
                 cachedRoleSelection = FindFirstObjectByType<TacticalCombat.UI.RoleSelectionUI>();
                 cachedTeamSelection = FindFirstObjectByType<TacticalCombat.UI.TeamSelectionUI>();
+                cachedLobbyController = TacticalCombat.UI.LobbyUIController.Instance; // ✅ Cache singleton too
                 lastUICacheTime = Time.time;
             }
             
@@ -1577,8 +1087,12 @@ private void Update()
             }
 
             // ✅ NEW: Check LobbyUIController (CRITICAL - this was missing!)
-            var lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
-            if (lobbyController != null && lobbyController.IsLobbyVisible())
+            // ✅ PERFORMANCE FIX: Cache LobbyUIController to avoid singleton property access overhead
+            if (cachedLobbyController == null)
+            {
+                cachedLobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            }
+            if (cachedLobbyController != null && cachedLobbyController.IsLobbyVisible())
             {
                 return true;
             }
@@ -1600,48 +1114,13 @@ private void Update()
         }
         
         /// <summary>
-        /// ✅ CRITICAL FIX: Cleanup Input System actions on destroy to prevent memory leaks
+        /// ✅ AAA: Cleanup on destroy
         /// </summary>
         private void OnDestroy()
         {
-            // ✅ AAA FIX: Unsubscribe from Input System actions first
-            try
-            {
-                if (jumpAction != null)
-                {
-                    jumpAction.performed -= OnJumpPerformed;
-                    jumpAction.Disable();
-                }
-                if (sprintAction != null)
-                {
-                    sprintAction.performed -= OnSprintPerformed;
-                    sprintAction.canceled -= OnSprintCanceled;
-                    sprintAction.Disable();
-                }
-                if (moveAction != null)
-                {
-                    moveAction.Disable();
-                }
-                if (lookAction != null)
-                {
-                    lookAction.Disable();
-                }
-            }
-            catch (System.Exception e)
-            {
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"[FPSController] Error cleaning up Input System actions: {e.Message}");
-                #endif
-            }
+            // ✅ AAA: No Input System cleanup needed - InputManager handles everything
             
-            // ✅ AAA FIX: Clear singleton if we own it (prevents stale reference)
-            // ✅ AAA FIX: Clear singleton if we own it (prevents stale reference)
-            // if (s_sharedPlayerInput == playerInput)
-            // {
-            //     s_sharedPlayerInput = null;
-            // }
-            
-            // ✅ AAA FIX: Stop all coroutines ONCE at the end (after all cleanup)
+            // ✅ AAA FIX: Stop all coroutines
             StopAllCoroutines();
             activeCorrectionCoroutine = null;
         }

@@ -35,9 +35,9 @@ namespace TacticalCombat.Combat
         private WeaponVFXController vfxController;
         
         [Header("📊 WEAPON STATE")]
-        // ✅ CRITICAL FIX: Ammo must be server-authoritative (SyncVar)
-        [SyncVar] private int currentAmmo;
-        [SyncVar] private int reserveAmmo;
+        // ✅ NETWORK OPTIMIZATION: Use SyncVar hooks instead of explicit RPCs
+        [SyncVar(hook = nameof(OnAmmoChanged_Hook))] private int currentAmmo;
+        [SyncVar(hook = nameof(OnReserveAmmoChanged_Hook))] private int reserveAmmo;
         private bool isReloading;
 
         // ✅ PHASE 2: nextFireTime server-only (client can't hack it)
@@ -45,7 +45,7 @@ namespace TacticalCombat.Combat
         private float nextFireTime;
         private float recoilAmount;
         
-        // ✅ CRITICAL FIX: Deterministic spread seed
+        // ✅ NETWORK OPTIMIZATION: Spread seed syncs automatically via SyncVar
         [SyncVar] private int spreadSeed = 0;
 
         // ✅ FIX: Track coroutines to prevent memory leaks
@@ -55,18 +55,8 @@ namespace TacticalCombat.Combat
         private Quaternion originalWeaponRot;
         private bool isAiming;
         
-        [Header("Input System")]
-        [SerializeField] private InputActionAsset actionsAsset; // Assign InputSystem_Actions in Inspector
-        
-        // ✅ Input System bridge (optional)
-        private PlayerInput playerInput;
-        private InputAction fireAction;
-        private InputAction reloadAction;
-        private InputAction aimAction;
-        private bool fireHeld;
-        private bool firePressed;
-        private bool reloadPressed;
-        private bool aimHeld;
+        // ✅ AAA: Input handled by InputManager (Single Source of Truth)
+        // All input code removed - WeaponSystem reads from InputManager
         
         // ✅ FIX: Audio debug flag
         [Header("🐛 DEBUG")]
@@ -132,9 +122,7 @@ namespace TacticalCombat.Combat
                 weaponAnimator = weaponHolder.GetComponent<Animator>();
             }
             
-            // ✅ PERFORMANCE: Initialize PlayerInput once in Awake (shared with FPSController)
-            // This avoids runtime AddComponent calls in OnEnable/OnStartLocalPlayer
-            InitializePlayerInput();
+            // ✅ AAA: InputManager will be cached in Start()
             
             // ✅ CRITICAL FIX: Initialize original weapon position and rotation to prevent NaN errors
             if (weaponHolder != null)
@@ -151,55 +139,7 @@ namespace TacticalCombat.Combat
         }
 
 
-        
-        // ✅ AAA QUALITY: Use same singleton pattern as FPSController (prevents conflicts)
-        // Note: FPSController's static s_sharedPlayerInput is used, but we can't access it directly
-        // So we use GetComponent to find existing PlayerInput
-        
-        private void InitializePlayerInput()
-        {
-            // Only initialize if actionsAsset is assigned (optional feature)
-            if (actionsAsset == null) return;
-            
-            try
-            {
-                // ✅ AAA FIX: Check if PlayerInput already exists (FPSController may have created it)
-                playerInput = GetComponent<PlayerInput>();
-                if (playerInput == null)
-                {
-                    // FPSController should have created it, but if not, create it here
-                    playerInput = gameObject.AddComponent<PlayerInput>();
-                    playerInput.actions = actionsAsset;
-                    playerInput.defaultActionMap = "Player";
-                    
-                    if (debugInputs)
-                    {
-                        Debug.Log("[WeaponSystem] PlayerInput initialized in Awake (FPSController didn't create it)");
-                    }
-                }
-                else
-                {
-                    // PlayerInput exists (likely created by FPSController) - just ensure actions are assigned
-                    if (playerInput.actions == null && actionsAsset != null)
-                    {
-                        playerInput.actions = actionsAsset;
-                        playerInput.defaultActionMap = "Player";
-                    }
-                    
-                    if (debugInputs)
-                    {
-                        Debug.Log("[WeaponSystem] PlayerInput found (shared with FPSController)");
-                    }
-                }
-            }
-            catch (System.Exception e)
-            {
-                if (debugInputs)
-                {
-                    Debug.LogWarning($"[WeaponSystem] Failed to initialize PlayerInput: {e.Message}");
-                }
-            }
-        }
+
         
 
         
@@ -287,59 +227,7 @@ namespace TacticalCombat.Combat
             }
         }
 
-        private void OnEnable()
-        {
-            // ✅ Hook Input System actions (PlayerInput already initialized in Awake)
-            try
-            {
-                // PlayerInput should already exist from Awake, but check anyway
-                if (playerInput == null)
-                {
-                    playerInput = GetComponent<PlayerInput>();
-                }
-
-                // Ensure actions are assigned (should be done in Awake)
-                if (playerInput != null && playerInput.actions == null && actionsAsset != null)
-                {
-                    playerInput.actions = actionsAsset;
-                    playerInput.defaultActionMap = "Player";
-                }
-
-                if (playerInput.actions != null)
-                {
-                    var map = playerInput.actions.FindActionMap("Player", true);
-                    if (map != null)
-                    {
-                        playerInput.defaultActionMap = "Player";
-                        map.Enable();
-
-                        // Map to existing actions in InputSystem_Actions: Attack/Reload/Aim
-                        fireAction = map.FindAction("Attack", false);
-                        reloadAction = map.FindAction("Reload", false);
-                        aimAction = map.FindAction("Aim", false);
-
-                        if (fireAction != null)
-                        {
-                            fireAction.performed += OnFirePerformed;
-                            fireAction.canceled += OnFireCanceled;
-                            fireAction.Enable();
-                        }
-                        if (reloadAction != null)
-                        {
-                            reloadAction.performed += OnReloadPerformed;
-                            reloadAction.Enable();
-                        }
-                        if (aimAction != null)
-                        {
-                            aimAction.performed += OnAimPerformed;
-                            aimAction.canceled += OnAimCanceled;
-                            aimAction.Enable();
-                        }
-                    }
-                }
-            }
-            catch { /* Input System not present or not configured */ }
-        }
+        // ✅ AAA: No OnEnable needed - InputManager handles all input
         
         // ✅ PERFORMANCE FIX: Throttle component checks
         private float lastComponentCheckTime;
@@ -384,108 +272,65 @@ namespace TacticalCombat.Combat
             UpdateRecoil();
         }
         
+        /// <summary>
+        /// ✅ AAA: Handle weapon input from InputManager (Single Source of Truth)
+        /// </summary>
         private void HandleInput()
         {
-            // ✅ CRITICAL FIX: Block all input if in build mode OR if BlockShootInput is active
-            if (inputManager == null) return;
+            if (inputManager == null || currentWeapon == null) return;
 
-            // ✅ CRITICAL: Block weapon input in build mode OR if BlockShootInput is true
+            // ✅ CRITICAL: Block weapon input in build mode
             if (inputManager.IsInBuildMode || inputManager.BlockShootInput)
             {
-                return; // Don't process any weapon input
+                return;
             }
 
-            // ✅ CRITICAL: Double-check phase - don't fire in Build or Lobby phase
+            // ✅ CRITICAL: Don't fire in Build or Lobby phase
             if (MatchManager.Instance != null)
             {
                 Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
                 if (currentPhase == Phase.Build || currentPhase == Phase.Lobby)
                 {
-                    return; // Don't process weapon input in Build/Lobby
+                    return;
                 }
             }
 
-            // Fire - ✅ FIX: Separate auto and semi-auto to prevent stuck shooting
-            if (currentWeapon != null)
+            // ✅ AAA: Read from InputManager - Single Source of Truth
+            bool fireInput = inputManager.FirePressed;
+            bool fireHeld = inputManager.FireHeld;
+            bool reloadInput = inputManager.ReloadPressed;
+
+            // Fire handling
+            if (currentWeapon.fireMode == FireMode.Auto)
             {
-            // ✅ CRITICAL FIX: Use Input System if available, fallback to Legacy Input
-            // Check if Input System is working (fireHeld/firePressed set by callbacks)
-            // If Input System callbacks aren't working, use Legacy Input as fallback
-            bool fireHeldInput = fireHeld;
-            bool firePressedInput = firePressed;
-            
-            // ✅ FIX: Fallback to Legacy Input if Input System isn't working
-            // Check if Input System is properly initialized (playerInput != null and fireAction != null)
-            // If not, use Legacy Input as fallback to prevent "can't fire" bug
-            if (playerInput == null || fireAction == null)
-            {
-                // Input System not initialized - use Legacy Input
-                if (Mouse.current != null)
+                // Auto mode: Hold to fire continuously
+                if (fireHeld && CanFire())
                 {
-                    fireHeldInput = Mouse.current.leftButton.isPressed;
-                    firePressedInput = Mouse.current.leftButton.wasPressedThisFrame;
+                    Fire();
+                }
+                else if (fireHeld && currentAmmo <= 0 && Time.frameCount % 30 == 0)
+                {
+                    audioController?.PlayEmptySound();
                 }
             }
-            // If Input System is initialized but callbacks aren't working, also use Legacy Input
-            else if (!fireHeldInput && !firePressedInput)
+            else
             {
-                // Input System callbacks might not be working - use Legacy Input as fallback
-                if (Mouse.current != null)
+                // Semi-auto/Burst: Press to fire once
+                if (fireInput && CanFire())
                 {
-                    fireHeldInput = Mouse.current.leftButton.isPressed;
-                    firePressedInput = Mouse.current.leftButton.wasPressedThisFrame;
+                    Fire();
+                }
+                else if (fireInput && currentAmmo <= 0)
+                {
+                    audioController?.PlayEmptySound();
                 }
             }
 
-                if (currentWeapon.fireMode == FireMode.Auto)
-                {
-                    // Auto mode: Hold to fire continuously
-                    if (fireHeldInput && CanFire())
-                    {
-                        Fire();
-                    }
-                    else if (fireHeldInput && currentAmmo <= 0 && Time.frameCount % 30 == 0)
-                    {
-                        // Empty gun sound (throttled)
-                        audioController?.PlayEmptySound();
-                    }
-                }
-                else
-                {
-                    // Semi-auto/Burst: Press to fire once
-                    if (firePressedInput && CanFire())
-                    {
-                        Fire();
-                    }
-                    else if (firePressedInput && currentAmmo <= 0)
-                    {
-                        audioController?.PlayEmptySound();
-                    }
-                }
-            }
-            
-            // ✅ CRITICAL FIX: Reload must go through server
-            bool reloadInput = reloadPressed;
-            if (!reloadInput && Keyboard.current != null)
-            {
-                reloadInput = Keyboard.current.rKey.wasPressedThisFrame;
-            }
-
+            // Reload handling
             if (reloadInput && CanReload())
             {
                 CmdStartReload();
-                reloadPressed = false;
             }
-            
-            // Aim (optional)
-            isAiming = aimHeld;
-            if (!isAiming && Mouse.current != null)
-            {
-                isAiming = Mouse.current.rightButton.isPressed;
-            }
-
-            // Reset one-shot press
-            firePressed = false;
         }
         
         /// <summary>
@@ -581,19 +426,15 @@ namespace TacticalCombat.Combat
                 return;
             }
             
-            // ✅ CRITICAL FIX: Generate deterministic spread seed FIRST
-            // This ensures client and server use same seed for same shot
+            // ✅ NETWORK OPTIMIZATION: Generate deterministic spread seed
+            // SyncVar will automatically sync to clients (no explicit RPC needed)
             spreadSeed = Random.Range(0, int.MaxValue);
 
             // Update timers
             nextFireTime = Time.time + (1f / currentWeapon.fireRate);
 
-            // ✅ CRITICAL FIX: Server modifies ammo (authoritative)
+            // ✅ NETWORK OPTIMIZATION: Server modifies ammo (SyncVar hook will notify clients)
             currentAmmo--;
-
-            // ✅ CRITICAL FIX: Send seed to clients BEFORE doing server raycast
-            // This ensures clients can use correct seed for hit validation/prediction
-            RpcSyncSpreadSeed(spreadSeed);
 
             // ✅ NETWORK STABILITY: Calculate lag compensation
             float serverTime = (float)NetworkTime.time;
@@ -641,12 +482,11 @@ namespace TacticalCombat.Combat
             
             RpcPlayFireEffects(muzzlePos, muzzleDir);
             
-            // ✅ CRITICAL: Sync ammo to ALL clients (SyncVar might not trigger event immediately)
-            RpcSyncAmmo(currentAmmo, reserveAmmo);
+            // ✅ NETWORK OPTIMIZATION: SyncVar hooks will automatically notify clients
+            // No explicit RPC needed - OnAmmoChanged_Hook will fire on all clients
             
             // Events (server-side only)
             OnWeaponFired?.Invoke();
-            OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
             
             // ✅ FIX: Auto reload only if not already firing (prevents interruption)
             if (currentAmmo <= 0 && reserveAmmo > 0 && !isReloading)
@@ -777,6 +617,38 @@ namespace TacticalCombat.Combat
             {
                 Debug.LogWarning("⚠️ [WeaponSystem] Fire rejected by server");
             }
+        }
+
+        /// <summary>
+        /// ✅ NETWORK OPTIMIZATION: SyncVar hook for currentAmmo
+        /// Automatically called when currentAmmo changes on server
+        /// </summary>
+        private void OnAmmoChanged_Hook(int oldValue, int newValue)
+        {
+            OnAmmoChanged?.Invoke(newValue, reserveAmmo);
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (debugAudio)
+            {
+                LogNetwork($"Ammo changed: {newValue}/{reserveAmmo}");
+            }
+            #endif
+        }
+        
+        /// <summary>
+        /// ✅ NETWORK OPTIMIZATION: SyncVar hook for reserveAmmo
+        /// Automatically called when reserveAmmo changes on server
+        /// </summary>
+        private void OnReserveAmmoChanged_Hook(int oldValue, int newValue)
+        {
+            OnAmmoChanged?.Invoke(currentAmmo, newValue);
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (debugAudio)
+            {
+                LogNetwork($"Reserve ammo changed: {currentAmmo}/{newValue}");
+            }
+            #endif
         }
 
         /// <summary>
@@ -1390,35 +1262,7 @@ namespace TacticalCombat.Combat
             }
         }
         
-        // ═══════════════════════════════════════════════════════════
-        // INPUT SYSTEM BRIDGE HANDLERS
-        // ═══════════════════════════════════════════════════════════
-        private void OnFirePerformed(InputAction.CallbackContext ctx)
-        {
-            fireHeld = true;
-            firePressed = true;
-        }
-
-        private void OnFireCanceled(InputAction.CallbackContext ctx)
-        {
-            fireHeld = false;
-            firePressed = false;
-        }
-
-        private void OnReloadPerformed(InputAction.CallbackContext ctx)
-        {
-            reloadPressed = true;
-        }
-
-        private void OnAimPerformed(InputAction.CallbackContext ctx)
-        {
-            aimHeld = true;
-        }
-
-        private void OnAimCanceled(InputAction.CallbackContext ctx)
-        {
-            aimHeld = false;
-        }
+        // ✅ AAA: All input callbacks removed - InputManager handles everything
 
         private void PlayHitSound(SurfaceType surface)
         {
@@ -1681,28 +1525,7 @@ namespace TacticalCombat.Combat
         /// </summary>
         private void OnDisable()
         {
-            // Unhook Input System actions
-            try
-            {
-                if (fireAction != null)
-                {
-                    fireAction.performed -= OnFirePerformed;
-                    fireAction.canceled -= OnFireCanceled;
-                    fireAction.Disable();
-                }
-                if (reloadAction != null)
-                {
-                    reloadAction.performed -= OnReloadPerformed;
-                    reloadAction.Disable();
-                }
-                if (aimAction != null)
-                {
-                    aimAction.performed -= OnAimPerformed;
-                    aimAction.canceled -= OnAimCanceled;
-                    aimAction.Disable();
-                }
-            }
-            catch { }
+            // ✅ AAA: No Input System cleanup needed - InputManager handles everything
 
             // Stop tracked coroutines to prevent memory leaks
             // Stop tracked coroutines to prevent memory leaks

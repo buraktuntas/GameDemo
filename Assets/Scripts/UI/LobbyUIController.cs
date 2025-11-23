@@ -143,8 +143,36 @@ namespace TacticalCombat.UI
 
             // Step 8: Ensure camera is active
             EnsureCameraActive();
+            
+            // ✅ CRITICAL FIX: Unlock cursor for UI interaction
+            UnlockCursorForLobby();
 
             Debug.Log("✅ [LobbyUIController] Lobby UI shown");
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Unlock cursor for lobby UI interaction
+        /// </summary>
+        private void UnlockCursorForLobby()
+        {
+            // Find local player's InputManager
+            var inputManagers = FindObjectsByType<Player.InputManager>(FindObjectsSortMode.None);
+            foreach (var inputManager in inputManagers)
+            {
+                var networkBehaviour = inputManager.GetComponent<Mirror.NetworkBehaviour>();
+                if (networkBehaviour != null && networkBehaviour.isLocalPlayer)
+                {
+                    // Set to Menu mode (cursor unlocked, all input blocked)
+                    inputManager.SetCursorMode(Player.InputManager.CursorMode.Menu);
+                    Debug.Log("✅ [LobbyUIController] Cursor unlocked for lobby (Menu mode)");
+                    return;
+                }
+            }
+            
+            // Fallback: Direct cursor unlock if InputManager not found
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            Debug.Log("✅ [LobbyUIController] Cursor unlocked (fallback - InputManager not found)");
         }
 
         /// <summary>
@@ -189,6 +217,34 @@ namespace TacticalCombat.UI
             {
                 lobbyPanel.SetActive(false);
             }
+            
+            // ✅ CRITICAL FIX: Lock cursor when lobby closes (game starting)
+            LockCursorForGameplay();
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Lock cursor for gameplay
+        /// </summary>
+        private void LockCursorForGameplay()
+        {
+            // Find local player's InputManager
+            var inputManagers = FindObjectsByType<Player.InputManager>(FindObjectsSortMode.None);
+            foreach (var inputManager in inputManagers)
+            {
+                var networkBehaviour = inputManager.GetComponent<Mirror.NetworkBehaviour>();
+                if (networkBehaviour != null && networkBehaviour.isLocalPlayer)
+                {
+                    // Set to Locked mode (FPS gameplay)
+                    inputManager.SetCursorMode(Player.InputManager.CursorMode.Locked);
+                    Debug.Log("✅ [LobbyUIController] Cursor locked for gameplay");
+                    return;
+                }
+            }
+            
+            // Fallback: Direct cursor lock if InputManager not found
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+            Debug.Log("✅ [LobbyUIController] Cursor locked (fallback - InputManager not found)");
         }
 
         /// <summary>

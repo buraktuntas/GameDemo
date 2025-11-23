@@ -155,8 +155,19 @@ namespace TacticalCombat.Building
             // Spawn destruction particle effect
             if (destructionEffect != null)
             {
-                GameObject effect = Instantiate(destructionEffect, transform.position, Quaternion.identity);
-                Destroy(effect, 3f);
+                // ✅ PERFORMANCE: Use object pooling if available
+                GameObject effect;
+                if (NetworkObjectPool.Instance != null)
+                {
+                    effect = NetworkObjectPool.Instance.Get(destructionEffect, transform.position, Quaternion.identity);
+                    // Auto-return to pool after 3 seconds
+                    StartCoroutine(ReturnEffectToPool(effect, 3f));
+                }
+                else
+                {
+                    effect = Instantiate(destructionEffect, transform.position, Quaternion.identity);
+                    Destroy(effect, 3f);
+                }
             }
 
             // Play destruction sound
@@ -208,6 +219,18 @@ namespace TacticalCombat.Building
         public ulong GetOwnerId()
         {
             return ownerId;
+        }
+
+        /// <summary>
+        /// ✅ PERFORMANCE: Helper coroutine to return effect to pool after delay
+        /// </summary>
+        private System.Collections.IEnumerator ReturnEffectToPool(GameObject effect, float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            if (effect != null && NetworkObjectPool.Instance != null)
+            {
+                NetworkObjectPool.Instance.Release(effect);
+            }
         }
     }
 }

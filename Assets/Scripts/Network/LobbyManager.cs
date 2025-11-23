@@ -671,7 +671,9 @@ namespace TacticalCombat.Network
             // ✅ CRITICAL: Hide all UI before starting game
             RpcHideAllUI();
             
-            // ✅ NEW: Apply team assignments to PlayerControllers
+            
+            // ✅ FIXED: Apply team assignments to PlayerControllers
+            // Use Team enum values directly (no mapping needed!)
             foreach (var player in players)
             {
                 // Find PlayerController for this connection
@@ -690,13 +692,18 @@ namespace TacticalCombat.Network
                     var playerController = conn.identity.GetComponent<PlayerController>();
                     if (playerController != null)
                     {
-                        // Map Lobby Team ID to Game Team Enum
-                        // Lobby: 0=TeamA, 1=TeamB, -1=None (FFA)
-                        // Game: 0=None, 1=TeamA, 2=TeamB
-                        Team gameTeam = Team.None;
-                        if (player.teamId == 0) gameTeam = Team.TeamA;
-                        else if (player.teamId == 1) gameTeam = Team.TeamB;
-                        else if (player.teamId == -1) gameTeam = Team.None; // Explicitly set None for FFA
+                        // ✅ FIXED: Direct mapping - Lobby teamId now matches Team enum!
+                        // Lobby: -1=None, 0=TeamA, 1=TeamB
+                        // Team enum: None=0, TeamA=1, TeamB=2
+                        // Convert: lobbyId + 1 = enumValue
+                        Team gameTeam = (Team)(player.teamId + 1);
+                        
+                        // Validate team assignment
+                        if (gameTeam < Team.None || gameTeam > Team.TeamB)
+                        {
+                            Debug.LogWarning($"[LobbyManager] Invalid team ID {player.teamId} for {player.playerName}, defaulting to None");
+                            gameTeam = Team.None;
+                        }
                         
                         // Set team (SyncVar will propagate to clients)
                         playerController.team = gameTeam;
@@ -707,7 +714,7 @@ namespace TacticalCombat.Network
                             MatchManager.Instance.RegisterPlayer(playerController.netId, playerController.team, playerController.role);
                         }
                         
-                        Debug.Log($"[LobbyManager] Applied team assignment: {player.playerName} -> {gameTeam}");
+                        Debug.Log($"[LobbyManager] Applied team assignment: {player.playerName} -> {gameTeam} (LobbyID: {player.teamId})");
                     }
                 }
             }

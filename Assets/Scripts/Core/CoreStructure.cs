@@ -145,8 +145,19 @@ namespace TacticalCombat.Core
             // Play destruction effect
             if (destructionEffect != null)
             {
-                GameObject effect = Instantiate(destructionEffect, transform.position, Quaternion.identity);
-                Destroy(effect, 5f);
+                // ✅ PERFORMANCE: Use object pooling if available
+                GameObject effect;
+                if (NetworkObjectPool.Instance != null)
+                {
+                    effect = NetworkObjectPool.Instance.Get(destructionEffect, transform.position, Quaternion.identity);
+                    // Auto-return to pool after 5 seconds
+                    StartCoroutine(ReturnEffectToPool(effect, 5f));
+                }
+                else
+                {
+                    effect = Instantiate(destructionEffect, transform.position, Quaternion.identity);
+                    Destroy(effect, 5f);
+                }
             }
 
             // Hide core visual
@@ -160,6 +171,18 @@ namespace TacticalCombat.Core
             if (col != null)
             {
                 col.enabled = false;
+            }
+        }
+
+        /// <summary>
+        /// ✅ PERFORMANCE: Helper coroutine to return effect to pool after delay
+        /// </summary>
+        private System.Collections.IEnumerator ReturnEffectToPool(GameObject effect, float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            if (effect != null && NetworkObjectPool.Instance != null)
+            {
+                NetworkObjectPool.Instance.Release(effect);
             }
         }
 

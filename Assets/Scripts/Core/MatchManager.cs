@@ -1223,6 +1223,12 @@ namespace TacticalCombat.Core
             
             // ✅ NEW: Update audio based on phase
             UpdatePhaseAudio(newPhase);
+            
+            // ✅ CRITICAL FIX: Update cursor state based on phase (client-side)
+            if (isClient)
+            {
+                UpdateCursorForPhase(newPhase);
+            }
         }
         
         /// <summary>
@@ -1259,6 +1265,57 @@ namespace TacticalCombat.Core
                 currentPhase = newPhase;
             }
             // Don't invoke event again - SyncVar hook already did it
+            
+            // ✅ CRITICAL FIX: Update cursor state based on phase
+            UpdateCursorForPhase(newPhase);
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Update cursor state based on game phase
+        /// </summary>
+        [Client]
+        private void UpdateCursorForPhase(Phase phase)
+        {
+            // Find local player's InputManager
+            var inputManagers = FindObjectsByType<Player.InputManager>(FindObjectsSortMode.None);
+            foreach (var inputManager in inputManagers)
+            {
+                var networkBehaviour = inputManager.GetComponent<Mirror.NetworkBehaviour>();
+                if (networkBehaviour != null && networkBehaviour.isLocalPlayer)
+                {
+                    switch (phase)
+                    {
+                        case Phase.Lobby:
+                        case Phase.End:
+                            // UI phase - unlock cursor
+                            inputManager.SetCursorMode(Player.InputManager.CursorMode.Menu);
+                            break;
+                        case Phase.Build:
+                        case Phase.Combat:
+                        case Phase.SuddenDeath:
+                            // Gameplay phase - lock cursor
+                            inputManager.SetCursorMode(Player.InputManager.CursorMode.Locked);
+                            break;
+                    }
+                    return;
+                }
+            }
+            
+            // Fallback: Direct cursor control if InputManager not found
+            switch (phase)
+            {
+                case Phase.Lobby:
+                case Phase.End:
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
+                    break;
+                case Phase.Build:
+                case Phase.Combat:
+                case Phase.SuddenDeath:
+                    Cursor.lockState = CursorLockMode.Locked;
+                    Cursor.visible = false;
+                    break;
+            }
         }
 
         [ClientRpc]

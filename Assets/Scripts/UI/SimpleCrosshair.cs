@@ -36,7 +36,8 @@ namespace TacticalCombat.UI
 
             if (cachedLocalInputManager != null)
             {
-                bool currentBuildMode = cachedLocalInputManager.IsInBuildMode || cachedLocalInputManager.IsInMenu || cachedLocalInputManager.IsPaused;
+                bool currentBuildMode = cachedLocalInputManager.IsInBuildMode;
+                bool isInMenu = cachedLocalInputManager.IsInMenu || cachedLocalInputManager.IsPaused;
                 InputManager.CursorMode currentCursorMode = cachedLocalInputManager.GetCurrentMode();
                 
                 // Debug logları sadece state değiştiğinde göster
@@ -55,21 +56,32 @@ namespace TacticalCombat.UI
                     }
                 }
                 
-                // ✅ FIX: Build mode'da crosshair görünmeli
-                if (currentBuildMode)
-                {
-                    // Build mode'da crosshair görünmeli (cursor gizli olduğu için)
-                    // return; // ← Bu satırı kaldır
-                }
-                
-                // ✅ FIX: İmleç görünürse crosshair gizle (ama build mode hariç)
-                if (Cursor.visible && !currentBuildMode)
+                // ✅ CRITICAL FIX: Crosshair görünürlük mantığı
+                // 1. Menu/pause açıksa crosshair gizle
+                if (isInMenu)
                 {
                     return; // Crosshair gizle
                 }
                 
-                // Cursor locked değilse crosshair gizle
-                if (currentCursorMode != InputManager.CursorMode.Locked)
+                // 2. Cursor görünürse crosshair gizle (UI açık demektir)
+                if (Cursor.visible)
+                {
+                    return; // Crosshair gizle
+                }
+                
+                // 3. Cursor locked değilse crosshair gizle
+                if (currentCursorMode != InputManager.CursorMode.Locked && currentCursorMode != InputManager.CursorMode.Confined)
+                {
+                    return; // Crosshair gizle
+                }
+                
+                // 4. Build mode veya gameplay'de crosshair görünür (cursor locked olduğu için)
+                // Buraya geldiyse crosshair gösterilmeli
+            }
+            else
+            {
+                // InputManager bulunamadı - cursor durumuna göre karar ver
+                if (Cursor.visible || Cursor.lockState != CursorLockMode.Locked)
                 {
                     return; // Crosshair gizle
                 }
