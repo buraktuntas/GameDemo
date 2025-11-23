@@ -23,9 +23,9 @@ namespace TacticalCombat.Network
         private int teamACount = 0;
         private int teamBCount = 0;
         
-        // ✅ MEMORY LEAK FIX: Track coroutines for cleanup
-        private System.Collections.IEnumerator activeRegisterHostCoroutine;
-        private System.Collections.IEnumerator activeShowLobbyCoroutine;
+        // ✅ AAA QUALITY: Track coroutines for cleanup (use Coroutine, not IEnumerator)
+        private Coroutine activeRegisterHostCoroutine;
+        private Coroutine activeShowLobbyCoroutine;
         private bool isDestroyed = false;
         
         // ✅ NEW: Track if client successfully connected (to distinguish from failed connection)
@@ -73,11 +73,14 @@ namespace TacticalCombat.Network
                 }
                 else
                 {
-                    // ✅ CRITICAL: Ensure assetId is set (Mirror needs this for client spawning)
+                    // ✅ AAA QUALITY: Ensure assetId is set (Mirror needs this for client spawning)
                     if (prefabIdentity.assetId == 0)
                     {
-                        LogWarning("⚠️ LobbyManager prefab has assetId=0! This might cause spawn issues.");
-                        LogWarning("   Make sure the prefab is saved and has a valid NetworkIdentity assetId.");
+                        LogError("❌ CRITICAL: LobbyManager prefab assetId=0! Spawn will FAIL on clients!");
+                        LogError("   FIX: Select prefab in Project, make sure NetworkIdentity component is saved.");
+                        LogError("   Then click 'Reimport' in Inspector to regenerate assetId.");
+                        // ✅ AAA FIX: ABORT - don't spawn invalid prefab
+                        return;
                     }
                     
                     LogNetwork($"✅ LobbyManager prefab assetId: {prefabIdentity.assetId}");
@@ -87,15 +90,21 @@ namespace TacticalCombat.Network
                     
                     if (spawnedIdentity != null)
                     {
-                        // ✅ CRITICAL: Ensure spawned object has valid assetId before spawning
+                        // ✅ AAA QUALITY: Ensure spawned object has valid assetId before spawning
                         if (spawnedIdentity.assetId == 0)
                         {
-                            LogError("❌ Spawned LobbyManager has assetId=0! This will fail on clients.");
+                            LogError("❌ CRITICAL: Spawned LobbyManager has assetId=0! This will fail on clients!");
+                            LogError("   Destroying invalid object - check prefab NetworkIdentity settings.");
+                            Destroy(lobbyGO);
+                            return; // ✅ AAA FIX: ABORT spawn
                         }
                         
                         NetworkServer.Spawn(lobbyGO);
                         activeLobbyManager = lobbyGO.GetComponent<LobbyManager>();
                         LogNetwork($"✅ Lobby Manager spawned on server (assetId: {spawnedIdentity.assetId}, netId: {spawnedIdentity.netId})");
+                        
+                        // ✅ AAA FIX: LobbyManager is NetworkBehaviour, it will set Instance on clients automatically
+                        // No need for RPC from NetworkManager (which is not NetworkBehaviour)
                     }
                     else
                     {
@@ -159,7 +168,7 @@ namespace TacticalCombat.Network
             teamACount = 0;
             teamBCount = 0;
             
-            // ✅ MEMORY LEAK FIX: Cleanup coroutines
+            // ✅ AAA QUALITY: Cleanup coroutines (proper Coroutine tracking)
             if (activeRegisterHostCoroutine != null)
             {
                 StopCoroutine(activeRegisterHostCoroutine);
@@ -181,6 +190,7 @@ namespace TacticalCombat.Network
             isDestroyed = true;
             
             // ✅ MEMORY LEAK FIX: Stop all coroutines
+            // ✅ AAA QUALITY: Cleanup coroutines (proper Coroutine tracking)
             if (activeRegisterHostCoroutine != null)
             {
                 StopCoroutine(activeRegisterHostCoroutine);
@@ -256,13 +266,37 @@ namespace TacticalCombat.Network
                 return; // ✅ FIX: STOP execution if no NetworkIdentity!
             }
 
-            NetworkServer.AddPlayerForConnection(conn, player);
+            // ✅ AAA QUALITY: Only add player if NetworkIdentity is valid
+            bool spawnSucceeded = false;
+            try
+            {
+                NetworkServer.AddPlayerForConnection(conn, player);
+                spawnSucceeded = true;
+            }
+            catch (System.Exception e)
+            {
+                LogError($"❌ Failed to add player for connection: {e.Message}");
+                Destroy(player);
+                return; // ✅ AAA FIX: Abort if spawn failed
+            }
 
-            // Update team counts
-            if (assignedTeam == Team.TeamA)
-                teamACount++;
-            else
-                teamBCount++;
+            // ✅ AAA QUALITY: Only increment team count AFTER successful spawn (prevents desync)
+            if (spawnSucceeded)
+            {
+                if (assignedTeam == Team.TeamA)
+                    teamACount++;
+                else
+                    teamBCount++;
+            }
+
+            // ✅ AAA QUALITY: Sync spawn position to client (after successful spawn)
+            // This prevents teleport detection on first movement command
+            var fpsController = player.GetComponent<Player.FPSController>();
+            if (fpsController != null)
+            {
+                // ✅ AAA FIX: Wait for NetworkIdentity to be fully ready and client to receive spawn
+                StartCoroutine(SyncSpawnPositionDelayed(fpsController, spawnPoint.position, spawnPoint.rotation));
+            }
 
             LogNetwork($"Player spawned - Team: {assignedTeam}, Team A: {teamACount}, Team B: {teamBCount}");
 
@@ -407,28 +441,25 @@ namespace TacticalCombat.Network
             // ✅ NEW: Mark that client successfully connected
             clientSuccessfullyConnected = true;
             
-            // ✅ NEW: If we're the host, ensure we're registered in the lobby
-            // This handles the case where StartHost() doesn't automatically call OnServerAddPlayer
+            // ✅ AAA QUALITY: Host registration is handled in OnServerAddPlayer
+            // Don't register here to prevent double registration
             if (NetworkServer.active && NetworkClient.isConnected && !isDestroyed)
             {
-                // ✅ MEMORY LEAK FIX: Stop previous coroutine if running
-                if (activeRegisterHostCoroutine != null)
-                {
-                    StopCoroutine(activeRegisterHostCoroutine);
-                }
-                activeRegisterHostCoroutine = RegisterHostInLobby();
-                StartCoroutine(activeRegisterHostCoroutine);
+                // Host will be registered in OnServerAddPlayer when player spawns
+                // No need to register here - prevents duplicate entry
+                LogNetwork("✅ Host connected - will register in OnServerAddPlayer");
             }
             // ✅ NEW: If we're a client (not host), show lobby UI and wait for spawn
             else if (NetworkClient.isConnected && !NetworkServer.active && !isDestroyed)
             {
-                // ✅ MEMORY LEAK FIX: Stop previous coroutine if running
+                // ✅ AAA QUALITY: Stop previous coroutine if running (proper Coroutine tracking)
                 if (activeShowLobbyCoroutine != null)
                 {
                     StopCoroutine(activeShowLobbyCoroutine);
+                    activeShowLobbyCoroutine = null;
                 }
-                activeShowLobbyCoroutine = ShowLobbyForClient();
-                StartCoroutine(activeShowLobbyCoroutine);
+                // ✅ AAA FIX: Store Coroutine reference (not IEnumerator)
+                activeShowLobbyCoroutine = StartCoroutine(ShowLobbyForClient());
             }
         }
         
@@ -831,6 +862,42 @@ namespace TacticalCombat.Network
             int index = team == Team.TeamA ? (teamACount % spawnPoints.Length) : (teamBCount % spawnPoints.Length);
             return spawnPoints[index];
         }
+        
+        /// <summary>
+        /// ✅ AAA QUALITY: Sync spawn position to client after NetworkIdentity fully initializes and client receives spawn
+        /// </summary>
+        private System.Collections.IEnumerator SyncSpawnPositionDelayed(Player.FPSController fpsController, Vector3 position, Quaternion rotation)
+        {
+            // ✅ AAA FIX: Wait for NetworkIdentity to be fully ready on server
+            while (fpsController != null && (!fpsController.isServer || fpsController.netIdentity == null || !fpsController.netIdentity.isServer))
+            {
+                yield return null;
+            }
+            
+            if (fpsController == null) yield break;
+            
+            // ✅ AAA FIX: Wait additional time for client to receive spawn (network latency)
+            yield return new WaitForSeconds(0.1f);
+            
+            if (fpsController != null && fpsController.isServer)
+            {
+                // Set position on server
+                fpsController.transform.position = position;
+                fpsController.transform.rotation = rotation;
+                
+                // Sync to all clients via RPC
+                fpsController.RpcSetPosition(position, rotation);
+                
+                // ✅ AAA FIX: Update spawn time on client (prevents false speed warnings)
+                fpsController.SetSpawnTime(Time.time);
+                
+                LogNetwork($"✅ Spawn position synced: {position}");
+            }
+        }
+        
+        // ✅ AAA FIX: NetworkManager is not NetworkBehaviour, cannot use RPC
+        // LobbyManager (NetworkBehaviour) will automatically set Instance on clients via Mirror's sync
+        // ShowLobbyForClient() already handles waiting for LobbyManager.Instance to be set
 
         private void CheckAutoStart()
         {

@@ -216,8 +216,8 @@ namespace TacticalCombat.Player
             lastSentPosition = transform.position;
             lastSentRotation = transform.rotation;
 
-            // ✅ CRITICAL FIX: Reset server-side Command timing
-            lastCmdMoveTime = 0f;
+            // ✅ CRITICAL FIX: Reset movement RPC timing to prevent false movement detection
+            lastMovementRpcTime = 0f;
             
             // ✅ AAA FIX: Ensure canMove is properly set (will be set by PlayerController, but ensure it's not stuck)
             // Don't force canMove here - let PlayerController handle it based on phase
@@ -548,8 +548,7 @@ private void Update()
         private const float POSITION_THRESHOLD = 0.1f; // 10cm değişiklik olursa gönder (AAA quality precision)
         private const float ROTATION_THRESHOLD = 5f; // 5 derece değişiklik olursa gönder
 
-        // ✅ CRITICAL FIX: Track server-side Command timing
-        private float lastCmdMoveTime = 0f;
+        // ✅ REMOVED: lastCmdMoveTime - not needed, using lastMovementRpcTime instead
         
         // ✅ AAA FIX: Track spawn time to ignore initial movement commands (prevents false speed warnings)
         private float lastSpawnTime = 0f;
@@ -597,194 +596,92 @@ private void Update()
                 characterController.Move(moveDirection * Time.fixedDeltaTime);
                 return;
             }
-            
-            // ✅ AAA QUALITY: Local player movement (client-side prediction)
+
+            // ✅ REVERT TO WORKING VERSION: Client-side prediction (responsive gameplay)
+            // Client predicts movement locally for instant response
             Vector3 input = GetMovementInput();
-            
-            // ✅ AAA FIX: CRITICAL - Validate input before processing (prevent ghost movement)
-            if (input.magnitude < 0.01f && currentSpeedVelocity < 0.01f)
-            {
-                // No input and no residual speed - ensure zero movement
-                moveDirection = new Vector3(0, CalculateVerticalVelocity(), 0);
-                characterController.Move(moveDirection * Time.fixedDeltaTime);
-                return; // ✅ CRITICAL: Early return to prevent any movement
-            }
-            
             Vector3 horizontalMove = CalculateHorizontalMovement(input);
             float verticalVelocity = CalculateVerticalVelocity();
-            
-            // ✅ AAA FIX: Validate movement values (prevent NaN or invalid values)
-            if (float.IsNaN(horizontalMove.x) || float.IsNaN(horizontalMove.y) || float.IsNaN(horizontalMove.z))
-            {
-                horizontalMove = Vector3.zero;
-            }
-            if (float.IsNaN(verticalVelocity))
-            {
-                verticalVelocity = moveDirection.y; // Keep current vertical velocity
-            }
-            
-            // ✅ AAA FIX: Final validation - if horizontal movement is effectively zero, don't move
-            if (horizontalMove.magnitude < 0.001f && currentSpeedVelocity < 0.01f)
-            {
-                moveDirection = new Vector3(0, verticalVelocity, 0);
-            }
-            else
-            {
-                // Combine movement
-                moveDirection = new Vector3(
-                    horizontalMove.x, 
-                    verticalVelocity, 
-                    horizontalMove.z
-                );
-            }
-            
-            // ✅ AAA FIX: Apply locally (client-side prediction)
+
+            // Combine movement
+            moveDirection = new Vector3(
+                horizontalMove.x,
+                verticalVelocity,
+                horizontalMove.z
+            );
+
+            // Apply locally (client-side prediction)
             characterController.Move(moveDirection * Time.fixedDeltaTime);
-            
-            // ✅ AAA QUALITY: Rate-limited RPC to server (optimized)
+
+            // ✅ Rate-limited RPC to server with working validation
             Vector3 predictedPosition = transform.position;
-            Quaternion predictedRotation = transform.rotation;
             float timeSinceLastRpc = Time.fixedTime - lastMovementRpcTime;
             bool positionChanged = Vector3.Distance(predictedPosition, lastSentPosition) > POSITION_THRESHOLD;
-            bool rotationChanged = Quaternion.Angle(predictedRotation, lastSentRotation) > ROTATION_THRESHOLD;
-            
-            // ✅ AAA FIX: Send RPC if: enough time passed OR significant change
+            bool rotationChanged = Quaternion.Angle(transform.rotation, lastSentRotation) > ROTATION_THRESHOLD;
+
+            // Send RPC if: enough time passed OR significant position/rotation change
             if (timeSinceLastRpc >= MOVEMENT_RPC_INTERVAL || positionChanged || rotationChanged)
             {
-                CmdMove(predictedPosition, predictedRotation, input);
+                CmdMove(predictedPosition, transform.rotation, input);
                 lastMovementRpcTime = Time.fixedTime;
                 lastSentPosition = predictedPosition;
-                lastSentRotation = predictedRotation;
+                lastSentRotation = transform.rotation;
             }
         }
         
         /// <summary>
-        /// ✅ CRITICAL FIX: Server-validated movement with proper timing-based validation
+        /// ✅ REVERTED TO WORKING VERSION (fe134db): Simple and effective server validation
+        /// - Client predicts movement (responsive)
+        /// - Server validates and applies (authoritative)
+        /// - Simple checks prevent cheating without breaking gameplay
         /// </summary>
         [Command]
         private void CmdMove(Vector3 predictedPosition, Quaternion predictedRotation, Vector3 input)
         {
-            // ✅ CRITICAL FIX: Calculate actual time since last Command
-            float currentTime = Time.time;
-            float deltaTime = currentTime - lastCmdMoveTime;
-
-            // ✅ CRITICAL FIX: Handle first Command or very fast Commands
-            if (lastCmdMoveTime == 0f || deltaTime < 0.001f)
-            {
-                deltaTime = MOVEMENT_RPC_INTERVAL; // Use expected interval
-            }
-
-            // ✅ CRITICAL FIX: Clamp deltaTime to reasonable range (prevent huge jumps)
-            deltaTime = Mathf.Clamp(deltaTime, 0.001f, 0.5f); // 1ms to 500ms
-
-            lastCmdMoveTime = currentTime;
-
-            // ✅ CRITICAL FIX: Calculate distance from LAST SERVER POSITION
-            float distance = Vector3.Distance(transform.position, predictedPosition);
-
-            // ✅ CRITICAL FIX: Use ACTUAL deltaTime for validation (not fixed 0.1f)
-            float maxAllowedMove = runSpeed * deltaTime * 2.5f; // Allow 2.5x for lag/sprint
-
-            // ✅ CRITICAL FIX: Validate movement speed based on ACTUAL deltaTime
-            float predictedSpeed = distance / deltaTime;
-            float maxAllowedSpeed = runSpeed * 2.5f; // 2.5x max speed (sprint + lag)
-            
-            // ✅ AAA FIX: Ignore speed validation during spawn grace period (prevents false warnings)
+            // ✅ AAA FIX: Ignore validation during spawn grace period (prevents false warnings)
             float timeSinceSpawn = Time.time - lastSpawnTime;
             bool inSpawnGracePeriod = timeSinceSpawn < SPAWN_GRACE_PERIOD;
+            
+            // ✅ SIMPLE TELEPORT CHECK: Validate position (anti-teleport)
+            float distance = Vector3.Distance(transform.position, predictedPosition);
+            float maxAllowedMove = runSpeed * Time.fixedDeltaTime * 2.5f; // Allow 2.5x for lag compensation
 
-            if (predictedSpeed > maxAllowedSpeed && !inSpawnGracePeriod)
+            if (distance > maxAllowedMove && !inSpawnGracePeriod)
             {
-                // ✅ AAA FIX: Clamp to max speed but still accept position (smooth correction)
-                if (predictedSpeed > runSpeed * 3.0f)
-                {
-                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    Debug.LogWarning($"🚨 [FPSController SERVER] SUSPICIOUS speed: {predictedSpeed:F2}m/s from player {netId}");
-                    #endif
-                    // Reject suspicious movement
-                    RpcSetPosition(transform.position, transform.rotation);
-                    return;
-                }
-                
-                // Minor violation - clamp but accept
-                Vector3 direction = (predictedPosition - transform.position).normalized;
-                float clampedDistance = maxAllowedSpeed * MOVE_TIME_WINDOW;
-                predictedPosition = transform.position + direction * clampedDistance;
-            }
-            else if (inSpawnGracePeriod && predictedSpeed > maxAllowedSpeed)
-            {
-                // ✅ AAA FIX: During spawn grace period, accept position but log for debugging
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                if (showDebugInfo)
-                {
-                    Debug.Log($"✅ [FPSController SERVER] Spawn grace period: accepting high speed {predictedSpeed:F2}m/s from player {netId} (time since spawn: {timeSinceSpawn:F2}s)");
-                }
+                Debug.LogWarning($"🚨 [FPSController SERVER] Teleport detected: {distance:F2}m > {maxAllowedMove:F2}m from player {netId}");
                 #endif
-            }
-
-            // ✅ AAA FIX: Accept client's predicted position (proper client-side prediction)
-            // Server validates but trusts client prediction for smooth gameplay
-            if (distance > maxAllowedMove)
-            {
-                // Teleport detected - reject but don't correct immediately (prevents jitter)
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                if (distance > 5.0f) // Only log major teleports
-                {
-                    Debug.LogWarning($"🚨 [FPSController SERVER] Teleport detected: {distance:F3}m from player {netId}");
-                }
-                #endif
-                // Reject - client will be corrected by RpcSetPosition
+                // Reject - don't move, client will be corrected by RpcSetPosition
                 RpcSetPosition(transform.position, transform.rotation);
                 return;
             }
 
-            // ✅ AAA FIX: Accept client position with CharacterController validation
-            // This ensures smooth client-side prediction while preventing wall clipping
-            Vector3 oldPosition = transform.position;
-            Quaternion oldRotation = transform.rotation;
-            
-            // ✅ AAA FIX: Calculate movement vector (for CharacterController validation)
-            Vector3 moveVector = predictedPosition - transform.position;
-            
-            // ✅ AAA FIX: Use CharacterController.Move to validate collision
-            // This ensures player doesn't clip through walls while accepting client prediction
-            if (characterController.enabled && moveVector.magnitude > 0.001f)
-            {
-                // Move using CharacterController (handles collision automatically)
-                characterController.Move(moveVector);
-                // Rotation is safe to apply directly
-                transform.rotation = predictedRotation;
-            }
-            else
-            {
-                // Small movement or CharacterController disabled - direct position
-                transform.position = predictedPosition;
-                transform.rotation = predictedRotation;
-            }
-            
-            // ✅ CRITICAL FIX: Smart throttling - broadcast ONLY if position actually changed
-            // This prevents RPC flood while ensuring other clients see real position
-            float positionDelta = Vector3.Distance(transform.position, lastBroadcastPosition);
-            float rotationDelta = Quaternion.Angle(transform.rotation, lastBroadcastRotation);
-            float timeSinceBroadcast = currentTime - lastBroadcastTime;
+            // ✅ SIMPLE SPEED CHECK: Validate movement speed
+            Vector3 serverMove = CalculateServerMovement(input);
 
-            // Broadcast if: significant movement OR rotation OR timeout (max 100ms without update)
-            if (positionDelta > 0.01f || rotationDelta > 1f || timeSinceBroadcast >= 0.1f)
+            // Calculate predicted speed from distance moved
+            float predictedSpeed = distance / Time.fixedDeltaTime;
+
+            // Allow 15% tolerance for lag/network differences
+            if (predictedSpeed > runSpeed * 1.15f)
             {
-                RpcSetPosition(transform.position, transform.rotation);
-                lastBroadcastPosition = transform.position;
-                lastBroadcastRotation = transform.rotation;
-                lastBroadcastTime = currentTime;
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"🚨 [FPSController SERVER] Speed hack detected: {predictedSpeed}m/s > {runSpeed * 1.15f}m/s from player {netId}");
+                #endif
+                // Clamp to server-calculated movement
+                serverMove = serverMove.normalized * Mathf.Min(predictedSpeed, runSpeed * 1.15f);
             }
+
+            // Apply server movement (authoritative)
+            characterController.Move(serverMove * Time.fixedDeltaTime);
+
+            // Sync corrected position to clients
+            RpcSetPosition(transform.position, transform.rotation);
         }
-
-        // ✅ CRITICAL FIX: Track server broadcast timing to prevent RPC flood
-        private Vector3 lastBroadcastPosition;
-        private Quaternion lastBroadcastRotation;
-        private float lastBroadcastTime = 0f;
         
         /// <summary>
-        /// ✅ CRITICAL FIX: Server-side movement calculation (authoritative)
+        /// ✅ AAA QUALITY: Server-side movement calculation (authoritative)
+        /// Returns horizontal movement vector (no vertical component)
         /// </summary>
         [Server]
         private Vector3 CalculateServerMovement(Vector3 input)
@@ -798,11 +695,15 @@ private void Update()
             forward.Normalize();
             right.Normalize();
             
-            // Server calculates speed (can't be hacked)
+            // ✅ AAA FIX: Server calculates speed (can't be hacked)
+            // Use same logic as client for consistency
             bool wantsToSprint = input.magnitude > 0.8f; // Assume sprint if input is strong
-            float currentSpeed = (wantsToSprint ? runSpeed : walkSpeed) * speedMultiplier; // ✅ CRITICAL FIX: Apply speed multiplier on server too
+            float currentSpeed = (wantsToSprint ? runSpeed : walkSpeed) * speedMultiplier;
             
+            // ✅ AAA FIX: Calculate movement direction
             Vector3 horizontalMove = (forward * input.z) + (right * input.x);
+            horizontalMove.Normalize(); // ✅ CRITICAL: Normalize to prevent diagonal speed boost
+            
             return horizontalMove * currentSpeed;
         }
         

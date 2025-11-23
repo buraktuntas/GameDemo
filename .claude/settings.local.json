@@ -8,7 +8,9 @@
       "Bash(git add:*)",
       "Bash(nul)",
       "Bash(findstr:*)",
-      "Bash(if exist \"Assets\\Scenes\\nul\" del \"Assets\\Scenes\\nul\")"
+      "Bash(if exist \"Assets\\Scenes\\nul\" del \"Assets\\Scenes\\nul\")",
+      "Bash(git commit:*)",
+      "Bash(C:UsersBurakAppDataLocalTempold_fps_working.cs)"
     ],
     "deny": [],
     "ask": []

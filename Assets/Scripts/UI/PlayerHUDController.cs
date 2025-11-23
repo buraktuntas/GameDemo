@@ -71,10 +71,15 @@ namespace TacticalCombat.UI
                 MatchManager.Instance.GetCurrentPhase() == Phase.Build &&
                 player != null)
             {
-                var playerState = MatchManager.Instance.GetPlayerState(player.playerId);
-                if (playerState != null)
+                // ✅ AAA FIX: Get budget from SimpleBuildMode (client-safe)
+                var buildMode = player.GetComponent<Building.SimpleBuildMode>();
+                if (buildMode != null)
                 {
-                    hud.UpdateResources(playerState.budget);
+                    var budget = buildMode.GetBudget();
+                    if (budget.HasValue)
+                    {
+                        hud.UpdateResources(budget.Value);
+                    }
                 }
             }
 

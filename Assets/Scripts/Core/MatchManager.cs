@@ -462,6 +462,9 @@ namespace TacticalCombat.Core
             // ✅ NEW: Sync initial stats to all clients when build phase starts
             RpcSyncAllStats();
             
+            // ✅ AAA FIX: Sync budgets to all clients
+            RpcSyncAllBudgets();
+            
             // ✅ NEW: Notify BuildManager that build phase started
             if (Building.BuildManager.Instance != null)
             {
@@ -1592,10 +1595,69 @@ namespace TacticalCombat.Core
             }
         }
         
+        /// <summary>
+        /// ✅ AAA QUALITY: Sync all player budgets to clients (for UI display)
+        /// </summary>
+        [Server]
+        private void RpcSyncAllBudgets()
+        {
+            foreach (var kvp in playerStates)
+            {
+                var playerState = kvp.Value;
+                if (playerState != null)
+                {
+                    // Find SimpleBuildMode component for this player
+                    var player = FindPlayerByNetId(kvp.Key);
+                    if (player != null)
+                    {
+                        var buildMode = player.GetComponent<Building.SimpleBuildMode>();
+                        if (buildMode != null)
+                        {
+                            buildMode.RpcUpdateBudget(playerState.budget);
+                        }
+                    }
+                }
+            }
+        }
+        
         // ✅ NETWORK OPTIMIZATION: Batch stats sync to reduce network traffic
         private Dictionary<ulong, float> lastStatsSyncTime = new Dictionary<ulong, float>();
         private const float STATS_SYNC_INTERVAL = 0.5f; // Sync stats every 500ms max (2 Hz)
         private const float STATS_SYNC_COOLDOWN = 0.1f; // Minimum 100ms between syncs for same player
+        
+        /// <summary>
+        /// ✅ AAA QUALITY: Find player GameObject by netId
+        /// </summary>
+        [Server]
+        private GameObject FindPlayerByNetId(ulong netId)
+        {
+            var allPlayers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
+            foreach (var player in allPlayers)
+            {
+                if (player != null && player.netId == netId)
+                {
+                    return player.gameObject;
+                }
+            }
+            return null;
+        }
+        
+        /// <summary>
+        /// ✅ AAA QUALITY: Sync budget to specific client (called when budget changes)
+        /// </summary>
+        [Server]
+        private void SyncBudgetToClient(ulong playerId, BuildBudget budget)
+        {
+            var player = FindPlayerByNetId(playerId);
+            if (player != null)
+            {
+                var buildMode = player.GetComponent<Building.SimpleBuildMode>();
+                if (buildMode != null)
+                {
+                    buildMode.RpcUpdateBudget(budget);
+                }
+            }
+        }
         
         /// <summary>
         /// ✅ NEW: Notify clients when stats change (called from ScoreManager)
@@ -1701,7 +1763,24 @@ namespace TacticalCombat.Core
         [Server]
         public PlayerState GetPlayerState(ulong playerId)
         {
+            if (!isServer)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"[Server] function 'GetPlayerState' called when server was not active (client call)");
+                #endif
+                return null;
+            }
             return playerStates.ContainsKey(playerId) ? playerStates[playerId] : null;
+        }
+        
+        /// <summary>
+        /// ✅ AAA QUALITY: Client-safe version of GetPlayerState (for UI queries)
+        /// </summary>
+        public PlayerState GetPlayerStateClient(ulong playerId)
+        {
+            // ✅ AAA FIX: Client can't access server data directly
+            // Return null - UI should use SyncVar or RPC data instead
+            return null;
         }
 
         [Server]
@@ -1745,6 +1824,8 @@ namespace TacticalCombat.Core
                     {
                         budget.wallPoints -= cost;
                         playerStates[playerId].budget = budget;
+                        // ✅ AAA FIX: Sync budget change to client
+                        SyncBudgetToClient(playerId, budget);
                         return true;
                     }
                     break;
@@ -1753,6 +1834,8 @@ namespace TacticalCombat.Core
                     {
                         budget.elevationPoints -= cost;
                         playerStates[playerId].budget = budget;
+                        // ✅ AAA FIX: Sync budget change to client
+                        SyncBudgetToClient(playerId, budget);
                         return true;
                     }
                     break;
@@ -1761,6 +1844,8 @@ namespace TacticalCombat.Core
                     {
                         budget.trapPoints -= cost;
                         playerStates[playerId].budget = budget;
+                        // ✅ AAA FIX: Sync budget change to client
+                        SyncBudgetToClient(playerId, budget);
                         return true;
                     }
                     break;
@@ -1769,6 +1854,8 @@ namespace TacticalCombat.Core
                     {
                         budget.utilityPoints -= cost;
                         playerStates[playerId].budget = budget;
+                        // ✅ AAA FIX: Sync budget change to client
+                        SyncBudgetToClient(playerId, budget);
                         return true;
                     }
                     break;
