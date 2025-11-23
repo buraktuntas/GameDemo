@@ -5,7 +5,10 @@
       "Bash(find:*)",
       "Bash(ls:*)",
       "Bash(NUL)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(nul)",
+      "Bash(findstr:*)",
+      "Bash(if exist \"Assets\\Scenes\\nul\" del \"Assets\\Scenes\\nul\")"
     ],
     "deny": [],
     "ask": []

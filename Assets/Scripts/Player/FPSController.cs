@@ -345,7 +345,12 @@ namespace TacticalCombat.Player
                     audioListener.enabled = true;
 
                     // ✅ CRITICAL FIX: Use delayed coroutine to clean scene listeners (prevents infinite loop)
-                    StartCoroutine(CleanSceneAudioListenersDelayed());
+                    // ✅ FIX: Check if GameObject is active before starting coroutine
+                    if (gameObject.activeInHierarchy)
+                    {
+                        StartCoroutine(CleanSceneAudioListenersDelayed());
+                    }
+                    // ✅ FIX: If GameObject is inactive, skip audio cleanup (will be handled when activated)
 
                     if (showDebugInfo)
                     {
@@ -1181,7 +1186,16 @@ private void Update()
         /// <summary>
         /// ✅ CRITICAL: Check if any UI panel is currently open
         /// Prevents FPSController from interfering with UI clicks
+        /// ✅ PERFORMANCE FIX: Cache UI component references to avoid FindFirstObjectByType calls
         /// </summary>
+        // ✅ PERFORMANCE FIX: Cache UI component references
+        private TacticalCombat.UI.MainMenu cachedMainMenu;
+        private TacticalCombat.UI.GameModeSelectionUI cachedGameModeSelection;
+        private TacticalCombat.UI.RoleSelectionUI cachedRoleSelection;
+        private TacticalCombat.UI.TeamSelectionUI cachedTeamSelection;
+        private float lastUICacheTime = 0f;
+        private const float UI_CACHE_REFRESH_INTERVAL = 1f; // Refresh cache every 1 second
+        
         private bool IsAnyUIOpen()
         {
             // ✅ CRITICAL FIX: Check MatchManager phase FIRST (Lobby phase = UI open)
@@ -1194,18 +1208,26 @@ private void Update()
                 }
             }
             
-            // ✅ FIX: Use public IsPanelOpen() methods for accurate UI state checking
+            // ✅ PERFORMANCE FIX: Refresh UI cache periodically (not every frame)
+            if (Time.time - lastUICacheTime >= UI_CACHE_REFRESH_INTERVAL)
+            {
+                cachedMainMenu = FindFirstObjectByType<TacticalCombat.UI.MainMenu>();
+                cachedGameModeSelection = FindFirstObjectByType<TacticalCombat.UI.GameModeSelectionUI>();
+                cachedRoleSelection = FindFirstObjectByType<TacticalCombat.UI.RoleSelectionUI>();
+                cachedTeamSelection = FindFirstObjectByType<TacticalCombat.UI.TeamSelectionUI>();
+                lastUICacheTime = Time.time;
+            }
             
-            // Check MainMenu using public method
-            var mainMenu = FindFirstObjectByType<TacticalCombat.UI.MainMenu>();
-            if (mainMenu != null && mainMenu.IsPanelOpen())
+            // ✅ FIX: Use cached references and public IsPanelOpen() methods
+            
+            // Check MainMenu using cached reference
+            if (cachedMainMenu != null && cachedMainMenu.IsPanelOpen())
             {
                 return true;
             }
 
-            // ✅ NEW: Check GameModeSelectionUI using public method
-            var gameModeSelection = FindFirstObjectByType<TacticalCombat.UI.GameModeSelectionUI>();
-            if (gameModeSelection != null && gameModeSelection.IsPanelOpen())
+            // Check GameModeSelectionUI using cached reference
+            if (cachedGameModeSelection != null && cachedGameModeSelection.IsPanelOpen())
             {
                 return true;
             }
@@ -1217,22 +1239,59 @@ private void Update()
                 return true;
             }
 
-            // Check RoleSelectionUI using public method
-            var roleSelection = FindFirstObjectByType<TacticalCombat.UI.RoleSelectionUI>();
-            if (roleSelection != null && roleSelection.IsPanelOpen())
+            // Check RoleSelectionUI using cached reference
+            if (cachedRoleSelection != null && cachedRoleSelection.IsPanelOpen())
             {
                 return true;
             }
 
-            // Check TeamSelectionUI using public method
-            var teamSelection = FindFirstObjectByType<TacticalCombat.UI.TeamSelectionUI>();
-            if (teamSelection != null && teamSelection.IsPanelOpen())
+            // Check TeamSelectionUI using cached reference
+            if (cachedTeamSelection != null && cachedTeamSelection.IsPanelOpen())
             {
                 return true;
             }
 
             // No UI open - safe to handle cursor locking
             return false;
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Cleanup Input System actions on destroy to prevent memory leaks
+        /// </summary>
+        private void OnDestroy()
+        {
+            // Unsubscribe from Input System actions
+            try
+            {
+                if (jumpAction != null)
+                {
+                    jumpAction.performed -= OnJumpPerformed;
+                    jumpAction.Disable();
+                }
+                if (sprintAction != null)
+                {
+                    sprintAction.performed -= OnSprintPerformed;
+                    sprintAction.canceled -= OnSprintCanceled;
+                    sprintAction.Disable();
+                }
+                if (moveAction != null)
+                {
+                    moveAction.Disable();
+                }
+                if (lookAction != null)
+                {
+                    lookAction.Disable();
+                }
+            }
+            catch (System.Exception e)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"[FPSController] Error cleaning up Input System actions: {e.Message}");
+                #endif
+            }
+            
+            // Stop all coroutines
+            StopAllCoroutines();
         }
     }
 }

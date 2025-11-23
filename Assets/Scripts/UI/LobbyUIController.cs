@@ -854,15 +854,20 @@ namespace TacticalCombat.UI
             Image btnImg = readyButton.GetComponent<Image>();
             TextMeshProUGUI btnText = readyButton.GetComponentInChildren<TextMeshProUGUI>();
 
+            // ✅ FIX: Buton mevcut durumu değil, geçmek istediği durumu göstermeli
+            // Eğer oyuncu hazırsa, butonda "NOT READY" yazmalı (çünkü tıklayınca hazır olmayacak)
+            // Eğer oyuncu hazır değilse, butonda "READY" yazmalı (çünkü tıklayınca hazır olacak)
             if (isLocalPlayerReady)
             {
-                btnImg.color = readyColor;
-                if (btnText != null) btnText.text = "READY";
+                // Oyuncu hazır -> butonda "NOT READY" yazmalı (tıklayınca hazır olmayacak)
+                btnImg.color = notReadyColor;
+                if (btnText != null) btnText.text = "NOT READY";
             }
             else
             {
-                btnImg.color = notReadyColor;
-                if (btnText != null) btnText.text = "NOT READY";
+                // Oyuncu hazır değil -> butonda "READY" yazmalı (tıklayınca hazır olacak)
+                btnImg.color = readyColor;
+                if (btnText != null) btnText.text = "READY";
             }
         }
 
@@ -1217,7 +1222,7 @@ namespace TacticalCombat.UI
             }
         }
 
-        private void RefreshPlayerList()
+        public void RefreshPlayerList()
         {
             Debug.Log($"🔍 [LobbyUIController] RefreshPlayerList called - lobbyManager: {lobbyManager != null}, container: {playerListContainer != null}");
             

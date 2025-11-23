@@ -176,12 +176,15 @@ namespace TacticalCombat.UI
         private void UpdateHealthAndAmmo()
         {
             // ✅ CRITICAL FIX: Cache local player reference to avoid FindFirstObjectByType every frame
-            if (cachedLocalPlayer == null)
+            // ✅ LOGIC FIX: Validate cached player is still valid (might have been destroyed/respawned)
+            if (cachedLocalPlayer == null || !cachedLocalPlayer.isLocalPlayer || cachedLocalPlayer.gameObject == null)
             {
+                // Cache is invalid, refresh it
+                cachedLocalPlayer = null;
                 var players = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
                 foreach (var player in players)
                 {
-                    if (player.isLocalPlayer)
+                    if (player != null && player.isLocalPlayer)
                     {
                         cachedLocalPlayer = player;
                         break;
@@ -334,16 +337,40 @@ namespace TacticalCombat.UI
             }
         }
 
+        /// <summary>
+        /// ✅ NEW: Update combat transition countdown (called by MatchManager RPC)
+        /// </summary>
+        public void UpdateCombatTransitionCountdown(int secondsRemaining)
+        {
+            if (phaseText != null)
+            {
+                if (secondsRemaining > 0)
+                {
+                    phaseText.text = $"COMBAT STARTING IN {secondsRemaining}...";
+                }
+                else
+                {
+                    phaseText.text = "COMBAT PHASE";
+                }
+            }
+            
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"[GameHUD] Combat transition countdown: {secondsRemaining} seconds");
+            #endif
+        }
+        
         private void UpdateCoreCarrying()
         {
             // ✅ CRITICAL FIX: Cache local player instead of FindFirstObjectByType every 100ms
-            if (cachedLocalPlayer == null)
+            // ✅ LOGIC FIX: Validate cached player is still valid (might have been destroyed/respawned)
+            if (cachedLocalPlayer == null || !cachedLocalPlayer.isLocalPlayer || cachedLocalPlayer.gameObject == null)
             {
-                // Try to find local player (only when null)
+                // Cache is invalid, refresh it
+                cachedLocalPlayer = null;
                 var players = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
                 foreach (var player in players)
                 {
-                    if (player.isLocalPlayer)
+                    if (player != null && player.isLocalPlayer)
                     {
                         cachedLocalPlayer = player;
                         break;
@@ -362,7 +389,7 @@ namespace TacticalCombat.UI
             }
 
             // Check if cached player is still valid
-            if (cachedLocalPlayer != null && cachedLocalPlayer.isLocalPlayer)
+            if (cachedLocalPlayer != null && cachedLocalPlayer.isLocalPlayer && cachedLocalPlayer.gameObject != null)
             {
                 bool isCarrying = cachedLocalPlayer.IsCarryingCore();
 

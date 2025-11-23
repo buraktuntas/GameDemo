@@ -29,6 +29,9 @@ namespace TacticalCombat.Player
 
         public System.Action<float> OnCooldownChanged;
         public System.Action<bool> OnAbilityActiveChanged;
+        
+        // ✅ FIX: Static flag to prevent duplicate warnings (RpcShowAllPlayers calls OnStartLocalPlayer multiple times)
+        private static bool s_hasWarnedAboutUseAbility = false;
 
         private void Awake()
         {
@@ -56,12 +59,21 @@ namespace TacticalCombat.Player
                     }
                     else
                     {
-                        Debug.LogWarning("[AbilityController] UseAbility action not found in Player action map");
+                        // ✅ FIX: UseAbility action not in Input System - use fallback (legacy Input or disable)
+                        // ✅ FIX: Only warn once (prevents spam from RpcShowAllPlayers calling OnStartLocalPlayer multiple times)
+                        // ✅ FIX: Only warn in development builds (reduces console spam)
+                        #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                        if (!s_hasWarnedAboutUseAbility)
+                        {
+                            Debug.LogWarning("[AbilityController] UseAbility action not found in Player action map - ability input disabled. To fix: Add 'UseAbility' action to 'Player' action map in InputSystem_Actions.inputactions");
+                            s_hasWarnedAboutUseAbility = true;
+                        }
+                        #endif
                     }
                 }
                 else
                 {
-                    Debug.LogWarning("[AbilityController] Player action map not found");
+                    Debug.LogWarning("[AbilityController] Player action map not found - ability input disabled");
                 }
             }
 

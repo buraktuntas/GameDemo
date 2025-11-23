@@ -44,6 +44,14 @@ namespace TacticalCombat.Network
         // Singleton instance
         public static LobbyManager Instance { get; private set; }
 
+        // ✅ MEMORY LEAK FIX: Track active coroutines for cleanup
+        private Coroutine activeRetryConnectionCoroutine = null;
+        private Coroutine activeShowVisualsCoroutine = null;
+        private Coroutine activeAutoStartCoroutine = null;
+        private Coroutine activeCameraSetupCoroutine = null;
+        private Coroutine activeDisconnectCoroutine = null;
+        private readonly List<Coroutine> activeCoroutines = new List<Coroutine>();
+
         #region Unity & Network Lifecycle
 
         private void Awake()
@@ -55,6 +63,32 @@ namespace TacticalCombat.Network
             }
             Instance = this;
             DontDestroyOnLoad(gameObject);
+        }
+
+        private void OnDestroy()
+        {
+            // ✅ MEMORY LEAK FIX: Clean up all active coroutines
+            if (activeRetryConnectionCoroutine != null) StopCoroutine(activeRetryConnectionCoroutine);
+            if (activeShowVisualsCoroutine != null) StopCoroutine(activeShowVisualsCoroutine);
+            if (activeAutoStartCoroutine != null) StopCoroutine(activeAutoStartCoroutine);
+            if (activeCameraSetupCoroutine != null) StopCoroutine(activeCameraSetupCoroutine);
+            if (activeDisconnectCoroutine != null) StopCoroutine(activeDisconnectCoroutine);
+
+            // Stop all tracked coroutines
+            foreach (var coroutine in activeCoroutines)
+            {
+                if (coroutine != null) StopCoroutine(coroutine);
+            }
+            activeCoroutines.Clear();
+
+            // Cancel all Invoke calls
+            CancelInvoke();
+
+            // Clear instance reference
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
 
         public override void OnStartServer()
@@ -96,6 +130,26 @@ namespace TacticalCombat.Network
             {
                 // ✅ CRITICAL: Ensure LobbyUIController is shown when client connects
                 lobbyController.ShowLobby();
+                
+                // ✅ CRITICAL FIX: Force refresh player list when client connects
+                // This ensures client sees all players (including host) that were registered before client connected
+                StartCoroutine(DelayedClientRefresh());
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Delayed refresh to ensure client sees all players (including host)
+        /// </summary>
+        private System.Collections.IEnumerator DelayedClientRefresh()
+        {
+            // Wait a frame for SyncList to fully sync
+            yield return null;
+            
+            var lobbyController = TacticalCombat.UI.LobbyUIController.Instance;
+            if (lobbyController != null)
+            {
+                Debug.Log($"[LobbyManager] 🔄 DelayedClientRefresh: Refreshing player list ({players.Count} players)");
+                lobbyController.RefreshPlayerList();
             }
         }
 
@@ -109,22 +163,6 @@ namespace TacticalCombat.Network
         {
             base.OnStopClient();
             players.Callback -= OnPlayersListChanged;
-        }
-
-        // ✅ MEMORY LEAK FIX: Clean up on destroy
-        private void OnDestroy()
-        {
-            // Unsubscribe from SyncList callbacks
-            players.Callback -= OnPlayersListChanged;
-
-            // Stop all coroutines
-            StopAllCoroutines();
-
-            // Clear instance reference if this is the active instance
-            if (Instance == this)
-            {
-                Instance = null;
-            }
         }
 
         #endregion
@@ -145,7 +183,9 @@ namespace TacticalCombat.Network
                 RpcShowLobbyFullError(conn, $"Lobby is full! Maximum {maxPlayers} players allowed.");
                 
                 // Wait a moment for RPC to be sent before disconnecting
-                StartCoroutine(DisconnectPlayerAfterError(conn));
+                // ✅ MEMORY LEAK FIX: Track coroutine (add to list for cleanup)
+                var disconnectCoroutine = StartCoroutine(DisconnectPlayerAfterError(conn));
+                activeCoroutines.Add(disconnectCoroutine);
                 return;
             }
 
@@ -182,35 +222,45 @@ namespace TacticalCombat.Network
 
             // ✅ CRITICAL: Send connection ID to client (retry mechanism)
             uint connId = (uint)conn.connectionId;
-            Debug.Log($"[LobbyManager] 📡 Sending RpcSetLocalConnectionId to client (ConnectionID: {connId})");
-            RpcSetLocalConnectionId(conn, connId);
+            Debug.Log($"[LobbyManager] 📡 Sending TargetSetLocalConnectionId to client (ConnectionID: {connId})");
+            TargetSetLocalConnectionId(conn, connId);
 
             // ✅ CRITICAL: Retry RPC after a delay to ensure it arrives
-            StartCoroutine(RetrySetLocalConnectionId(conn, connId));
+            // ✅ MEMORY LEAK FIX: Track coroutine for cleanup
+            if (activeRetryConnectionCoroutine != null) StopCoroutine(activeRetryConnectionCoroutine);
+            activeRetryConnectionCoroutine = StartCoroutine(RetrySetLocalConnectionId(conn, connId));
 
             // ✅ DISABLED: Auto-start removed - user must click "Start Game" button
             // CheckAutoStart(); // REMOVED - no auto-start
         }
 
         /// <summary>
-        /// ✅ AAA FIX: Retry mechanism for RpcSetLocalConnectionId
+        /// ✅ AAA FIX: Retry mechanism for TargetSetLocalConnectionId
         /// Mirror RPCs can sometimes be lost if client is not fully ready
+        /// ✅ FIX: Retry 3 times with increasing delays
         /// </summary>
         [Server]
         private System.Collections.IEnumerator RetrySetLocalConnectionId(NetworkConnectionToClient conn, uint connectionId)
         {
-            // Wait for client to fully initialize
-            yield return new WaitForSeconds(0.5f);
+            // ✅ FIX: Retry 3 times with exponential backoff
+            float[] retryDelays = { 0.5f, 1.0f, 2.0f };
 
-            // Retry RPC
-            if (conn != null && conn.isReady)
+            for (int attempt = 0; attempt < retryDelays.Length; attempt++)
             {
-                Debug.Log($"[LobbyManager] 🔄 Retrying RpcSetLocalConnectionId (ConnectionID: {connectionId})");
-                RpcSetLocalConnectionId(conn, connectionId);
-            }
-            else
-            {
-                Debug.LogWarning($"[LobbyManager] ⚠️ Cannot retry RPC - connection lost or not ready");
+                // Wait for client to fully initialize
+                yield return new WaitForSeconds(retryDelays[attempt]);
+
+                // Retry RPC
+                if (conn != null && conn.isReady)
+                {
+                    Debug.Log($"[LobbyManager] 🔄 Retrying TargetSetLocalConnectionId (Attempt {attempt + 1}/{retryDelays.Length}, ConnectionID: {connectionId})");
+                    TargetSetLocalConnectionId(conn, connectionId);
+                }
+                else
+                {
+                    Debug.LogWarning($"[LobbyManager] ⚠️ Cannot retry RPC (Attempt {attempt + 1}) - connection lost or not ready");
+                    yield break; // Stop retrying if connection is lost
+                }
             }
         }
 
@@ -614,7 +664,9 @@ namespace TacticalCombat.Network
             
             // ✅ RACE CONDITION FIX: Wait a frame for phase change to propagate
             // Then show visuals (prevents race condition between phase change and visual updates)
-            StartCoroutine(ShowPlayerVisualsAfterPhaseChange());
+            // ✅ MEMORY LEAK FIX: Track coroutine
+            if (activeShowVisualsCoroutine != null) StopCoroutine(activeShowVisualsCoroutine);
+            activeShowVisualsCoroutine = StartCoroutine(ShowPlayerVisualsAfterPhaseChange());
             
             // ✅ CRITICAL: Hide all UI before starting game
             RpcHideAllUI();
@@ -1223,11 +1275,11 @@ namespace TacticalCombat.Network
         }
 
         [TargetRpc]
-        private void RpcSetLocalConnectionId(NetworkConnection target, uint connectionId)
+        private void TargetSetLocalConnectionId(NetworkConnection target, uint connectionId)
         {
-            // ✅ NEW: Set local connection ID on client
+            // ✅ FIX: Set local connection ID on client (TargetRpc requires "Target" prefix!)
             localConnectionId = connectionId;
-            Debug.Log($"[LobbyManager] ✅ RpcSetLocalConnectionId: Local connection ID set to: {connectionId}");
+            Debug.Log($"[LobbyManager] ✅ TargetSetLocalConnectionId: Local connection ID set to: {connectionId}");
 
             // ✅ CRITICAL: Verify we can now find local player
             var localPlayer = GetLocalPlayer();
@@ -1387,6 +1439,20 @@ namespace TacticalCombat.Network
                         return player;
                     }
                 }
+
+                // ✅ FIX: Fallback for host - if no host flag set, connection ID 0 is always host
+                if (players.Count > 0)
+                {
+                    foreach (var player in players)
+                    {
+                        if (player.connectionId == 0)
+                        {
+                            Debug.LogWarning($"[LobbyManager] GetLocalPlayer: Using fallback - ConnectionID 0 is host: {player.playerName}");
+                            return player;
+                        }
+                    }
+                }
+
                 Debug.LogWarning("[LobbyManager] GetLocalPlayer: We're server but no host player found!");
             }
 

@@ -213,3 +213,4 @@ Oyun, prompt'un %85'ini karşılıyor. Eksikler çoğunlukla yapısal farklar (r
 
 
 
+

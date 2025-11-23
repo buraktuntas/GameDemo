@@ -299,6 +299,17 @@ namespace TacticalCombat.Building
         // Public getter'lar
         public float GetCurrentStability() => currentStability;
         public bool IsGrounded() => isGrounded;
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Clear all structures from static list (called on server stop/destroy to prevent memory leak)
+        /// </summary>
+        public static void ClearAllStructures()
+        {
+            allStructures.Clear();
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log("✅ [StructuralIntegrity] Cleared all structures from static list");
+            #endif
+        }
     }
 }
 

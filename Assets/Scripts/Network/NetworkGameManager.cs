@@ -152,6 +152,10 @@ namespace TacticalCombat.Network
         public override void OnStopServer()
         {
             base.OnStopServer();
+            
+            // ✅ CRITICAL FIX: Clear static caches on server stop to prevent memory leaks
+            Combat.Health.ClearSpawnPointCache();
+            Building.StructuralIntegrity.ClearAllStructures();
             teamACount = 0;
             teamBCount = 0;
             
@@ -190,6 +194,10 @@ namespace TacticalCombat.Network
             
             // ✅ MEMORY LEAK FIX: Cancel Invoke calls
             CancelInvoke();
+            
+            // ✅ CRITICAL FIX: Clear static caches on destroy to prevent memory leaks
+            Combat.Health.ClearSpawnPointCache();
+            Building.StructuralIntegrity.ClearAllStructures();
         }
 
         public override void OnServerAddPlayer(NetworkConnectionToClient conn)
@@ -369,6 +377,9 @@ namespace TacticalCombat.Network
                         MatchManager.Instance.UnregisterPlayer(player.netId);
                         Debug.Log($"✅ [NetworkGameManager] Player {player.netId} unregistered from MatchManager");
                     }
+                    
+                    // ✅ CRITICAL FIX: Cleanup SimpleBuildMode placement times (prevents memory leak)
+                    TacticalCombat.Building.SimpleBuildMode.CleanupPlayerPlacementTimes(player.netId);
                 }
             }
 

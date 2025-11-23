@@ -49,8 +49,18 @@ namespace TacticalCombat.Combat
             // Initial health update for UI (after SyncVar is synced)
             if (isLocalPlayer)
             {
-                // Wait one frame to ensure all components are initialized
-                StartCoroutine(NotifyInitialHealth());
+                // ✅ FIX: Check if GameObject is active before starting coroutine
+                if (gameObject.activeInHierarchy)
+                {
+                    // Wait one frame to ensure all components are initialized
+                    StartCoroutine(NotifyInitialHealth());
+                }
+                else
+                {
+                    // ✅ FIX: GameObject is inactive, invoke directly
+                    OnHealthChangedEvent?.Invoke(currentHealth, maxHealth);
+                    Debug.Log($"🏥 [Client] Initial health (direct): {currentHealth}/{maxHealth}");
+                }
             }
         }
 
@@ -425,6 +435,15 @@ namespace TacticalCombat.Combat
         private static Transform[] cachedSpawnPoints = null;
         private static float lastSpawnPointCacheTime = 0f;
         private const float SPAWN_POINT_CACHE_DURATION = 30f; // Refresh cache every 30 seconds
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Clear spawn point cache (called on scene unload to prevent memory leak)
+        /// </summary>
+        public static void ClearSpawnPointCache()
+        {
+            cachedSpawnPoints = null;
+            lastSpawnPointCacheTime = 0f;
+        }
 
         /// <summary>
         /// ✅ PUBLIC: Get cached spawn points for use by other systems (e.g., ObjectiveManager)

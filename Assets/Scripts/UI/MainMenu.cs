@@ -285,7 +285,8 @@ namespace TacticalCombat.UI
                 // Check if button is blocked by parent
                 if (!buttons[i].gameObject.activeInHierarchy)
                 {
-                    GameLogger.LogWarning($"Button GameObject is INACTIVE!");
+                    // ✅ FIX: Silent check - inactive buttons are expected when panel is hidden
+                    // No warning needed - this is normal behavior
                 }
             }
         }
@@ -773,7 +774,10 @@ namespace TacticalCombat.UI
             
             foreach (var blocker in blockers)
             {
+                // ✅ FIX: Only log in development builds (reduces console spam)
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 GameLogger.LogWarning($"⚠️ [MainMenu] Found blocking UI: {GetFullPath(blocker.transform)}");
+                #endif
                 blocker.SetActive(false);
                 GameLogger.LogUI($"✅ [MainMenu] Disabled blocker: {blocker.name}");
             }

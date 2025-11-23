@@ -33,7 +33,8 @@ namespace TacticalCombat.Building
         [SerializeField] private LayerMask structureLayer; // for stability/support checks
         public float placementDistance = 5f;
         public float rotationSpeed = 90f;
-        public Key buildModeKey = Key.B;
+        [SerializeField] private Key buildModeKey = Key.B;
+        
         public Key rotateKey = Key.R;
         public Key cycleStructureKey = Key.Tab;
         public float gridSize = 1f;
@@ -96,6 +97,8 @@ namespace TacticalCombat.Building
         
         // ✅ FIX: Track initialization state
         private bool isInitialized = false;
+        
+        // ✅ REMOVED: Debug flags (no longer needed)
 
         // NonAlloc buffers
         private static readonly Collider[] stabilityBuffer = new Collider[256];
@@ -108,24 +111,41 @@ namespace TacticalCombat.Building
         public override void OnStartLocalPlayer()
         {
             base.OnStartLocalPlayer();
-            Debug.Log($"[SimpleBuildMode] OnStartLocalPlayer() called - GameObject: {gameObject.name}");
+            
+            // ✅ CRITICAL FIX: Force buildModeKey to B (prefab might have F5 or wrong key)
+            if (buildModeKey != Key.B)
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning($"[SimpleBuildMode] ⚠️ buildModeKey was {buildModeKey}, forcing to Key.B");
+                #endif
+                buildModeKey = Key.B;
+            }
+            
+            // ✅ CRITICAL: Ensure component is enabled
+            if (!enabled)
+            {
+                enabled = true;
+            }
+            
+            // ✅ CRITICAL: Ensure GameObject is active
+            if (!gameObject.activeInHierarchy)
+            {
+                gameObject.SetActive(true);
+                
+                // ✅ CRITICAL FIX: Wait one frame after activation to ensure Update() starts
+                StartCoroutine(EnsureUpdateStartsAfterActivation());
+            }
+            
             InitializeBuildMode();
         }
         
         private void Start()
         {
-            // ✅ DEBUG: Always log Start() to verify component is active
-            Debug.Log($"[SimpleBuildMode] Start() called - isLocalPlayer: {isLocalPlayer}, GameObject: {gameObject.name}");
-            
             // ✅ FIX: Don't initialize here - wait for OnStartLocalPlayer()
             // NetworkBehaviour.isLocalPlayer is only set after OnStartLocalPlayer() is called
             if (isLocalPlayer)
             {
                 InitializeBuildMode();
-            }
-            else
-            {
-                Debug.LogWarning($"[SimpleBuildMode] Not local player in Start() - will wait for OnStartLocalPlayer()");
             }
         }
         
@@ -134,30 +154,18 @@ namespace TacticalCombat.Building
             // ✅ FIX: Prevent double initialization using flag
             if (isInitialized)
             {
-                Debug.LogWarning("[SimpleBuildMode] Already initialized - skipping");
+                // ✅ FIX: Silent skip - double initialization is normal (e.g., RpcShowAllPlayers)
                 return;
             }
             
-            Debug.Log("[SimpleBuildMode] Initializing build mode...");
-            
             // ✅ FIX: Get weapon system reference
             weaponSystem = GetComponent<WeaponSystem>();
-            if (weaponSystem == null)
-            {
-                Debug.LogWarning("⚠️ [SimpleBuildMode] WeaponSystem not found!");
-            }
             
             // ✅ FIX: Get InputManager reference - her player'ın kendi InputManager'ı var
             inputManager = GetComponent<TacticalCombat.Player.InputManager>();
             if (inputManager == null)
             {
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning("⚠️ [SimpleBuildMode] InputManager not found! Creating one...");
-                #endif
                 inputManager = gameObject.AddComponent<TacticalCombat.Player.InputManager>();
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.Log("✅ [SimpleBuildMode] InputManager created and assigned");
-                #endif
             }
             
             // ✅ PERFORMANCE FIX: Get camera from FPSController (NEVER use Camera.main)
@@ -200,7 +208,6 @@ namespace TacticalCombat.Building
             
             // ✅ CRITICAL FIX: Mark as initialized AFTER everything is set up
             isInitialized = true;
-            Debug.Log("[SimpleBuildMode] ✅ Build mode initialized successfully!");
         }
         
         private void InitializeAvailableStructures()
@@ -311,29 +318,18 @@ namespace TacticalCombat.Building
         
         private void Update()
         {
-            // ✅ DEBUG: Always log first 20 frames to verify Update() is being called
-            if (Time.frameCount <= 20)
-            {
-                Debug.Log($"[SimpleBuildMode] Update() frame {Time.frameCount} - isLocalPlayer: {isLocalPlayer}, isInitialized: {isInitialized}, GameObject: {gameObject.name}, enabled: {enabled}");
-            }
+            // ✅ CRITICAL: Check if component is enabled
+            if (!enabled) return;
+            
+            // ✅ CRITICAL: Check if GameObject is active
+            if (!gameObject.activeInHierarchy) return;
             
             // ✅ CRITICAL FIX: Check isLocalPlayer - it should be true after OnStartLocalPlayer()
-            if (!isLocalPlayer)
-            {
-                if (Time.frameCount <= 20)
-                {
-                    Debug.LogWarning($"[SimpleBuildMode] Update() skipped - not local player: {gameObject.name}");
-                }
-                return;
-            }
+            if (!isLocalPlayer) return;
             
             // ✅ CRITICAL FIX: Ensure initialization happened
             if (!isInitialized)
             {
-                if (Time.frameCount <= 20)
-                {
-                    Debug.LogWarning("[SimpleBuildMode] Not initialized yet - calling InitializeBuildMode()");
-                }
                 InitializeBuildMode();
                 return; // Skip this frame, wait for next frame after initialization
             }
@@ -385,15 +381,25 @@ namespace TacticalCombat.Building
                 if (!isBuildModeActive && MatchManager.Instance != null)
                 {
                     Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log($"🏗️ [SimpleBuildMode] B key pressed - Current phase: {currentPhase}, Build mode active: {isBuildModeActive}");
+                    #endif
+                    
                     if (currentPhase != Phase.Build)
                     {
                         // Optional: Allow in Combat phase if design permits, but for now restrict to Build
                         // If user wants to build in combat, remove this check
                         #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                        Debug.Log($"⚠️ [SimpleBuildMode] Cannot enter build mode in {currentPhase} phase");
+                        Debug.LogWarning($"⚠️ [SimpleBuildMode] Cannot enter build mode in {currentPhase} phase. Build mode is only available during Build phase.");
                         #endif
                         return;
                     }
+                }
+                else if (!isBuildModeActive && MatchManager.Instance == null)
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogWarning("⚠️ [SimpleBuildMode] MatchManager.Instance is null - build mode may not work correctly!");
+                    #endif
                 }
 
                 isTogglingBuildMode = true;
@@ -837,10 +843,82 @@ namespace TacticalCombat.Building
         private const float RATE_LIMIT_WINDOW = 5f; // 5 second window
         private const int MAX_PLACEMENTS_PER_WINDOW = 10; // Max 10 structures per 5 seconds
         private const float SERVER_PLACEMENT_COOLDOWN = 0.25f; // 250ms minimum between placements
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Cleanup placement times for disconnected players (prevents memory leak)
+        /// </summary>
+        [Server]
+        public static void CleanupPlayerPlacementTimes(ulong playerId)
+        {
+            if (playerPlacementTimes.ContainsKey(playerId))
+            {
+                playerPlacementTimes.Remove(playerId);
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.Log($"[SimpleBuildMode] Cleaned up placement times for disconnected player {playerId}");
+                #endif
+            }
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Periodic cleanup of old placement data (prevents memory leak from stale entries)
+        /// </summary>
+        [Server]
+        private static void CleanupOldPlacementData()
+        {
+            float currentTime = Time.time;
+            List<ulong> playersToRemove = new List<ulong>();
+            
+            foreach (var kvp in playerPlacementTimes)
+            {
+                Queue<float> placementTimes = kvp.Value;
+                
+                // Remove old placements outside the time window
+                while (placementTimes.Count > 0 && currentTime - placementTimes.Peek() > RATE_LIMIT_WINDOW)
+                {
+                    placementTimes.Dequeue();
+                }
+                
+                // If queue is empty and player hasn't placed anything recently, remove entry
+                if (placementTimes.Count == 0)
+                {
+                    // Check if player still exists in network
+                    bool playerExists = false;
+                    if (NetworkServer.active && NetworkServer.spawned != null)
+                    {
+                        foreach (var spawned in NetworkServer.spawned.Values)
+                        {
+                            if (spawned != null && spawned.netId == kvp.Key)
+                            {
+                                playerExists = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!playerExists)
+                    {
+                        playersToRemove.Add(kvp.Key);
+                    }
+                }
+            }
+            
+            // Remove disconnected players
+            foreach (var playerId in playersToRemove)
+            {
+                playerPlacementTimes.Remove(playerId);
+            }
+        }
 
         [Command]
         private void CmdPlaceStructure(Vector3 position, Quaternion rotation, int structureIndex)
         {
+            // ✅ CRITICAL FIX: Periodic cleanup of old placement data (prevents memory leak)
+            // Cleanup every 10 seconds to avoid performance impact
+            if (Time.frameCount % 600 == 0) // ~10 seconds at 60 FPS
+            {
+                CleanupOldPlacementData();
+            }
+            
             // ✅ CRITICAL FIX: Per-player rate limiting (prevents spam exploit)
             if (!playerPlacementTimes.ContainsKey(netId))
             {
@@ -1094,6 +1172,21 @@ namespace TacticalCombat.Building
             }
             marker_FindSupport.End();
             return foundSupport ? nearestDistance : -1f;
+        }
+        
+        /// <summary>
+        /// ✅ CRITICAL FIX: Ensure Update() starts after GameObject activation
+        /// </summary>
+        private System.Collections.IEnumerator EnsureUpdateStartsAfterActivation()
+        {
+            // Wait one frame to ensure Update() loop starts
+            yield return null;
+            
+            // Force enable component if needed
+            if (!enabled)
+            {
+                enabled = true;
+            }
         }
         
         private void OnDisable()

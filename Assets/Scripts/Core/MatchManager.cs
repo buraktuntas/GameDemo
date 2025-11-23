@@ -10,6 +10,8 @@ namespace TacticalCombat.Core
 {
     public class MatchManager : NetworkBehaviour
     {
+        // ✅ CRITICAL FIX: Static HashSet for registered prefabs (prevents duplicate registrations)
+        // ⚠️ NOTE: This is cleared on scene unload to prevent memory leaks
         private static readonly HashSet<GameObject> s_registeredPrefabs = new HashSet<GameObject>();
         public static MatchManager Instance { get; private set; }
 
@@ -24,6 +26,7 @@ namespace TacticalCombat.Core
 
         [Header("Configuration")]
         [SerializeField] private float buildDuration = GameConstants.BUILD_DURATION;
+        [SerializeField] private float combatTransitionDuration = GameConstants.COMBAT_TRANSITION_DURATION;
         [SerializeField] private float combatDuration = GameConstants.COMBAT_DURATION;
         [SerializeField] private float suddenDeathDuration = GameConstants.SUDDEN_DEATH_DURATION;
         [SerializeField] private float endPhaseDuration = GameConstants.END_PHASE_DURATION;
@@ -85,6 +88,10 @@ namespace TacticalCombat.Core
 
             // Cancel all Invoke calls
             CancelInvoke();
+
+            // ✅ CRITICAL FIX: Clear static HashSet on destroy to prevent memory leak
+            // This ensures prefab registration cache is cleared when MatchManager is destroyed
+            s_registeredPrefabs.Clear();
 
             // Clear instance reference if this is the active instance
             if (Instance == this)
@@ -193,7 +200,10 @@ namespace TacticalCombat.Core
             }
             else
             {
+                // ✅ FIX: Only warn in development builds (reduces console spam)
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 LogWarning("SimpleBuildMode not found - BuildValidator prefabs will be empty");
+                #endif
             }
             
             // Spawn on network (required for NetworkBehaviour)
@@ -270,10 +280,13 @@ namespace TacticalCombat.Core
             // ✅ REMOVED: Clan system reset (clan system removed)
             
             // ✅ CORE STABILITY: Find ObjectiveManager (null-safe)
-            objectiveManager = FindFirstObjectByType<ObjectiveManager>();
+            objectiveManager = FindFirstObjectByType<ObjectiveManager>(FindObjectsInactive.Include);
             if (objectiveManager == null)
             {
-                LogWarning("[MatchManager] ObjectiveManager not found in scene - core objectives may not work");
+                // ✅ FIX: Single consolidated warning (reduces console spam)
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                LogWarning("[MatchManager] ⚠️ ObjectiveManager not found in scene - core objectives will not work! This is OK for deathmatch/team deathmatch modes. For objective-based modes, please add ObjectiveManager to scene.");
+                #endif
             }
             
             // ✅ CRITICAL FIX: Do NOT auto-start match - wait for lobby system to start it
@@ -477,7 +490,55 @@ namespace TacticalCombat.Core
                 yield return null;
             }
 
+            // ✅ NEW: 3 second transition countdown before combat starts
+            StartCoroutine(CombatTransitionCountdown());
+        }
+        
+        /// <summary>
+        /// ✅ NEW: 3 second transition countdown before combat phase starts
+        /// </summary>
+        [Server]
+        private IEnumerator CombatTransitionCountdown()
+        {
+            float transitionTime = combatTransitionDuration;
+            
+            // Notify clients that transition is starting
+            RpcOnCombatTransition(transitionTime);
+            
+            while (transitionTime > 0)
+            {
+                transitionTime -= Time.deltaTime;
+                RpcUpdateCombatTransitionCountdown(Mathf.CeilToInt(transitionTime));
+                yield return null;
+            }
+            
+            // Transition complete - start combat phase
             TransitionToCombat();
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Notify clients that combat transition is starting
+        /// </summary>
+        [ClientRpc]
+        private void RpcOnCombatTransition(float duration)
+        {
+            // Phase is still Build during transition, but UI can show countdown
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"[MatchManager] Combat transition starting - {duration} seconds");
+            #endif
+        }
+        
+        /// <summary>
+        /// ✅ NEW: Update combat transition countdown on clients
+        /// </summary>
+        [ClientRpc]
+        private void RpcUpdateCombatTransitionCountdown(int secondsRemaining)
+        {
+            // Update GameHUD with countdown
+            if (UI.GameHUD.Instance != null)
+            {
+                UI.GameHUD.Instance.UpdateCombatTransitionCountdown(secondsRemaining);
+            }
         }
 
         /// <summary>
@@ -675,7 +736,7 @@ namespace TacticalCombat.Core
             }
             
             // ✅ CRITICAL FIX: Show GameHUD when match starts
-            var gameHUD = FindFirstObjectByType<TacticalCombat.UI.GameHUD>();
+            var gameHUD = FindFirstObjectByType<TacticalCombat.UI.GameHUD>(FindObjectsInactive.Include);
             if (gameHUD != null)
             {
                 gameHUD.gameObject.SetActive(true);
@@ -683,7 +744,9 @@ namespace TacticalCombat.Core
             }
             else
             {
-                LogWarning("[MatchManager] GameHUD not found in scene!");
+                // ✅ FIX: GameHUD not found - try to find in scene or warn user
+                LogWarning("[MatchManager] ⚠️ GameHUD not found in scene! UI will not be shown.");
+                LogWarning("[MatchManager]   Please add GameHUD prefab to scene or create one.");
             }
 
             LogInfo("[MatchManager] All players shown (match started)");
@@ -1284,10 +1347,14 @@ namespace TacticalCombat.Core
             LogInfo("[Client] Match restarted!");
             
             // Hide end game scoreboard
-            var endScoreboard = FindFirstObjectByType<UI.EndGameScoreboard>();
+            var endScoreboard = FindFirstObjectByType<UI.EndGameScoreboard>(FindObjectsInactive.Include);
             if (endScoreboard != null)
             {
                 endScoreboard.HideScoreboard();
+            }
+            else
+            {
+                LogWarning("[MatchManager] EndGameScoreboard not found (restart) - this is OK if scoreboard was never shown");
             }
         }
 
@@ -1376,21 +1443,24 @@ namespace TacticalCombat.Core
             }
             
             // ✅ CRITICAL: Hide game HUD and show end-game scoreboard
-            var gameHUD = FindFirstObjectByType<UI.GameHUD>();
+            var gameHUD = FindFirstObjectByType<UI.GameHUD>(FindObjectsInactive.Include);
             if (gameHUD != null)
             {
                 gameHUD.gameObject.SetActive(false);
             }
-            
+
             // Show end-game scoreboard
-            var endScoreboard = FindFirstObjectByType<UI.EndGameScoreboard>();
+            var endScoreboard = FindFirstObjectByType<UI.EndGameScoreboard>(FindObjectsInactive.Include);
             if (endScoreboard != null)
             {
                 endScoreboard.ShowScoreboard(winner, awardsDict);
             }
             else
             {
-                LogError("[MatchManager] EndGameScoreboard not found! Cannot show end screen.");
+                // ✅ FIX: EndGameScoreboard not found - provide helpful error message (only in development builds)
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                LogError("[MatchManager] ❌ EndGameScoreboard not found! Cannot show end screen. Please add EndGameScoreboard prefab to scene. Match ended but players won't see results!");
+                #endif
             }
             
             // ✅ NEW: Notify UIFlowManager
@@ -1468,6 +1538,11 @@ namespace TacticalCombat.Core
         /// ✅ NEW: Client-side cache for player stats
         /// </summary>
         private Dictionary<ulong, MatchStats> clientStatsCache = new Dictionary<ulong, MatchStats>();
+
+        /// <summary>
+        /// ✅ BANDWIDTH OPTIMIZATION: Server-side previous stats cache for delta compression
+        /// </summary>
+        private Dictionary<ulong, MatchStats> previousStatsCache = new Dictionary<ulong, MatchStats>();
         
         /// <summary>
         /// ✅ NEW: Get player stats from cache (client-side)
@@ -1525,13 +1600,14 @@ namespace TacticalCombat.Core
         /// <summary>
         /// ✅ NEW: Notify clients when stats change (called from ScoreManager)
         /// ✅ NETWORK OPTIMIZATION: Throttled to reduce network traffic
+        /// ✅ BANDWIDTH OPTIMIZATION: Delta compression - only sync if stats changed
         /// </summary>
         [Server]
         public void NotifyStatsChanged(ulong playerId)
         {
             var stats = GetPlayerMatchStats(playerId);
             if (stats == null) return;
-            
+
             // ✅ NETWORK OPTIMIZATION: Throttle stats sync to avoid spam
             float currentTime = Time.time;
             if (lastStatsSyncTime.TryGetValue(playerId, out float lastSync))
@@ -1543,11 +1619,44 @@ namespace TacticalCombat.Core
                     return;
                 }
             }
-            
-            // Sync stats
+
+            // ✅ BANDWIDTH OPTIMIZATION: Delta compression - check if stats actually changed
+            if (previousStatsCache.TryGetValue(playerId, out MatchStats prevStats))
+            {
+                // Compare with previous stats - only sync if changed
+                if (prevStats.kills == stats.kills &&
+                    prevStats.deaths == stats.deaths &&
+                    prevStats.assists == stats.assists &&
+                    prevStats.structuresBuilt == stats.structuresBuilt &&
+                    prevStats.trapKills == stats.trapKills &&
+                    prevStats.captures == stats.captures &&
+                    Mathf.Approximately(prevStats.defenseTime, stats.defenseTime) &&
+                    prevStats.totalScore == stats.totalScore)
+                {
+                    // No changes - skip sync (saves ~40 bytes per player)
+                    return;
+                }
+            }
+
+            // Sync stats (they changed or first time)
             RpcSendPlayerStats(playerId, stats.kills, stats.deaths, stats.assists,
                 stats.structuresBuilt, stats.trapKills, stats.captures, stats.defenseTime, stats.totalScore);
-            
+
+            // ✅ BANDWIDTH OPTIMIZATION: Cache current stats for next comparison
+            if (!previousStatsCache.ContainsKey(playerId))
+            {
+                previousStatsCache[playerId] = new MatchStats(playerId);
+            }
+            var cachedStats = previousStatsCache[playerId];
+            cachedStats.kills = stats.kills;
+            cachedStats.deaths = stats.deaths;
+            cachedStats.assists = stats.assists;
+            cachedStats.structuresBuilt = stats.structuresBuilt;
+            cachedStats.trapKills = stats.trapKills;
+            cachedStats.captures = stats.captures;
+            cachedStats.defenseTime = stats.defenseTime;
+            cachedStats.totalScore = stats.totalScore;
+
             // Update last sync time
             lastStatsSyncTime[playerId] = currentTime;
         }

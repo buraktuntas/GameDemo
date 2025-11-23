@@ -34,6 +34,7 @@ namespace TacticalCombat.Editor
         private string characterName = "MixamoCharacter";
         private bool createAnimatorController = true;
         private bool setupAvatar = true;
+        private bool fixTexturesAndMaterials = true; // ✅ NEW: Fix Mixamo texture/material issues
         
         [Header("Animation Settings")]
         private bool filterAnimations = false;
@@ -200,6 +201,13 @@ namespace TacticalCombat.Editor
             GUILayout.Label("4. Settings:", EditorStyles.boldLabel);
             createAnimatorController = EditorGUILayout.Toggle("Create Animator Controller", createAnimatorController);
             setupAvatar = EditorGUILayout.Toggle("Setup Avatar (Humanoid)", setupAvatar);
+            fixTexturesAndMaterials = EditorGUILayout.Toggle("Fix Textures & Materials (Mixamo gray fix)", fixTexturesAndMaterials);
+            if (fixTexturesAndMaterials)
+            {
+                EditorGUI.indentLevel++;
+                EditorGUILayout.HelpBox("Fixes gray textures and missing colors on Mixamo characters by:\n• Extracting embedded materials\n• Configuring texture import settings\n• Setting up proper shaders", MessageType.Info);
+                EditorGUI.indentLevel--;
+            }
             createBlendTree = EditorGUILayout.Toggle("Create Blend Tree (Walk/Run)", createBlendTree);
             transitionDuration = EditorGUILayout.Slider("Transition Duration", transitionDuration, 0.1f, 1f);
             useRootMotion = EditorGUILayout.Toggle("Use Root Motion", useRootMotion);
@@ -333,6 +341,13 @@ namespace TacticalCombat.Editor
                 Debug.Log("📦 Step 1: Setting up T-pose character model...");
                 Avatar avatar = null;
                 modified |= SetupCharacterModel(playerInstance, out avatar);
+                
+                // Step 1.5: Fix Textures & Materials (if requested)
+                if (fixTexturesAndMaterials)
+                {
+                    Debug.Log("\n🎨 Step 1.5: Fixing textures and materials...");
+                    modified |= FixTexturesAndMaterials(playerInstance);
+                }
 
                 // Step 2: Setup Animations
                 Debug.Log("\n🎬 Step 2: Setting up animations...");
@@ -1181,6 +1196,263 @@ namespace TacticalCombat.Editor
                     Debug.Log("✅ Test instance created in scene. Check it in Hierarchy.");
                 }
             }
+        }
+
+        /// <summary>
+        /// ✅ NEW: Fix Mixamo texture and material issues (gray textures, missing colors)
+        /// </summary>
+        private bool FixTexturesAndMaterials(GameObject playerInstance)
+        {
+            bool modified = false;
+            
+            if (tPoseCharacter == null)
+            {
+                Debug.LogWarning("⚠️ [MixamoCompleteSetup] No character model selected for texture fix!");
+                return false;
+            }
+
+            string modelPath = AssetDatabase.GetAssetPath(tPoseCharacter);
+            if (string.IsNullOrEmpty(modelPath))
+            {
+                Debug.LogWarning("⚠️ [MixamoCompleteSetup] Could not get model path!");
+                return false;
+            }
+
+            // Find character model in player instance
+            Transform playerVisual = playerInstance.transform.Find("PlayerVisual");
+            if (playerVisual == null)
+            {
+                Debug.LogWarning("⚠️ [MixamoCompleteSetup] PlayerVisual not found!");
+                return false;
+            }
+
+            // Find character instance
+            GameObject characterInstance = null;
+            foreach (Transform child in playerVisual)
+            {
+                if (child.name == characterName || child.name.Contains("Ch33") || child.name.Contains("Mixamo"))
+                {
+                    characterInstance = child.gameObject;
+                    break;
+                }
+            }
+
+            if (characterInstance == null)
+            {
+                Debug.LogWarning("⚠️ [MixamoCompleteSetup] Character instance not found in PlayerVisual!");
+                return false;
+            }
+
+            Debug.Log($"✅ Found character instance: {characterInstance.name}");
+
+            // Fix ModelImporter settings
+            ModelImporter importer = AssetImporter.GetAtPath(modelPath) as ModelImporter;
+            if (importer != null)
+            {
+                bool reimportNeeded = false;
+
+                // ✅ FIX: Use materialImportMode instead of deprecated importMaterials
+                // Check if material import is disabled and enable it
+                var currentMode = importer.materialImportMode;
+                if (currentMode == ModelImporterMaterialImportMode.None)
+                {
+                    // Try to set to a valid import mode
+                    // Check available enum values dynamically
+                    var enumValues = System.Enum.GetValues(typeof(ModelImporterMaterialImportMode));
+                    foreach (var value in enumValues)
+                    {
+                        if (value.ToString() != "None")
+                        {
+                            try
+                            {
+                                importer.materialImportMode = (ModelImporterMaterialImportMode)value;
+                                reimportNeeded = true;
+                                Debug.Log($"✅ Enabled material import (mode: {value})");
+                                break;
+                            }
+                            catch
+                            {
+                                // Continue to next value
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    Debug.Log($"ℹ️ Material import already enabled (mode: {currentMode})");
+                }
+
+                // Set material location (extract to external)
+                if (importer.materialLocation != ModelImporterMaterialLocation.External)
+                {
+                    importer.materialLocation = ModelImporterMaterialLocation.External;
+                    reimportNeeded = true;
+                    Debug.Log("✅ Set material location to External");
+                }
+
+                // Set material naming
+                if (importer.materialName != ModelImporterMaterialName.BasedOnTextureName)
+                {
+                    importer.materialName = ModelImporterMaterialName.BasedOnTextureName;
+                    reimportNeeded = true;
+                    Debug.Log("✅ Set material naming to BasedOnTextureName");
+                }
+
+                // Set material search
+                if (importer.materialSearch != ModelImporterMaterialSearch.Everywhere)
+                {
+                    importer.materialSearch = ModelImporterMaterialSearch.Everywhere;
+                    reimportNeeded = true;
+                    Debug.Log("✅ Set material search to Everywhere");
+                }
+
+                if (reimportNeeded)
+                {
+                    AssetDatabase.ImportAsset(modelPath, ImportAssetOptions.ForceUpdate);
+                    Debug.Log("✅ Reimported model with new material settings");
+                    modified = true;
+                }
+            }
+
+            // Fix materials on character instance
+            Renderer[] renderers = characterInstance.GetComponentsInChildren<Renderer>(true);
+            foreach (Renderer renderer in renderers)
+            {
+                Material[] materials = renderer.sharedMaterials;
+                bool materialsChanged = false;
+
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    if (materials[i] == null) continue;
+
+                    Material mat = materials[i];
+                    string matPath = AssetDatabase.GetAssetPath(mat);
+                    
+                    // Check if material is using wrong shader or has no textures
+                    if (mat.shader.name == "Standard" || mat.shader.name.Contains("Standard"))
+                    {
+                        // Try to find textures
+                        Texture2D mainTex = mat.mainTexture as Texture2D;
+                        Texture2D normalMap = mat.GetTexture("_BumpMap") as Texture2D;
+                        
+                        // If no main texture, try to find it
+                        if (mainTex == null)
+                        {
+                            // Look for texture files in same directory as model
+                            string modelDir = System.IO.Path.GetDirectoryName(modelPath);
+                            string modelName = System.IO.Path.GetFileNameWithoutExtension(modelPath);
+                            
+                            // Common Mixamo texture naming patterns
+                            string[] texturePatterns = {
+                                $"{modelName}_Diffuse",
+                                $"{modelName}_Albedo",
+                                $"{modelName}_BaseColor",
+                                $"{modelName}",
+                                "diffuse",
+                                "albedo",
+                                "basecolor"
+                            };
+
+                            foreach (string pattern in texturePatterns)
+                            {
+                                string[] guids = AssetDatabase.FindAssets($"{pattern} t:Texture2D", new[] { modelDir });
+                                if (guids.Length > 0)
+                                {
+                                    string texPath = AssetDatabase.GUIDToAssetPath(guids[0]);
+                                    mainTex = AssetDatabase.LoadAssetAtPath<Texture2D>(texPath);
+                                    if (mainTex != null)
+                                    {
+                                        Debug.Log($"✅ Found texture: {texPath}");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Apply textures if found
+                        if (mainTex != null)
+                        {
+                            mat.mainTexture = mainTex;
+                            materialsChanged = true;
+                            Debug.Log($"✅ Applied main texture to material: {mat.name}");
+                        }
+
+                        // Fix texture import settings
+                        if (mainTex != null)
+                        {
+                            string texPath = AssetDatabase.GetAssetPath(mainTex);
+                            TextureImporter texImporter = AssetImporter.GetAtPath(texPath) as TextureImporter;
+                            if (texImporter != null)
+                            {
+                                bool texReimportNeeded = false;
+
+                                // Set texture type
+                                if (texImporter.textureType != TextureImporterType.Default)
+                                {
+                                    texImporter.textureType = TextureImporterType.Default;
+                                    texReimportNeeded = true;
+                                }
+
+                                // Enable sRGB for color textures
+                                if (!texImporter.sRGBTexture)
+                                {
+                                    texImporter.sRGBTexture = true;
+                                    texReimportNeeded = true;
+                                }
+
+                                // Set max size
+                                if (texImporter.maxTextureSize < 2048)
+                                {
+                                    texImporter.maxTextureSize = 2048;
+                                    texReimportNeeded = true;
+                                }
+
+                                if (texReimportNeeded)
+                                {
+                                    AssetDatabase.ImportAsset(texPath, ImportAssetOptions.ForceUpdate);
+                                    Debug.Log($"✅ Fixed texture import settings: {texPath}");
+                                }
+                            }
+                        }
+
+                        // Ensure material uses Standard shader with proper settings
+                        if (mat.shader.name != "Standard")
+                        {
+                            mat.shader = Shader.Find("Standard");
+                            materialsChanged = true;
+                            Debug.Log($"✅ Set shader to Standard for material: {mat.name}");
+                        }
+
+                        // Set material properties for better appearance
+                        if (mat.HasProperty("_Metallic"))
+                        {
+                            mat.SetFloat("_Metallic", 0f);
+                        }
+                        if (mat.HasProperty("_Glossiness"))
+                        {
+                            mat.SetFloat("_Glossiness", 0.5f);
+                        }
+                    }
+                }
+
+                if (materialsChanged)
+                {
+                    renderer.sharedMaterials = materials;
+                    EditorUtility.SetDirty(renderer);
+                    modified = true;
+                }
+            }
+
+            if (modified)
+            {
+                Debug.Log("✅ Fixed textures and materials!");
+            }
+            else
+            {
+                Debug.Log("ℹ️ No texture/material fixes needed");
+            }
+
+            return modified;
         }
     }
 }

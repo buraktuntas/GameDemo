@@ -17,7 +17,7 @@ namespace TacticalCombat.Combat
         // Object pooling
         private Queue<GameObject> muzzleFlashPool = new Queue<GameObject>();
         private Queue<GameObject> hitEffectPool = new Queue<GameObject>();
-        private const int POOL_SIZE = 10;
+        private const int POOL_SIZE = 25; // ✅ FIX: Increased from 10 to 25 for rapid-fire weapons
 
         private void Awake()
         {
@@ -33,10 +33,8 @@ namespace TacticalCombat.Combat
                 {
                     GameObject flash = Instantiate(muzzleFlashPrefab);
                     flash.SetActive(false);
-                    if (flash.GetComponent<AutoDestroy>() == null)
-                    {
-                        flash.AddComponent<AutoDestroy>();
-                    }
+                    // ✅ FIX: REMOVED AutoDestroy - it conflicts with pooling (destroys objects instead of returning to pool)
+                    // AutoDestroy causes memory leak as objects are destroyed instead of being reused
                     muzzleFlashPool.Enqueue(flash);
                 }
                 Debug.Log($"✅ [WeaponVFXController] Initialized muzzle flash pool with {POOL_SIZE} objects");
@@ -53,10 +51,7 @@ namespace TacticalCombat.Combat
                 {
                     GameObject effect = Instantiate(hitEffectPrefab);
                     effect.SetActive(false);
-                    if (effect.GetComponent<AutoDestroy>() == null)
-                    {
-                        effect.AddComponent<AutoDestroy>();
-                    }
+                    // ✅ FIX: REMOVED AutoDestroy - same reason as muzzle flash pool
                     hitEffectPool.Enqueue(effect);
                 }
                 Debug.Log($"✅ [WeaponVFXController] Initialized hit effect pool with {POOL_SIZE} objects");
@@ -114,10 +109,7 @@ namespace TacticalCombat.Combat
             {
                 GameObject flash = Instantiate(muzzleFlashPrefab);
                 flash.SetActive(false);
-                if (flash.GetComponent<AutoDestroy>() == null)
-                {
-                    flash.AddComponent<AutoDestroy>();
-                }
+                // ✅ FIX: REMOVED AutoDestroy - consistent with pool initialization
                 Debug.Log($"⚠️ [WeaponVFXController] Pool exhausted! Created new muzzle flash instance. Consider increasing POOL_SIZE.");
                 return flash;
             }
@@ -129,9 +121,21 @@ namespace TacticalCombat.Combat
         private IEnumerator ReturnMuzzleFlashToPool(GameObject flash, float delay)
         {
             yield return new WaitForSeconds(delay);
-            if (flash != null)
+            // ✅ FIX: Added null check and activeInHierarchy check to prevent errors
+            if (flash != null && !flash.activeInHierarchy == false) // Check if object still exists
             {
                 flash.SetActive(false);
+
+                // ✅ FIX: Stop all particle systems before returning to pool
+                var particleSystems = flash.GetComponentsInChildren<ParticleSystem>();
+                foreach (var ps in particleSystems)
+                {
+                    if (ps != null)
+                    {
+                        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                    }
+                }
+
                 muzzleFlashPool.Enqueue(flash);
             }
         }
@@ -180,7 +184,20 @@ namespace TacticalCombat.Combat
             
             // Fallback for specific effects (could add pools for these later)
             GameObject instance = Instantiate(effectPrefab, position, Quaternion.LookRotation(normal));
-            if (instance.GetComponent<AutoDestroy>() == null) instance.AddComponent<AutoDestroy>();
+            // ✅ FIX: Use coroutine to destroy after delay instead of AutoDestroy component
+            StartCoroutine(DestroyAfterDelay(instance, 2f));
+        }
+
+        /// <summary>
+        /// ✅ FIX: Destroy VFX after delay (replacement for AutoDestroy component)
+        /// </summary>
+        private IEnumerator DestroyAfterDelay(GameObject obj, float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            if (obj != null)
+            {
+                Destroy(obj);
+            }
         }
 
         private GameObject GetPooledHitEffect()
@@ -194,21 +211,29 @@ namespace TacticalCombat.Combat
             if (hitEffectPrefab != null)
             {
                 GameObject effect = Instantiate(hitEffectPrefab);
-                if (effect.GetComponent<AutoDestroy>() == null)
-                {
-                    effect.AddComponent<AutoDestroy>();
-                }
+                // ✅ FIX: REMOVED AutoDestroy - consistent with pool pattern
                 return effect;
             }
-            
+
             return null;
         }
 
         private IEnumerator ReturnHitEffectToPool(GameObject effect, float delay)
         {
             yield return new WaitForSeconds(delay);
-            if (effect != null)
+            // ✅ FIX: Added null check and particle system cleanup
+            if (effect != null && !effect.activeInHierarchy == false)
             {
+                // ✅ FIX: Stop all particle systems before returning to pool
+                var particleSystems = effect.GetComponentsInChildren<ParticleSystem>();
+                foreach (var ps in particleSystems)
+                {
+                    if (ps != null)
+                    {
+                        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                    }
+                }
+
                 effect.SetActive(false);
                 hitEffectPool.Enqueue(effect);
             }

@@ -39,6 +39,17 @@ namespace TacticalCombat.Core
                 Destroy(gameObject);
             }
         }
+        
+        private void OnDestroy()
+        {
+            // ✅ CRITICAL FIX: Clear static cache on destroy to prevent memory leak
+            if (Instance == this)
+            {
+                cachedObjectiveSpawnPoints = null;
+                lastObjectiveSpawnCacheTime = 0f;
+                Instance = null;
+            }
+        }
 
         public override void OnStartServer()
         {
@@ -134,6 +145,11 @@ namespace TacticalCombat.Core
             #endif
         }
 
+        // ✅ PERFORMANCE FIX: Cache spawn points to avoid FindGameObjectsWithTag calls
+        private static Transform[] cachedObjectiveSpawnPoints = null;
+        private static float lastObjectiveSpawnCacheTime = 0f;
+        private const float OBJECTIVE_SPAWN_CACHE_DURATION = 30f;
+        
         [Server]
         private Vector3 GetPlayerSpawnPosition(ulong playerId)
         {
@@ -147,12 +163,30 @@ namespace TacticalCombat.Core
                 return spawnPoints[randomIndex].position;
             }
 
-            // Fallback: Try to find spawn points by tag
-            GameObject[] spawnObjects = GameObject.FindGameObjectsWithTag("SpawnPoint");
-            if (spawnObjects.Length > 0)
+            // ✅ PERFORMANCE FIX: Use cached spawn points instead of FindGameObjectsWithTag
+            // Refresh cache if expired
+            if (cachedObjectiveSpawnPoints == null || Time.time - lastObjectiveSpawnCacheTime > OBJECTIVE_SPAWN_CACHE_DURATION)
             {
-                int randomIndex = UnityEngine.Random.Range(0, spawnObjects.Length);
-                return spawnObjects[randomIndex].transform.position;
+                // Use FindObjectsByType instead of FindGameObjectsWithTag (less GC)
+                var spawnObjects = FindObjectsByType<GameObject>(FindObjectsSortMode.None);
+                System.Collections.Generic.List<Transform> spawnList = new System.Collections.Generic.List<Transform>();
+                
+                for (int i = 0; i < spawnObjects.Length; i++)
+                {
+                    if (spawnObjects[i].CompareTag("SpawnPoint"))
+                    {
+                        spawnList.Add(spawnObjects[i].transform);
+                    }
+                }
+                
+                cachedObjectiveSpawnPoints = spawnList.ToArray();
+                lastObjectiveSpawnCacheTime = Time.time;
+            }
+            
+            if (cachedObjectiveSpawnPoints != null && cachedObjectiveSpawnPoints.Length > 0)
+            {
+                int randomIndex = UnityEngine.Random.Range(0, cachedObjectiveSpawnPoints.Length);
+                return cachedObjectiveSpawnPoints[randomIndex].position;
             }
 
             // Last resort: Generate random position around origin
