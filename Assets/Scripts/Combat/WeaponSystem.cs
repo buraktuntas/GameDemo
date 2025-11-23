@@ -153,6 +153,10 @@ namespace TacticalCombat.Combat
 
 
         
+        // ✅ AAA QUALITY: Use same singleton pattern as FPSController (prevents conflicts)
+        // Note: FPSController's static s_sharedPlayerInput is used, but we can't access it directly
+        // So we use GetComponent to find existing PlayerInput
+        
         private void InitializePlayerInput()
         {
             // Only initialize if actionsAsset is assigned (optional feature)
@@ -160,25 +164,33 @@ namespace TacticalCombat.Combat
             
             try
             {
+                // ✅ AAA FIX: Check if PlayerInput already exists (FPSController may have created it)
                 playerInput = GetComponent<PlayerInput>();
                 if (playerInput == null)
                 {
-                    // Add once in Awake - shared by FPSController and WeaponSystem
-                    // FPSController usually runs Awake first, but if not, we add it here
+                    // FPSController should have created it, but if not, create it here
                     playerInput = gameObject.AddComponent<PlayerInput>();
                     playerInput.actions = actionsAsset;
                     playerInput.defaultActionMap = "Player";
                     
                     if (debugInputs)
                     {
-                        Debug.Log("[WeaponSystem] PlayerInput initialized in Awake");
+                        Debug.Log("[WeaponSystem] PlayerInput initialized in Awake (FPSController didn't create it)");
                     }
                 }
-                else if (playerInput.actions == null && actionsAsset != null)
+                else
                 {
-                    // PlayerInput exists but no asset assigned - assign it
-                    playerInput.actions = actionsAsset;
-                    playerInput.defaultActionMap = "Player";
+                    // PlayerInput exists (likely created by FPSController) - just ensure actions are assigned
+                    if (playerInput.actions == null && actionsAsset != null)
+                    {
+                        playerInput.actions = actionsAsset;
+                        playerInput.defaultActionMap = "Player";
+                    }
+                    
+                    if (debugInputs)
+                    {
+                        Debug.Log("[WeaponSystem] PlayerInput found (shared with FPSController)");
+                    }
                 }
             }
             catch (System.Exception e)
@@ -359,8 +371,25 @@ namespace TacticalCombat.Combat
         
         private void HandleInput()
         {
-            if (inputManager == null || inputManager.BlockShootInput) return;
-            
+            // ✅ CRITICAL FIX: Block all input if in build mode OR if BlockShootInput is active
+            if (inputManager == null) return;
+
+            // ✅ CRITICAL: Block weapon input in build mode OR if BlockShootInput is true
+            if (inputManager.IsInBuildMode || inputManager.BlockShootInput)
+            {
+                return; // Don't process any weapon input
+            }
+
+            // ✅ CRITICAL: Double-check phase - don't fire in Build or Lobby phase
+            if (MatchManager.Instance != null)
+            {
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                if (currentPhase == Phase.Build || currentPhase == Phase.Lobby)
+                {
+                    return; // Don't process weapon input in Build/Lobby
+                }
+            }
+
             // Fire - ✅ FIX: Separate auto and semi-auto to prevent stuck shooting
             if (currentWeapon != null)
             {

@@ -513,7 +513,20 @@ namespace TacticalCombat.Building
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log($"🏗️ [SimpleBuildMode] Entering build mode...");
             #endif
-            
+
+            // ✅ CRITICAL: Only allow entering build mode in Build phase
+            if (MatchManager.Instance != null)
+            {
+                Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                if (currentPhase != Phase.Build)
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.LogWarning($"⚠️ [SimpleBuildMode] Cannot enter build mode - current phase is {currentPhase}");
+                    #endif
+                    return;
+                }
+            }
+
             if (availableStructures == null || availableStructures.Length == 0)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -521,16 +534,16 @@ namespace TacticalCombat.Building
                 #endif
                 return;
             }
-            
+
             isBuildModeActive = true;
             currentRotationY = 0f;
-            
-            // ✅ FIX: InputManager'ı override etme, kendi state'ini kullan
+
+            // ✅ CRITICAL FIX: InputManager'ı override et - silah kullanımını engelle
             if (inputManager != null)
             {
                 inputManager.IsInBuildMode = true;
-                inputManager.BlockShootInput = true; // ← Silah kullanımını engelle
-                
+                inputManager.BlockShootInput = true; // ← CRITICAL: Silah kullanımını tamamen engelle
+
                 // Valheim tarzı: Hareket + Kamera çalışsın, ama cursor gizli olsun
                 Cursor.lockState = CursorLockMode.Locked; // ← Cursor gizli
                 Cursor.visible = false; // ← Cursor gizli
@@ -538,10 +551,17 @@ namespace TacticalCombat.Building
                 inputManager.BlockMovementInput = false; // ← Hareket çalışsın
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log("🏗️ [SimpleBuildMode] Build mode: Valheim style (Movement + Camera + Hidden Cursor)");
+                Debug.Log($"🏗️ [SimpleBuildMode] InputManager state: IsInBuildMode={inputManager.IsInBuildMode}, BlockShootInput={inputManager.BlockShootInput}");
                 #endif
             }
-            
-            // ✅ FIX: Silahı devre dışı bırak
+            else
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogError("❌ [SimpleBuildMode] InputManager is NULL! Cannot block weapon input!");
+                #endif
+            }
+
+            // ✅ CRITICAL FIX: Silahı devre dışı bırak (double safety)
             if (weaponSystem != null)
             {
                 weaponSystem.DisableWeapon();
@@ -549,9 +569,15 @@ namespace TacticalCombat.Building
                 Debug.Log("🔫 [SimpleBuildMode] Weapon disabled");
                 #endif
             }
-            
+            else
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogWarning("⚠️ [SimpleBuildMode] WeaponSystem is NULL! Cannot disable weapon!");
+                #endif
+            }
+
             CreateGhostPreview();
-            
+
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("🏗️ [SimpleBuildMode] BUILD MODE ACTIVE | Controls: LMB=Place | ESC=Exit | R=Rotate | Tab=Switch");
             #endif
@@ -565,28 +591,60 @@ namespace TacticalCombat.Building
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("❌ [SimpleBuildMode] Exiting build mode...");
             #endif
-            
+
             isBuildModeActive = false;
-            
-            // ✅ FIX: InputManager restoration
+
+            // ✅ CRITICAL FIX: InputManager restoration - ALWAYS restore, even if null check fails
             if (inputManager != null)
             {
                 inputManager.IsInBuildMode = false;
-                inputManager.BlockShootInput = false; // ← Silah kullanımını aç
+                inputManager.BlockShootInput = false; // ← CRITICAL: Silah kullanımını aç
+
+                // ✅ CRITICAL: Check current phase - only enable weapon in Combat/SuddenDeath
+                bool shouldEnableWeapon = true;
+                if (MatchManager.Instance != null)
+                {
+                    Phase currentPhase = MatchManager.Instance.GetCurrentPhase();
+                    if (currentPhase == Phase.Lobby || currentPhase == Phase.Build)
+                    {
+                        shouldEnableWeapon = false; // Don't enable weapon in Lobby/Build
+                        #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                        Debug.Log($"🔫 [SimpleBuildMode] Weapon NOT enabled (still in {currentPhase} phase)");
+                        #endif
+                    }
+                }
+
                 inputManager.SetCursorMode(InputManager.CursorMode.Locked);
-            }
-            
-            // ✅ FIX: Silahı aktif et
-            if (weaponSystem != null)
-            {
-                weaponSystem.EnableWeapon();
+
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.Log("✅ [SimpleBuildMode] Weapon enabled");
+                Debug.Log($"✅ [SimpleBuildMode] InputManager restored: IsInBuildMode={inputManager.IsInBuildMode}, BlockShootInput={inputManager.BlockShootInput}");
+                #endif
+
+                // ✅ CRITICAL FIX: Silahı aktif et (only if in combat phase)
+                if (weaponSystem != null && shouldEnableWeapon)
+                {
+                    weaponSystem.EnableWeapon();
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log("✅ [SimpleBuildMode] Weapon enabled (Combat/SuddenDeath phase)");
+                    #endif
+                }
+                else if (weaponSystem != null && !shouldEnableWeapon)
+                {
+                    // Keep weapon disabled
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log("🔫 [SimpleBuildMode] Weapon kept disabled (Lobby/Build phase)");
+                    #endif
+                }
+            }
+            else
+            {
+                #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogError("❌ [SimpleBuildMode] InputManager is NULL! Cannot restore input!");
                 #endif
             }
-            
+
             DestroyGhostPreview();
-            
+
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Debug.Log("✅ [SimpleBuildMode] BUILD MODE DEACTIVATED");
             #endif
@@ -1263,14 +1321,28 @@ namespace TacticalCombat.Building
         /// <summary>
         /// Check if player can afford current structure
         /// </summary>
+        // ✅ AAA FIX: Cache budget on client (synced via RPC)
+        private BuildBudget? cachedBudget = null;
+        
         private bool CanAffordStructure()
         {
-            // ✅ IMPLEMENTED: Get player budget from MatchManager
-            var matchManager = MatchManager.Instance;
-            if (matchManager == null) return false;
-
-            var playerState = matchManager.GetPlayerState(netId);
-            if (playerState == null) return false;
+            // ✅ AAA FIX: Use cached budget on client, server can use GetPlayerState
+            BuildBudget budget;
+            if (isServer)
+            {
+                // Server can access GetPlayerState directly
+                var matchManager = MatchManager.Instance;
+                if (matchManager == null) return false;
+                var playerState = matchManager.GetPlayerState(netId);
+                if (playerState == null) return false;
+                budget = playerState.budget;
+            }
+            else
+            {
+                // Client uses cached budget
+                if (!cachedBudget.HasValue) return false;
+                budget = cachedBudget.Value;
+            }
 
             int cost = GetCurrentStructureCost();
             StructureType structureType = GetStructureTypeFromIndex(currentStructureIndex);
@@ -1281,24 +1353,53 @@ namespace TacticalCombat.Building
                 case StructureType.WoodWall:
                 case StructureType.MetalWall:
                 case StructureType.CoreStructure:
-                    return playerState.budget.wallPoints >= cost;
+                    return budget.wallPoints >= cost;
 
                 case StructureType.Platform:
                 case StructureType.Ramp:
-                    return playerState.budget.elevationPoints >= cost;
+                    return budget.elevationPoints >= cost;
 
                 case StructureType.TrapSpike:
                 case StructureType.TrapGlue:
                 case StructureType.TrapSpringboard:
                 case StructureType.TrapDartTurret:
-                    return playerState.budget.trapPoints >= cost;
+                    return budget.trapPoints >= cost;
 
                 case StructureType.UtilityGate:
-                    return playerState.budget.utilityPoints >= cost;
+                    return budget.utilityPoints >= cost;
 
                 default:
                     return false;
             }
+        }
+        
+        /// <summary>
+        /// ✅ AAA QUALITY: Get budget for UI display (client-safe)
+        /// </summary>
+        public BuildBudget? GetBudget()
+        {
+            if (isServer)
+            {
+                // Server can access directly
+                var matchManager = MatchManager.Instance;
+                if (matchManager == null) return null;
+                var playerState = matchManager.GetPlayerState(netId);
+                return playerState?.budget;
+            }
+            else
+            {
+                // Client uses cached budget
+                return cachedBudget;
+            }
+        }
+        
+        /// <summary>
+        /// ✅ AAA QUALITY: Update cached budget (called via RPC from server)
+        /// </summary>
+        [ClientRpc]
+        public void RpcUpdateBudget(BuildBudget budget)
+        {
+            cachedBudget = budget;
         }
 
         /// <summary>
