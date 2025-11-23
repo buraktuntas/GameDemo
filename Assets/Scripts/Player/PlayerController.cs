@@ -202,24 +202,33 @@ namespace TacticalCombat.Player
             {
                 if (shouldEnableControls)
                 {
+                    // Game Phase: Enable gameplay input
+                    inputManager.ExitMenu(); // Sets cursor to Locked and unblocks input
                     inputManager.UnblockAllInput();
+                    
+                    if (showDebugInfo)
+                    {
+                        Debug.Log("🎮 [PlayerController] Game phase - Controls enabled");
+                    }
                 }
                 else
                 {
-                    inputManager.BlockAllInput();
+                    // Lobby Phase: Disable gameplay input, show cursor
+                    inputManager.EnterMenu(); // Sets cursor to Menu mode (visible, gameplay blocked)
+                    
+                    if (showDebugInfo)
+                    {
+                        Debug.Log("🔓 [PlayerController] Lobby phase - Cursor unlocked, all controls disabled, player hidden");
+                    }
                 }
             }
-
-            // ✅ CRITICAL: In Lobby phase, unlock cursor for UI interaction
-            if (!shouldEnableControls)
+            else
             {
-                // Lobby phase: Unlock cursor for menu interaction
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-                
-                if (showDebugInfo)
+                // Fallback if InputManager is missing (should not happen)
+                if (!shouldEnableControls)
                 {
-                    Debug.Log("🔓 [PlayerController] Lobby phase - Cursor unlocked, all controls disabled, player hidden");
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
                 }
             }
 

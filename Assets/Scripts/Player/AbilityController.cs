@@ -52,10 +52,15 @@ namespace TacticalCombat.Player
                 var playerMap = playerInput.actions.FindActionMap("Player");
                 if (playerMap != null)
                 {
+                    // Try multiple common names for ability action
                     abilityAction = playerMap.FindAction("UseAbility");
+                    if (abilityAction == null) abilityAction = playerMap.FindAction("Ability");
+                    if (abilityAction == null) abilityAction = playerMap.FindAction("Interact"); // Fallback to Interact
+                    
                     if (abilityAction != null)
                     {
                         abilityAction.performed += OnAbilityInput;
+                        abilityAction.Enable(); // Ensure it's enabled
                     }
                     else
                     {

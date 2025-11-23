@@ -55,6 +55,10 @@ namespace TacticalCombat.Core
                 po.SetPrefab(prefab);
             }
 
+            // ✅ CRITICAL FIX: Reset object state (dirty pool fix)
+            var poolable = obj.GetComponent<IPoolable>();
+            if (poolable != null) poolable.OnReset();
+
             obj.transform.SetPositionAndRotation(position, rotation);
             obj.SetActive(true);
 
@@ -93,6 +97,10 @@ namespace TacticalCombat.Core
             {
                 NetworkServer.UnSpawn(instance);
             }
+
+            // ✅ CRITICAL FIX: Reset object state before disabling
+            var poolable = instance.GetComponent<IPoolable>();
+            if (poolable != null) poolable.OnReset();
 
             instance.SetActive(false);
             pool[prefab].Enqueue(instance);

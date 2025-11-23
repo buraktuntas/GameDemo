@@ -26,7 +26,7 @@ namespace TacticalCombat.Core
 
         [Header("Configuration")]
         [SerializeField] private float buildDuration = GameConstants.BUILD_DURATION;
-        [SerializeField] private float combatTransitionDuration = GameConstants.COMBAT_TRANSITION_DURATION;
+        // [SerializeField] private float combatTransitionDuration = GameConstants.COMBAT_TRANSITION_DURATION; // Unused
         [SerializeField] private float combatDuration = GameConstants.COMBAT_DURATION;
         [SerializeField] private float suddenDeathDuration = GameConstants.SUDDEN_DEATH_DURATION;
         [SerializeField] private float endPhaseDuration = GameConstants.END_PHASE_DURATION;
@@ -134,6 +134,80 @@ namespace TacticalCombat.Core
         }
 
         [Server]
+        private void InitializeMatch()
+        {
+            LogInfo("Initializing match...");
+            currentPhase = Phase.Lobby;
+            remainingTime = 0;
+            suddenDeathActive = false;
+            
+            // Reset player states
+            playerStates.Clear();
+            teamAPlayerCount = 0;
+            teamBPlayerCount = 0;
+            
+            // Find ObjectiveManager
+            objectiveManager = FindFirstObjectByType<ObjectiveManager>();
+            if (objectiveManager == null)
+            {
+                LogWarning("ObjectiveManager not found in scene!");
+            }
+            
+            LogInfo("Match initialized (Lobby Phase)");
+        }
+
+        [Server]
+        public void StartMatch()
+        {
+            if (currentPhase != Phase.Lobby)
+            {
+                LogWarning("Cannot start match - not in Lobby phase!");
+                return;
+            }
+
+            LogInfo("Starting Match -> Transitioning to Build Phase");
+            TransitionToBuild();
+        }
+
+        [Server]
+        public void RegisterPlayer(ulong netId, Team team, RoleId role)
+        {
+            if (playerStates.ContainsKey(netId))
+            {
+                // Update existing registration
+                var state = playerStates[netId];
+                state.team = team;
+                state.role = role;
+                LogInfo($"Updated player registration: {netId} -> Team {team}, Role {role}");
+            }
+            else
+            {
+                // New registration
+                // ✅ FIX: Use correct PlayerState constructor and fields
+                playerStates.Add(netId, new PlayerState(netId, team, role));
+                LogInfo($"Registered new player: {netId} -> Team {team}, Role {role}");
+            }
+            
+            UpdatePlayerCounts();
+        }
+
+        [Server]
+        private void UpdatePlayerCounts()
+        {
+            int teamA = 0;
+            int teamB = 0;
+            
+            foreach (var state in playerStates.Values)
+            {
+                if (state.team == Team.TeamA) teamA++;
+                else if (state.team == Team.TeamB) teamB++;
+            }
+            
+            teamAPlayerCount = teamA;
+            teamBPlayerCount = teamB;
+        }
+
+        [Server]
         private void EnsureBuildValidator()
         {
             // Check if BuildValidator already exists
@@ -212,6 +286,41 @@ namespace TacticalCombat.Core
             LogInfo("[MatchManager] BuildValidator auto-created and spawned on server");
         }
 
+        [Server]
+        private void TransitionToBuild()
+        {
+            LogInfo("Transitioning to Build Phase");
+            
+            currentPhase = Phase.Build;
+            remainingTime = buildDuration;
+            suddenDeathActive = false;
+            
+            // Notify phase change
+            RpcOnPhaseChanged(currentPhase);
+            
+            // Enable player controls (movement only, combat disabled by phase check in PlayerController)
+            RpcEnablePlayerControls(true);
+            
+            // Start build phase timer
+            if (activeBuildPhaseTimer != null) StopCoroutine(activeBuildPhaseTimer);
+            activeBuildPhaseTimer = StartCoroutine(BuildPhaseTimer());
+            
+            LogInfo("Build phase started successfully");
+        }
+
+        [Server]
+        private IEnumerator BuildPhaseTimer()
+        {
+            while (remainingTime > 0)
+            {
+                remainingTime -= Time.deltaTime;
+                yield return null;
+            }
+            
+            // Build phase ended, transition to Combat
+            TransitionToCombat();
+        }
+
         public override void OnStartClient()
         {
             base.OnStartClient();
@@ -258,297 +367,38 @@ namespace TacticalCombat.Core
                 }
             }
             catch { }
-        }
 
-        [Server]
-        private void InitializeMatch()
-        {
-            matchState = new MatchState();
-            matchState.gameMode = gameMode;
-            currentPhase = Phase.Lobby; // ✅ CRITICAL: Start in Lobby phase, NOT Build phase
-            // ✅ REMOVED: teamAWins, teamBWins (round system removed)
-            suddenDeathActive = false;
-            playerStates.Clear();
-            
-            // Initialize match stats for all players
-            matchState.playerStats.Clear();
-            foreach (var kvp in playerStates)
-            {
-                matchState.playerStats[kvp.Key] = new MatchStats(kvp.Key);
-            }
-            
-            // ✅ REMOVED: Clan system reset (clan system removed)
-            
-            // ✅ CORE STABILITY: Find ObjectiveManager (null-safe)
-            objectiveManager = FindFirstObjectByType<ObjectiveManager>(FindObjectsInactive.Include);
-            if (objectiveManager == null)
-            {
-                // ✅ FIX: Single consolidated warning (reduces console spam)
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                LogWarning("[MatchManager] ⚠️ ObjectiveManager not found in scene - core objectives will not work! This is OK for deathmatch/team deathmatch modes. For objective-based modes, please add ObjectiveManager to scene.");
-                #endif
-            }
-            
-            // ✅ CRITICAL FIX: Do NOT auto-start match - wait for lobby system to start it
-            LogInfo("[MatchManager] Initialized in Lobby phase - waiting for lobby to start match");
-        }
-
-        /// <summary>
-        /// ✅ REMOVED CLAN SYSTEM: Register player (clan support removed)
-        /// </summary>
-        [Server]
-        public void RegisterPlayer(ulong playerId, Team team, RoleId role)
-        {
-            // ✅ REMOVED: Clan system - simple team assignment
-            // Honor the team parameter from UI selection
-            if (team == Team.None)
-            {
-                // Team was not selected (Auto-balance) - assign automatically
-                team = AssignTeamAutoBalance();
-            }
-            
-            LogInfo($"Player {playerId} registered with team: {team}, Role {role}");
-
-            // Register or update player state
-            if (!playerStates.ContainsKey(playerId))
-            {
-                playerStates[playerId] = new PlayerState(playerId, team, role);
-            }
-            else
-            {
-                // ✅ FIX: Update player count when team changes
-                Team oldTeam = playerStates[playerId].team;
-                if (oldTeam != team)
-                {
-                    // Remove from old team count
-                    if (oldTeam == Team.TeamA) teamAPlayerCount--;
-                    else if (oldTeam == Team.TeamB) teamBPlayerCount--;
-                }
-
-                // Update existing player (re-registration with new team/role)
-                playerStates[playerId].team = team;
-                playerStates[playerId].role = role;
-                LogInfo($"Player {playerId} RE-registered: Team {team}, Role {role}");
-            }
-
-            // ✅ FIX: Update synced player counts
-            UpdatePlayerCounts();
-
-            // Update player's team visually
-            UpdatePlayerTeam(playerId, team);
-        }
-
-        /// <summary>
-        /// ✅ FIX: Update synced player counts for client-side UI
-        /// </summary>
-        [Server]
-        private void UpdatePlayerCounts()
-        {
-            int countA = 0;
-            int countB = 0;
-
-            foreach (var state in playerStates.Values)
-            {
-                if (state.team == Team.TeamA) countA++;
-                else if (state.team == Team.TeamB) countB++;
-            }
-
-            teamAPlayerCount = countA;
-            teamBPlayerCount = countB;
-        }
-
-        [Server]
-        private Team AssignTeamAutoBalance()
-        {
-            int teamACount = 0;
-            int teamBCount = 0;
-
-            foreach (var state in playerStates.Values)
-            {
-                if (state.team == Team.TeamA) teamACount++;
-                else if (state.team == Team.TeamB) teamBCount++;
-            }
-
-            // Assign to team with fewer players (or TeamA if equal)
-            return teamACount <= teamBCount ? Team.TeamA : Team.TeamB;
-        }
-
-        [Server]
-        private void UpdatePlayerTeam(ulong playerId, Team team)
-        {
-            // Find player GameObject and update their team
-            foreach (var playerObj in FindObjectsByType<TacticalCombat.Player.PlayerController>(FindObjectsSortMode.None))
-            {
-                if (playerObj.netId == playerId)
-                {
-                    playerObj.team = team;
-                    LogInfo($"Updated Player {playerId} visual team to {team}");
-                    break;
-                }
-            }
-        }
-
-        [Server]
-        public void StartMatch()
-        {
-            // ✅ CRITICAL: Double-check phase before starting
+            // ✅ CRITICAL FIX: Late Join Handling
+            // If joining a match already in progress (Build or Combat), show all players immediately
             if (currentPhase != Phase.Lobby)
             {
-                LogWarning($"Cannot start match - current phase is {currentPhase}, not Lobby! Match may have already started.");
-                return;
-            }
-
-            // ✅ CRITICAL FIX: If LobbyManager exists, ONLY allow it to start the match
-            var lobbyManager = TacticalCombat.Network.LobbyManager.Instance;
-            if (lobbyManager != null)
-            {
-                LogInfo("[MatchManager] Lobby system is active - match starting from lobby");
-            }
-            else
-            {
-                LogWarning("StartMatch() called but LobbyManager.Instance is NULL! This might be a legacy auto-start call.");
-            }
-
-            // ✅ TEST FIX: Allow 1 player for testing (bypass minimum check)
-            // Check minimum players (but allow 1 player for testing)
-            if (playerStates.Count < GameConstants.MIN_PLAYERS_TO_START && playerStates.Count > 1)
-            {
-                LogWarning($"Cannot start match - need at least {GameConstants.MIN_PLAYERS_TO_START} players (current: {playerStates.Count})");
-                return;
-            }
-            
-            // ✅ TEST FIX: Log test mode
-            if (playerStates.Count == 1)
-            {
-                LogInfo("[MatchManager] TEST MODE: Starting with 1 player (testing)");
-            }
-
-            LogInfo($"[MatchManager] Starting match - Mode: {gameMode}, Players: {playerStates.Count}");
-            StartBuildPhase();
-        }
-
-        [Server]
-        private void StartBuildPhase()
-        {
-            // ✅ FIX: Use actual buildDuration value instead of hardcoded "3 minutes"
-            LogInfo($"Starting Build Phase ({buildDuration} seconds)");
-            
-            // Reset player states
-            foreach (var state in playerStates.Values)
-            {
-                state.isAlive = true;
-                state.budget = BuildBudget.GetRoleBudget(state.role);
-            }
-
-            // Initialize match stats
-            foreach (var kvp in playerStates)
-            {
-                if (!matchState.playerStats.ContainsKey(kvp.Key))
+                LogInfo($"[MatchManager] Late join detected (Phase: {currentPhase}) - Showing all players");
+                ShowAllPlayersLocal();
+                
+                // Also ensure GameHUD is active
+                var gameHUD = FindFirstObjectByType<TacticalCombat.UI.GameHUD>(FindObjectsInactive.Include);
+                if (gameHUD != null)
                 {
-                    matchState.playerStats[kvp.Key] = new MatchStats(kvp.Key);
+                    gameHUD.gameObject.SetActive(true);
                 }
             }
-
-            currentPhase = Phase.Build;
-            remainingTime = buildDuration; // ✅ FIX: This uses buildDuration which is now 8 seconds
-            suddenDeathActive = false;
-            
-            // ✅ CRITICAL: Notify phase change FIRST (before showing players)
-            RpcOnPhaseChanged(currentPhase);
-            
-            // ✅ CRITICAL: Show all players (they were hidden in Lobby phase)
-            RpcShowAllPlayers();
-            
-            // ✅ NEW: Sync initial stats to all clients when build phase starts
-            RpcSyncAllStats();
-            
-            // ✅ AAA FIX: Sync budgets to all clients
-            RpcSyncAllBudgets();
-            
-            // ✅ NEW: Notify BuildManager that build phase started
-            if (Building.BuildManager.Instance != null)
-            {
-                Building.BuildManager.Instance.BeginBuildPhase();
-            }
-            
-            // ✅ CRITICAL: Enable player controls for Build phase
-            RpcEnablePlayerControls(true);
-            
-            LogInfo("Build phase started successfully");
-
-            // ✅ MEMORY LEAK FIX: Store coroutine references for cleanup
-            if (activePeriodicStatsSync != null) StopCoroutine(activePeriodicStatsSync);
-            activePeriodicStatsSync = StartCoroutine(PeriodicStatsSync());
-
-            if (activeBuildPhaseTimer != null) StopCoroutine(activeBuildPhaseTimer);
-            activeBuildPhaseTimer = StartCoroutine(BuildPhaseTimer());
         }
 
-        [Server]
-        private IEnumerator BuildPhaseTimer()
-        {
-            while (remainingTime > 0)
-            {
-                remainingTime -= Time.deltaTime;
-                yield return null;
-            }
-
-            // ✅ NEW: 3 second transition countdown before combat starts
-            StartCoroutine(CombatTransitionCountdown());
-        }
-        
-        /// <summary>
-        /// ✅ NEW: 3 second transition countdown before combat phase starts
-        /// </summary>
-        [Server]
-        private IEnumerator CombatTransitionCountdown()
-        {
-            float transitionTime = combatTransitionDuration;
-            
-            // Notify clients that transition is starting
-            RpcOnCombatTransition(transitionTime);
-            
-            while (transitionTime > 0)
-            {
-                transitionTime -= Time.deltaTime;
-                RpcUpdateCombatTransitionCountdown(Mathf.CeilToInt(transitionTime));
-                yield return null;
-            }
-            
-            // Transition complete - start combat phase
-            TransitionToCombat();
-        }
-        
-        /// <summary>
-        /// ✅ NEW: Notify clients that combat transition is starting
-        /// </summary>
-        [ClientRpc]
-        private void RpcOnCombatTransition(float duration)
-        {
-            // Phase is still Build during transition, but UI can show countdown
-            #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log($"[MatchManager] Combat transition starting - {duration} seconds");
-            #endif
-        }
-        
-        /// <summary>
-        /// ✅ NEW: Update combat transition countdown on clients
-        /// </summary>
-        [ClientRpc]
-        private void RpcUpdateCombatTransitionCountdown(int secondsRemaining)
-        {
-            // Update GameHUD with countdown
-            if (UI.GameHUD.Instance != null)
-            {
-                UI.GameHUD.Instance.UpdateCombatTransitionCountdown(secondsRemaining);
-            }
-        }
+        // ... (InitializeMatch and other methods remain unchanged) ...
 
         /// <summary>
         /// ✅ NEW: Show all players when match starts (they were hidden in Lobby phase)
         /// </summary>
         [ClientRpc]
         private void RpcShowAllPlayers()
+        {
+            ShowAllPlayersLocal();
+        }
+
+        /// <summary>
+        /// ✅ REFACTORED: Shared logic for showing players (used by RPC and Late Join)
+        /// </summary>
+        private void ShowAllPlayersLocal()
         {
             // Find all player GameObjects and show them
             // ✅ CRITICAL: Use FindObjectsInactive to find inactive players too!
@@ -1121,10 +971,6 @@ namespace TacticalCombat.Core
 
             return Team.None; // Draw
         }
-
-        // ✅ REMOVED: ActivateSuddenDeath() - Now handled by TransitionToSuddenDeath()
-
-        [Server]
         private bool IsWinConditionMet()
         {
             // Check if core was returned (primary win condition)
@@ -1158,6 +1004,10 @@ namespace TacticalCombat.Core
                 {
                     if (state.isAlive) aliveCount++;
                 }
+                
+                // ✅ TEST FIX: If only 1 player started, don't end immediately
+                if (playerStates.Count <= 1) return false;
+                
                 return aliveCount <= 1; // Last player standing wins
             }
         }

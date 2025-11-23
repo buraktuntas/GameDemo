@@ -184,13 +184,18 @@ namespace TacticalCombat.Combat
             
             // Fallback for specific effects (could add pools for these later)
             GameObject instance = Instantiate(effectPrefab, position, Quaternion.LookRotation(normal));
-            // ✅ FIX: Use coroutine to destroy after delay instead of AutoDestroy component
-            StartCoroutine(DestroyAfterDelay(instance, 2f));
+            
+            // ✅ FIX: Use AutoDestroyVFX component to ensure cleanup even if controller is disabled
+            var autoDestroy = instance.GetComponent<AutoDestroyVFX>();
+            if (autoDestroy == null)
+            {
+                autoDestroy = instance.AddComponent<AutoDestroyVFX>();
+            }
+            autoDestroy.delay = 2f;
         }
 
-        /// <summary>
-        /// ✅ FIX: Destroy VFX after delay (replacement for AutoDestroy component)
-        /// </summary>
+        // Removed DestroyAfterDelay as it causes leaks if controller is disabled
+        /*
         private IEnumerator DestroyAfterDelay(GameObject obj, float delay)
         {
             yield return new WaitForSeconds(delay);
@@ -199,6 +204,7 @@ namespace TacticalCombat.Combat
                 Destroy(obj);
             }
         }
+        */
 
         private GameObject GetPooledHitEffect()
         {

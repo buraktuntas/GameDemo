@@ -4,7 +4,7 @@ using TacticalCombat.Core;
 
 namespace TacticalCombat.Combat
 {
-    public class Projectile : NetworkBehaviour
+    public class Projectile : NetworkBehaviour, IPoolable
     {
         [Header("Projectile")]
         [SerializeField] private float lifetime = 5f;
@@ -23,6 +23,21 @@ namespace TacticalCombat.Combat
 
         // NonAlloc buffer for sphere casts to avoid GC spikes
         private static readonly RaycastHit[] sphereCastHits = new RaycastHit[8];
+
+        public void OnReset()
+        {
+            velocity = Vector3.zero;
+            shooterTransform = null;
+            shooterId = 0;
+            ownerTeam = Team.None;
+            isScoutArrow = false;
+            // Reset SyncVars too if needed, though Initialize overwrites them
+            initVelocity = Vector3.zero;
+            syncDamage = 0;
+            syncOwnerTeam = Team.None;
+            syncShooterId = 0;
+            syncScout = false;
+        }
 
         private void Awake()
         {

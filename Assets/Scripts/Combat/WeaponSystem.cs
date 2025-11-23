@@ -49,7 +49,6 @@ namespace TacticalCombat.Combat
         [SyncVar] private int spreadSeed = 0;
 
         // ✅ FIX: Track coroutines to prevent memory leaks
-        private Coroutine currentCameraShakeCoroutine;
         private Coroutine currentReloadCoroutine;
         private Coroutine retryCameraCoroutine; // ✅ FIX: Store retry coroutine to stop it when camera is found
         private Vector3 originalWeaponPos;
@@ -342,25 +341,41 @@ namespace TacticalCombat.Combat
             catch { /* Input System not present or not configured */ }
         }
         
+        // ✅ PERFORMANCE FIX: Throttle component checks
+        private float lastComponentCheckTime;
+        private int componentCheckAttempts;
+        private const int MAX_COMPONENT_CHECK_ATTEMPTS = 10;
+        private const float COMPONENT_CHECK_INTERVAL = 1.0f;
+
         private void Update()
         {
-            // ✅ PROFESSIONAL FIX: Try to assign camera if still null (for local player)
-            if (isLocalPlayer && playerCamera == null)
-            {
-                TryAssignCamera();
-            }
-            
-            // ✅ FIX: Don't process input if weapon system is disabled or camera is missing
-            if (!enabled || playerCamera == null) return;
+            // ✅ FIX: Don't process input if weapon system is disabled
+            if (!enabled) return;
             
             // ✅ FIX: Only process input for local player
             if (!isLocalPlayer) return;
-            
-            // Retry finding InputManager if missing
-            if (inputManager == null)
+
+            // ✅ PERFORMANCE FIX: Throttle camera/input checks
+            if (playerCamera == null || inputManager == null)
             {
-                inputManager = GetComponent<TacticalCombat.Player.InputManager>();
-                if (inputManager == null) return;
+                if (componentCheckAttempts < MAX_COMPONENT_CHECK_ATTEMPTS && Time.time > lastComponentCheckTime + COMPONENT_CHECK_INTERVAL)
+                {
+                    lastComponentCheckTime = Time.time;
+                    componentCheckAttempts++;
+                    
+                    if (playerCamera == null) TryAssignCamera();
+                    if (inputManager == null) inputManager = GetComponent<TacticalCombat.Player.InputManager>();
+                    
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    if (playerCamera != null && inputManager != null)
+                    {
+                        Debug.Log($"✅ [WeaponSystem] Components recovered after {componentCheckAttempts} attempts");
+                    }
+                    #endif
+                }
+                
+                // If still missing after checks, return (don't run logic)
+                if (playerCamera == null || inputManager == null) return;
             }
 
             if (inputManager.IsInBuildMode) return;
@@ -684,11 +699,12 @@ namespace TacticalCombat.Combat
             
             audioController?.PlayFireSound(true);
             
-            if (currentCameraShakeCoroutine != null)
+            // ✅ AAA FEEL: Use Perlin Noise Camera Shake
+            var shake = GetComponent<TacticalCombat.Player.CameraShake>();
+            if (shake != null)
             {
-                StopCoroutine(currentCameraShakeCoroutine);
+                shake.AddTrauma(currentWeapon.recoilAmount * 0.1f);
             }
-            currentCameraShakeCoroutine = StartCoroutine(CameraShake(0.05f, 0.1f));
         }
         
         /// <summary>
@@ -701,18 +717,27 @@ namespace TacticalCombat.Combat
 
             // ✅ CRITICAL FIX: Use deterministic spread
             Vector3 spread = CalculateDeterministicSpread();
-            Vector3 direction = playerCamera.transform.forward + spread;
+            Vector3 direction = (playerCamera.transform.forward + spread).normalized;
+            
+            // Safety check for zero vector (rare but possible with extreme spread)
+            if (direction == Vector3.zero)
+            {
+                direction = playerCamera.transform.forward;
+            }
 
             // ✅ NETWORK STABILITY: Basic lag compensation - use current position
             // Full lag compensation would require rewinding player positions, which is complex
             // For now, we use current positions but allow slight tolerance in hit detection
             Vector3 rayOrigin = playerCamera.transform.position;
             
-            Ray ray = new Ray(rayOrigin, direction);
+            // ✅ AAA IMPROVEMENT: Use SphereCast instead of Raycast for "thicker" bullets
+            // This helps with hitting moving targets without full lag compensation (rewinding)
+            float bulletRadius = 0.15f; // 15cm radius (generous but fair)
             
             // Use NonAlloc to avoid GC
             RaycastHit[] hitBuffer = new RaycastHit[32];
-            int hitCount = Physics.RaycastNonAlloc(ray, hitBuffer, currentWeapon.range, currentWeapon.hitMask);
+            // int hitCount = Physics.RaycastNonAlloc(ray, hitBuffer, currentWeapon.range, currentWeapon.hitMask);
+            int hitCount = Physics.SphereCastNonAlloc(rayOrigin, bulletRadius, direction, hitBuffer, currentWeapon.range, currentWeapon.hitMask);
 
             // Find first valid hit
             RaycastHit? validHit = null;
@@ -816,11 +841,11 @@ namespace TacticalCombat.Combat
             // Camera shake for shooter only
             if (isLocalPlayer)
             {
-                if (currentCameraShakeCoroutine != null)
+                var shake = GetComponent<TacticalCombat.Player.CameraShake>();
+                if (shake != null)
                 {
-                    StopCoroutine(currentCameraShakeCoroutine);
+                    shake.AddTrauma(currentWeapon.recoilAmount * 0.1f);
                 }
-                currentCameraShakeCoroutine = StartCoroutine(CameraShake(0.05f, 0.1f));
             }
         }
         
@@ -1401,31 +1426,7 @@ namespace TacticalCombat.Combat
             audioController?.PlayHitSound();
         }
         
-        private IEnumerator CameraShake(float intensity, float duration)
-        {
-            if (playerCamera == null)
-            {
-                currentCameraShakeCoroutine = null; // ✅ FIX: Clear reference on early exit
-                yield break;
-            }
 
-            Vector3 originalPos = playerCamera.transform.localPosition;
-            float elapsed = 0f;
-
-            while (elapsed < duration)
-            {
-                float x = Random.Range(-1f, 1f) * intensity;
-                float y = Random.Range(-1f, 1f) * intensity;
-
-                playerCamera.transform.localPosition = originalPos + new Vector3(x, y, 0);
-
-                elapsed += Time.deltaTime;
-                yield return null;
-            }
-
-            playerCamera.transform.localPosition = originalPos;
-            currentCameraShakeCoroutine = null; // ✅ FIX: Clear coroutine reference when complete
-        }
         
         /// <summary>
         /// ✅ CRITICAL FIX: Command to request reload from client
@@ -1704,11 +1705,9 @@ namespace TacticalCombat.Combat
             catch { }
 
             // Stop tracked coroutines to prevent memory leaks
-            if (currentCameraShakeCoroutine != null)
-            {
-                StopCoroutine(currentCameraShakeCoroutine);
-                currentCameraShakeCoroutine = null;
-            }
+            // Stop tracked coroutines to prevent memory leaks
+            // currentCameraShakeCoroutine removed - using component based shake
+
 
             if (currentReloadCoroutine != null)
             {

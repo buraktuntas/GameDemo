@@ -56,6 +56,24 @@ namespace TacticalCombat.Player
             // Her player'ın kendi InputManager'ı var - singleton değil
             Debug.Log("✅ InputManager initialized for this player");
         }
+
+        private void OnEnable()
+        {
+            // ✅ CRITICAL FIX: Reset state when enabled (e.g. on respawn)
+            // This prevents "stuck" states if player was in menu/build mode when disabled
+            currentMode = CursorMode.Locked;
+            IsInBuildMode = false;
+            IsInMenu = false;
+            IsPaused = false;
+            
+            BlockCameraInput = false;
+            BlockMovementInput = false;
+            UnblockGameplayInput();
+            
+            // Force cursor update
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+        }
         
         // ═══════════════════════════════════════════════════════════
         // CURSOR MODE CONTROL

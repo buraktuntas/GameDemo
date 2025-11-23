@@ -4,23 +4,29 @@ using Mirror;
 namespace TacticalCombat.Player
 {
     /// <summary>
-    /// Camera shake effect for hit feedback
+    /// ✅ AAA QUALITY: Perlin Noise Camera Shake
+    /// Provides smooth, heavy, and realistic shake effects.
     /// </summary>
     public class CameraShake : NetworkBehaviour
     {
         [Header("Shake Settings")]
-        [SerializeField] private float shakeDuration = 0.2f;
-        [SerializeField] private float shakeIntensity = 0.5f;
-        [SerializeField] private float decreaseFactor = 1.5f;
+        [SerializeField] private float traumaDecreaseSpeed = 2.0f;
+        [SerializeField] private float maxAngle = 5.0f;
+        [SerializeField] private float maxOffset = 0.2f;
+        [SerializeField] private float noiseSpeed = 15.0f;
 
         private Camera playerCamera;
-        private Vector3 originalPosition;
-        private float shakeTimer = 0f;
-        private float currentIntensity = 0f;
+        private float trauma = 0f; // 0 to 1
+        private float seed;
+        private Vector3 originalLocalPos;
+        private Quaternion originalLocalRot;
+        
+        // Cache for performance
+        private float timeCounter = 0f;
 
         private void Awake()
         {
-            // Will be set from FPSController
+            seed = Random.value * 100f;
         }
 
         public void SetCamera(Camera cam)
@@ -28,48 +34,72 @@ namespace TacticalCombat.Player
             playerCamera = cam;
             if (playerCamera != null)
             {
-                originalPosition = playerCamera.transform.localPosition;
+                originalLocalPos = playerCamera.transform.localPosition;
+                originalLocalRot = playerCamera.transform.localRotation;
             }
         }
 
-        private void LateUpdate()
+        private void Update()
         {
             if (!isLocalPlayer || playerCamera == null) return;
 
-            if (shakeTimer > 0)
+            if (trauma > 0)
             {
-                // Apply shake
-                playerCamera.transform.localPosition = originalPosition + Random.insideUnitSphere * currentIntensity;
+                // Decrease trauma over time
+                trauma = Mathf.Clamp01(trauma - Time.deltaTime * traumaDecreaseSpeed);
 
-                // Decrease shake over time
-                shakeTimer -= Time.deltaTime * decreaseFactor;
-                currentIntensity = shakeIntensity * (shakeTimer / shakeDuration);
+                // Shake = Trauma^2 (Non-linear falloff feels better)
+                float shake = trauma * trauma;
+
+                // Calculate noise based on time and seed
+                timeCounter += Time.deltaTime * noiseSpeed;
+                
+                // Perlin Noise for smooth random movement
+                float yaw = (Mathf.PerlinNoise(seed, timeCounter) - 0.5f) * 2f * maxAngle * shake;
+                float pitch = (Mathf.PerlinNoise(seed + 1f, timeCounter) - 0.5f) * 2f * maxAngle * shake;
+                float roll = (Mathf.PerlinNoise(seed + 2f, timeCounter) - 0.5f) * 2f * maxAngle * shake;
+
+                float offsetX = (Mathf.PerlinNoise(seed + 3f, timeCounter) - 0.5f) * 2f * maxOffset * shake;
+                float offsetY = (Mathf.PerlinNoise(seed + 4f, timeCounter) - 0.5f) * 2f * maxOffset * shake;
+
+                // Apply to camera
+                playerCamera.transform.localRotation = originalLocalRot * Quaternion.Euler(pitch, yaw, roll);
+                playerCamera.transform.localPosition = originalLocalPos + new Vector3(offsetX, offsetY, 0);
             }
             else
             {
-                // Reset to original position
-                shakeTimer = 0f;
-                if (playerCamera.transform.localPosition != originalPosition)
+                // Reset smoothly if needed, or just snap if close enough
+                if (playerCamera.transform.localPosition != originalLocalPos)
                 {
-                    playerCamera.transform.localPosition = originalPosition;
+                    playerCamera.transform.localPosition = Vector3.Lerp(playerCamera.transform.localPosition, originalLocalPos, Time.deltaTime * 5f);
+                    playerCamera.transform.localRotation = Quaternion.Lerp(playerCamera.transform.localRotation, originalLocalRot, Time.deltaTime * 5f);
                 }
             }
         }
 
         /// <summary>
-        /// Trigger camera shake (call from Health component)
+        /// Add trauma to the camera (0 to 1)
         /// </summary>
-        public void Shake(float intensity = 1f)
+        public void AddTrauma(float amount)
         {
             if (!isLocalPlayer) return;
-
-            shakeTimer = shakeDuration;
-            currentIntensity = shakeIntensity * intensity;
-
-            if (playerCamera != null)
+            
+            // Ensure camera is set
+            if (playerCamera == null)
             {
-                originalPosition = playerCamera.transform.localPosition;
+                var fps = GetComponent<FPSController>();
+                if (fps != null) SetCamera(fps.playerCamera);
             }
+
+            trauma = Mathf.Clamp01(trauma + amount);
+        }
+
+        /// <summary>
+        /// Legacy support for existing calls
+        /// </summary>
+        public void Shake(float intensity = 0.5f)
+        {
+            AddTrauma(intensity);
         }
 
         /// <summary>
@@ -77,10 +107,10 @@ namespace TacticalCombat.Player
         /// </summary>
         public void ShakeOnHit(int damage, int maxHealth)
         {
-            // Scale shake based on damage percentage
             float damagePercent = (float)damage / maxHealth;
-            float intensity = Mathf.Clamp(damagePercent * 2f, 0.3f, 1.5f);
-            Shake(intensity);
+            // Map damage to trauma (e.g., 100% damage = 1.0 trauma, 10% damage = 0.3 trauma)
+            float traumaAmount = Mathf.Clamp(damagePercent * 1.5f, 0.3f, 1.0f);
+            AddTrauma(traumaAmount);
         }
     }
 }

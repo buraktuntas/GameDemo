@@ -691,11 +691,12 @@ namespace TacticalCombat.Network
                     if (playerController != null)
                     {
                         // Map Lobby Team ID to Game Team Enum
-                        // Lobby: 0=TeamA, 1=TeamB, -1=None
+                        // Lobby: 0=TeamA, 1=TeamB, -1=None (FFA)
                         // Game: 0=None, 1=TeamA, 2=TeamB
                         Team gameTeam = Team.None;
                         if (player.teamId == 0) gameTeam = Team.TeamA;
                         else if (player.teamId == 1) gameTeam = Team.TeamB;
+                        else if (player.teamId == -1) gameTeam = Team.None; // Explicitly set None for FFA
                         
                         // Set team (SyncVar will propagate to clients)
                         playerController.team = gameTeam;
