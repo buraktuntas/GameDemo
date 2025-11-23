@@ -743,20 +743,14 @@ private void Update()
                 transform.rotation = predictedRotation;
             }
             
-            // ✅ AAA FIX: Throttle RPC to prevent network spam (only send if position changed significantly)
-            float positionDelta = Vector3.Distance(transform.position, oldPosition);
-            float rotationDelta = Quaternion.Angle(transform.rotation, oldRotation);
-            
-            if (positionDelta > 0.01f || rotationDelta > 1f || Time.time - lastServerSyncTime >= SERVER_SYNC_INTERVAL)
-            {
-                RpcSetPosition(transform.position, transform.rotation);
-                lastServerSyncTime = Time.time;
-            }
+            // ✅ CRITICAL FIX: ALWAYS send position update to other clients (ghost player fix)
+            // Throttling causes ghost player issue - other clients don't see real position!
+            // Server is authoritative, so we MUST broadcast position to all clients
+            RpcSetPosition(transform.position, transform.rotation);
         }
-        
-        // ✅ AAA FIX: Throttle server sync to prevent network spam
-        private float lastServerSyncTime = 0f;
-        private const float SERVER_SYNC_INTERVAL = 0.05f; // 20 updates/second max (50ms)
+
+        // ✅ CRITICAL FIX: Removed aggressive throttling (was causing ghost player bug)
+        // Server should ALWAYS broadcast validated position to all clients
         
         /// <summary>
         /// ✅ CRITICAL FIX: Server-side movement calculation (authoritative)
@@ -1114,19 +1108,16 @@ private void Update()
 
         /// <summary>
         /// Apply rotation in LateUpdate (after movement, smooth)
-        /// ✅ AAA FIX: Frame-independent rotation for smooth mouse movement
+        /// ✅ CRITICAL FIX: Direct rotation without deltaTime scaling (mouse delta is already frame-independent)
         /// </summary>
         private void ApplyRotation()
         {
-            // ✅ AAA FIX: Use deltaTime for frame-independent rotation (prevents stuttering)
-            float deltaTime = Time.smoothDeltaTime;
-            
-            // ✅ AAA FIX: Apply rotation with deltaTime scaling for consistent feel
-            // This ensures rotation speed is consistent regardless of frame rate
-            float rotationSpeed = lookSpeed * deltaTime * 60f; // Scale to 60 FPS baseline
-            
+            // ✅ CRITICAL FIX: Mouse delta is ALREADY frame-independent (pixels per frame)
+            // Don't multiply by deltaTime - this causes jitter during movement!
+            // Just apply lookSpeed as sensitivity multiplier
+
             // Mouse Y -> Camera pitch (up/down)
-            rotationX += -pendingMouseY * rotationSpeed;
+            rotationX += -pendingMouseY * lookSpeed;
             rotationX = Mathf.Clamp(rotationX, -lookXLimit, lookXLimit);
 
             if (playerCamera != null)
@@ -1135,7 +1126,7 @@ private void Update()
             }
 
             // Mouse X -> Player rotation (left/right)
-            transform.rotation *= Quaternion.Euler(0, pendingMouseX * rotationSpeed, 0);
+            transform.rotation *= Quaternion.Euler(0, pendingMouseX * lookSpeed, 0);
 
             // Reset pending input
             pendingMouseX = 0;
