@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using Mirror;
+using TacticalCombat.Core;
 
 namespace TacticalCombat.Combat
 {

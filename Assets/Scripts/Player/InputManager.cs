@@ -35,6 +35,12 @@ namespace TacticalCombat.Player
         
         /// <summary>Reload pressed (R/X Button)</summary>
         public bool ReloadPressed { get; private set; }
+
+        /// <summary>Build selection index (1-9 keys)</summary>
+        public int BuildSelectIndex { get; private set; }
+
+        /// <summary>Build rotation pressed this frame (R key in build mode)</summary>
+        public bool BuildRotatePressed { get; private set; }
         
         // ═══════════════════════════════════════════════════════════
         // CURSOR MODES
@@ -110,8 +116,8 @@ namespace TacticalCombat.Player
                 {
                     // In gameplay - lock cursor
                     currentMode = CursorMode.Locked;
-                    Cursor.lockState = CursorLockMode.Locked;
-                    Cursor.visible = false;
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
                 }
                 else
                 {
@@ -140,6 +146,8 @@ namespace TacticalCombat.Player
             JumpPressed = false;
             FirePressed = false;
             ReloadPressed = false;
+            BuildRotatePressed = false;
+            // BuildSelectIndex persists until changed or reset
             
             // ✅ Movement Input (WASD / Left Stick)
             if (!BlockMovementInput && Keyboard.current != null)
@@ -156,6 +164,22 @@ namespace TacticalCombat.Player
                 if (MoveInput.magnitude > 1f)
                 {
                     MoveInput = MoveInput.normalized;
+                }
+
+                // Build Selection (1-9)
+                for (int i = 0; i < 9; i++)
+                {
+                    Key key = (Key)((int)Key.Digit1 + i);
+                    if (Keyboard.current[key].wasPressedThisFrame)
+                    {
+                        BuildSelectIndex = i;
+                    }
+                }
+
+                // Build Rotation
+                if (Keyboard.current.rKey.wasPressedThisFrame)
+                {
+                    BuildRotatePressed = true;
                 }
             }
             else

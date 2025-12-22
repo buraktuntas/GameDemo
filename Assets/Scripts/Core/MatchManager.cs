@@ -32,6 +32,11 @@ namespace TacticalCombat.Core
         [SerializeField] private float endPhaseDuration = GameConstants.END_PHASE_DURATION;
         [SerializeField] private GameMode gameMode = GameMode.Team4v4;
 
+        public float BuildDuration => buildDuration;
+        public float CombatDuration => combatDuration;
+        public float SuddenDeathDuration => suddenDeathDuration;
+        public ObjectiveManager ObjectiveMgr => objectiveManager;
+
         [Header("Team Tracking")]
         // ⚠️ NOTE: Dictionary doesn't sync to clients automatically
         // Client-side UI should query via [ClientRpc] methods or use GetPlayerState via Commands
@@ -140,17 +145,18 @@ namespace TacticalCombat.Core
             currentPhase = Phase.Lobby;
             remainingTime = 0;
             suddenDeathActive = false;
+            objectiveManager = FindFirstObjectByType<ObjectiveManager>();
             
             // Reset player states
             playerStates.Clear();
             teamAPlayerCount = 0;
             teamBPlayerCount = 0;
             
-            // Find ObjectiveManager
+            // Find ObjectiveManager (only warn in Combat/SuddenDeath phases)
             objectiveManager = FindFirstObjectByType<ObjectiveManager>();
-            if (objectiveManager == null)
+            if (objectiveManager == null && (currentPhase == Phase.Combat || currentPhase == Phase.SuddenDeath))
             {
-                LogWarning("ObjectiveManager not found in scene!");
+                LogWarning("ObjectiveManager not found in scene during active combat phase!");
             }
             
             LogInfo("Match initialized (Lobby Phase)");
@@ -206,6 +212,11 @@ namespace TacticalCombat.Core
             teamAPlayerCount = teamA;
             teamBPlayerCount = teamB;
         }
+
+        [Server] public void SetTeamCounts(int a, int b) { teamAPlayerCount = a; teamBPlayerCount = b; }
+        [Server] public void SetPhase(Phase p) => currentPhase = p;
+        [Server] public void SetRemainingTime(float t) => remainingTime = t;
+        [Server] public void SetSuddenDeathActive(bool a) => suddenDeathActive = a;
 
         [Server]
         private void EnsureBuildValidator()
@@ -274,10 +285,8 @@ namespace TacticalCombat.Core
             }
             else
             {
-                // ✅ FIX: Only warn in development builds (reduces console spam)
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                LogWarning("SimpleBuildMode not found - BuildValidator prefabs will be empty");
-                #endif
+                // ✅ FIX: Silent during initial server startup as players haven't spawned yet
+                // LogInfo("SimpleBuildMode not yet found - BuildValidator prefabs will be assigned when players connect");
             }
             
             // Spawn on network (required for NetworkBehaviour)
@@ -900,7 +909,7 @@ namespace TacticalCombat.Core
         }
 
         [Server]
-        private Team DetermineWinnerByScore()
+        public Team DetermineWinnerByScore()
         {
             // If core returned, use that winner
             if (objectiveManager != null && objectiveManager.HasCoreBeenReturned())
@@ -1013,17 +1022,21 @@ namespace TacticalCombat.Core
         }
 
         [Server]
-        public void NotifyPlayerDeath(ulong playerId)
-        {
-            if (playerStates.ContainsKey(playerId))
-            {
-                playerStates[playerId].isAlive = false;
-                LogInfo($"Player {playerId} died. Current phase: {currentPhase}");
+        public bool CheckWinConditionInternal() => IsWinConditionMet();
 
-                // Check win condition in any phase (not just Combat)
+        [Server]
+        public void NotifyPlayerDeath(ulong victimId, ulong attackerId)
+        {
+            if (playerStates.ContainsKey(victimId))
+            {
+                playerStates[victimId].isAlive = false;
+                LogInfo($"Player {victimId} died. Current phase: {currentPhase}");
                 CheckWinCondition();
             }
         }
+
+        [Server]
+        public void NotifyPlayerDeath(ulong playerId) => NotifyPlayerDeath(playerId, 0);
 
         [Server]
         public void OnCoreDestroyed(Team winner)
@@ -1066,59 +1079,40 @@ namespace TacticalCombat.Core
         }
 
         [Server]
-        private void EndMatch(Team winner)
+        public void EndMatch(Team winner, AwardData[] awards = null)
         {
-            // ✅ FIX: EndMatch now takes winner as parameter (already determined by caller)
-            // Calculate final scores
-            foreach (var stats in matchState.playerStats.Values)
+            if (awards == null)
             {
-                stats.CalculateTotalScore();
-            }
-
-            // Calculate awards
-            var scoreManager = ScoreManager.Instance;
-            Dictionary<ulong, AwardType> awardsDict = null;
-            AwardData[] awardsArray = null;
-            if (scoreManager != null)
-            {
-                awardsDict = scoreManager.CalculateAwards();
-                
-                // ✅ FIX: Convert Dictionary to Array for Mirror RPC
-                if (awardsDict != null && awardsDict.Count > 0)
+                // Calculate final scores
+                foreach (var stats in matchState.playerStats.Values)
                 {
-                    awardsArray = new AwardData[awardsDict.Count];
-                    int index = 0;
-                    foreach (var kvp in awardsDict)
+                    stats.CalculateTotalScore();
+                }
+
+                // Calculate awards
+                var scoreManager = ScoreManager.Instance;
+                if (scoreManager != null)
+                {
+                    var awardsDict = scoreManager.CalculateAwards();
+                    if (awardsDict != null && awardsDict.Count > 0)
                     {
-                        awardsArray[index] = new AwardData(kvp.Key, kvp.Value);
-                        index++;
+                        awards = new AwardData[awardsDict.Count];
+                        int index = 0;
+                        foreach (var kvp in awardsDict)
+                        {
+                            awards[index++] = new AwardData(kvp.Key, kvp.Value);
+                        }
                     }
                 }
             }
 
-            EndMatch(winner, awardsArray);
-        }
-
-        [Server]
-        private void EndMatch(Team winner, AwardData[] awards = null)
-        {
             LogInfo($"Match ended! Winner: {winner}");
-            
             currentPhase = Phase.End;
             remainingTime = endPhaseDuration;
             RpcOnPhaseChanged(currentPhase);
             RpcOnMatchWon(winner, awards);
-            
-            // ✅ CRITICAL FIX: Keep players visible in End phase (don't hide them)
             RpcShowAllPlayers();
-            
-            // ✅ NEW: Update ranking system
             UpdateRankings(winner);
-            
-            // ✅ REMOVED: Clan system XP award (clan system removed)
-            
-            // Show end screen with scoreboard and awards
-            // Match stays in End phase until restart
         }
 
         // ✅ REMOVED: EndPhaseSequence, AwardClanXP, CalculateTeamXP (clan system and round system removed)
@@ -1255,7 +1249,7 @@ namespace TacticalCombat.Core
         }
 
         [ClientRpc]
-        private void RpcOnPhaseChanged(Phase newPhase)
+        public void RpcOnPhaseChanged(Phase newPhase)
         {
             // ✅ CRITICAL FIX: Only invoke if phase actually changed (prevent double-fire)
             // SyncVar hook may have already fired, check if event was already invoked
@@ -1319,7 +1313,7 @@ namespace TacticalCombat.Core
         }
 
         [ClientRpc]
-        private void RpcOnSuddenDeathActivated()
+        public void RpcOnSuddenDeathActivated()
         {
             OnSuddenDeathActivated?.Invoke();
             LogInfo("SUDDEN DEATH ACTIVATED!");
@@ -1329,7 +1323,7 @@ namespace TacticalCombat.Core
         /// ✅ NEW: Enable/disable player controls based on phase
         /// </summary>
         [ClientRpc]
-        private void RpcEnablePlayerControls(bool enable)
+        public void RpcEnablePlayerControls(bool enable)
         {
             // This RPC is called to notify clients about phase changes
             // PlayerController.CheckAndUpdatePlayerControls() will handle the actual enabling/disabling
@@ -1337,7 +1331,7 @@ namespace TacticalCombat.Core
         }
 
         [ClientRpc]
-        private void RpcOnMatchWon(Team winner, AwardData[] awards)
+        public void RpcOnMatchWon(Team winner, AwardData[] awards)
         {
             OnMatchWonEvent?.Invoke(winner);
             
@@ -1468,7 +1462,7 @@ namespace TacticalCombat.Core
         }
         
         [ClientRpc]
-        private void RpcSendPlayerStats(ulong playerId, int kills, int deaths, int assists,
+        public void RpcSendPlayerStats(ulong playerId, int kills, int deaths, int assists,
             int structuresBuilt, int trapKills, int captures, float defenseTime, int totalScore)
         {
             // Update client-side cache
@@ -1536,7 +1530,7 @@ namespace TacticalCombat.Core
         /// ✅ AAA QUALITY: Find player GameObject by netId
         /// </summary>
         [Server]
-        private GameObject FindPlayerByNetId(ulong netId)
+        public GameObject FindPlayerByNetId(ulong netId)
         {
             var allPlayers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
             foreach (var player in allPlayers)

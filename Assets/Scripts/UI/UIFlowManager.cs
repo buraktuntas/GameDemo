@@ -130,7 +130,8 @@ namespace TacticalCombat.UI
             }
             else
             {
-                Debug.LogWarning("⚠️ [UIFlowManager] GameHUD not found in scene!");
+                // Silence warning - GameHUD might not be needed in all phases
+                Debug.Log("[UIFlowManager] GameHUD not found in scene (skipping activation)");
             }
         }
 

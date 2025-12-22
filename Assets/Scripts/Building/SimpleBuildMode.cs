@@ -435,10 +435,40 @@ namespace TacticalCombat.Building
         
         private void HandleStructureSelection()
         {
+            // Cycle Selection (Tab)
             if (Keyboard.current != null && Keyboard.current[cycleStructureKey].wasPressedThisFrame)
             {
                 CycleStructure();
             }
+
+            // Direct Selection (1-6) from InputManager
+            if (inputManager != null && inputManager.BuildSelectIndex != -1)
+            {
+                SelectStructureDirect(inputManager.BuildSelectIndex);
+            }
+        }
+
+        private void SelectStructureDirect(int index)
+        {
+            if (availableStructures == null || index < 0 || index >= availableStructures.Length) return;
+            if (currentStructureIndex == index) return;
+
+            currentStructureIndex = index;
+            
+            if (ghostPreview != null)
+            {
+                DestroyGhostPreview();
+                CreateGhostPreview();
+            }
+            else
+            {
+                UpdateCostDisplay();
+            }
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            string structureName = availableStructures[currentStructureIndex].name;
+            Debug.Log($"🏗️ [SimpleBuildMode] Direct selection: {structureName} (Index: {index})");
+            #endif
         }
         
         private void CycleStructure()
@@ -466,15 +496,23 @@ namespace TacticalCombat.Building
 
             #if UNITY_EDITOR || DEVELOPMENT_BUILD
             string structureName = availableStructures[currentStructureIndex].name;
-            Debug.Log($"🏗️ [SimpleBuildMode] Structure selected: {structureName} - Cost: {GetCurrentStructureCost()}₺");
+            Debug.Log($"🏗️ [SimpleBuildMode] Structure selected: {structureName} - Cost: {GetCurrentStructureCost()}C");
             #endif
         }
         
         private void HandleRotation()
         {
+            // Direct key check for holding rotation
             if (Keyboard.current != null && Keyboard.current[rotateKey].isPressed)
             {
                 currentRotationY += rotationSpeed * Time.deltaTime;
+                currentRotationY = Mathf.Repeat(currentRotationY, 360f);
+            }
+            
+            // Centralized "Tap" rotation from InputManager
+            if (inputManager != null && inputManager.BuildRotatePressed)
+            {
+                currentRotationY += 90f; // Standard 90 deg rotation on tap
                 currentRotationY = Mathf.Repeat(currentRotationY, 360f);
             }
         }
@@ -487,8 +525,8 @@ namespace TacticalCombat.Building
             // ✅ FIX: Sadece build modunda placement'e izin ver
             if (!isBuildModeActive) return;
 
-            // ✅ PERFORMANCE FIX: Prevent rapid placement spam (freeze fix)
-            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame && canPlace)
+            // ✅ PERFORMANCE FIX: Use InputManager for placement detection
+            if (inputManager != null && inputManager.FirePressed && canPlace)
             {
                 float timeSinceLastPlacement = Time.time - lastPlacementTime;
                 if (timeSinceLastPlacement >= PLACEMENT_COOLDOWN)
@@ -496,12 +534,7 @@ namespace TacticalCombat.Building
                     PlaceStructure();
                     lastPlacementTime = Time.time;
                 }
-                else
-                {
-                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    Debug.Log($"⏱️ [SimpleBuildMode] Placement on cooldown ({PLACEMENT_COOLDOWN - timeSinceLastPlacement:F2}s remaining)");
-                    #endif
-                }
+                // ... cooldown log removed to reduce spam ...
             }
         }
         
@@ -733,9 +766,10 @@ namespace TacticalCombat.Building
 
         private void UpdateGhostPreview()
         {
-            if (ghostPreview == null || playerCamera == null || Mouse.current == null) return;
+            if (ghostPreview == null || playerCamera == null || inputManager == null) return;
 
-            Ray ray = playerCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
+            // Use camera forward for ray if mouse isn't active/locked, or screen center
+            Ray ray = playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
 
             if (Physics.Raycast(ray, out RaycastHit hit, placementDistance, groundLayer))
             {

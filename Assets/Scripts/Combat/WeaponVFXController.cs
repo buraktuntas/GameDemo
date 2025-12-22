@@ -1,7 +1,8 @@
 using UnityEngine;
 using System.Collections.Generic;
 using System.Collections;
-using TacticalCombat.Effects; // ✅ FIX: Required for AutoDestroy
+using TacticalCombat.Effects; 
+using TacticalCombat.Core;
 
 namespace TacticalCombat.Combat
 {

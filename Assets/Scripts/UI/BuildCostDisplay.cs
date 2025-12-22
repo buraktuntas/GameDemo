@@ -5,7 +5,7 @@ namespace TacticalCombat.UI
 {
     /// <summary>
     /// Build ghost preview üzerinde cost gösterir
-    /// Ghost'un üstünde "Wall - 50₺" gibi text
+    /// Ghost'un üstünde "Wall - 50C" gibi text
     /// </summary>
     public class BuildCostDisplay : MonoBehaviour
     {
@@ -75,7 +75,7 @@ namespace TacticalCombat.UI
         {
             if (costText != null)
             {
-                costText.text = $"{structureName}\n{cost} ₺";
+                costText.text = $"{structureName}\n{cost} C";
                 costText.color = canAfford ? affordableColor : unaffordableColor;
             }
 
@@ -127,7 +127,7 @@ namespace TacticalCombat.UI
             costText.fontSize = fontSize;
             costText.color = affordableColor;
             costText.alignment = TextAlignmentOptions.Center;
-            costText.text = "Wall - 50₺";
+            costText.text = "Wall - 50C";
 
             RectTransform rect = costText.GetComponent<RectTransform>();
             rect.anchorMin = Vector2.zero;

@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections;
+using TacticalCombat.Core;
 
 namespace TacticalCombat.Combat
 {

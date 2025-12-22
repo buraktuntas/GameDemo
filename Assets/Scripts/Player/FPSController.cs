@@ -158,7 +158,7 @@ namespace TacticalCombat.Player
             speedVelocityRef = 0f;
             
             // ✅ AAA FIX: CRITICAL - Force stop all movement immediately
-            if (characterController != null)
+            if (characterController != null && characterController.enabled && gameObject.activeInHierarchy)
             {
                 characterController.Move(Vector3.zero);
             }
@@ -265,7 +265,10 @@ namespace TacticalCombat.Player
                 moveDirection.x = 0;
                 moveDirection.y = CalculateVerticalVelocity();
                 moveDirection.z = 0;
-                characterController.Move(moveDirection * Time.fixedDeltaTime);
+                if (characterController.enabled && gameObject.activeInHierarchy)
+                {
+                    characterController.Move(moveDirection * Time.fixedDeltaTime);
+                }
                 return;
             }
 
@@ -284,7 +287,10 @@ namespace TacticalCombat.Player
             moveDirection.z = horizontalMove.z;
 
             // Apply prediction locally (instant feedback)
-            characterController.Move(moveDirection * Time.fixedDeltaTime);
+            if (characterController.enabled && gameObject.activeInHierarchy)
+            {
+                characterController.Move(moveDirection * Time.fixedDeltaTime);
+            }
 
             // ✅ SEND INPUT TO HOST (not position!)
             // Host will calculate authoritative position and sync back
@@ -329,7 +335,10 @@ namespace TacticalCombat.Player
             moveDirection.z = horizontalMove.z;
             
             // Apply movement on host (authoritative)
-            characterController.Move(moveDirection * Time.fixedDeltaTime);
+            if (characterController.enabled && gameObject.activeInHierarchy)
+            {
+                characterController.Move(moveDirection * Time.fixedDeltaTime);
+            }
             
             // Sync to all clients (including sender for reconciliation)
             RpcUpdateRemoteClients(transform.position, transform.rotation);

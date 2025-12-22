@@ -143,7 +143,7 @@ namespace TacticalCombat.UI
 
             // Step 8: Ensure camera is active
             EnsureCameraActive();
-            
+
             // ✅ CRITICAL FIX: Unlock cursor for UI interaction
             UnlockCursorForLobby();
 
@@ -1078,24 +1078,7 @@ namespace TacticalCombat.UI
 
         private void UpdateUI()
         {
-            Debug.Log($"🔍 [LobbyUIController] UpdateUI called - lobbyManager: {lobbyManager != null}, lobbyPanel: {lobbyPanel != null}, playerListContainer: {playerListContainer != null}");
-
-            // ✅ CRITICAL DEBUG: Check if buttons exist and have listeners
-            if (startGameButton != null)
-            {
-                int listenerCount = startGameButton.onClick.GetPersistentEventCount();
-                Debug.Log($"🔍 [LobbyUIController] Start Game button exists, persistent listeners: {listenerCount}");
-            }
-            else
-            {
-                Debug.LogWarning("⚠️ [LobbyUIController] startGameButton is NULL in UpdateUI!");
-            }
-
-            if (lobbyManager == null)
-            {
-                Debug.LogWarning("⚠️ [LobbyUIController] UpdateUI - lobbyManager is null");
-                return;
-            }
+            if (lobbyManager == null) return;
 
             // ✅ CRITICAL: Ensure UI elements exist
             // Try to find existing playerListContainer first (might have been created but reference lost)
@@ -1166,8 +1149,6 @@ namespace TacticalCombat.UI
             var localPlayer = lobbyManager.GetLocalPlayer();
             bool isHost = localPlayer?.isHost ?? false;
 
-            Debug.Log($"🔍 [LobbyUIController] UpdateUI - Local player: {localPlayer?.playerName}, isHost: {isHost}, NetworkServer.active: {NetworkServer.active}");
-
             if (startGameButton != null)
             {
                 startGameButton.gameObject.SetActive(isHost);
@@ -1178,7 +1159,7 @@ namespace TacticalCombat.UI
                 }
                 else
                 {
-                    Debug.Log("ℹ️ [LobbyUIController] Start Game button hidden (not host)");
+                // Removed redundant host button hide log
                 }
             }
             else
@@ -1220,7 +1201,6 @@ namespace TacticalCombat.UI
             }
             
             var players = lobbyManager.GetAllPlayers();
-            Debug.Log($"🔍 [LobbyUIController] UpdateReadyStatusDirectly: {players.Count} players, {playerListItems.Count} items");
             
             // ✅ CRITICAL: Match by connectionId, not by index (order might change)
             foreach (var playerData in players)

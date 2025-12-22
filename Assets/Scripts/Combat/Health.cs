@@ -208,7 +208,7 @@ namespace TacticalCombat.Combat
             // Notify MatchManager if this is a player
             if (TryGetComponent<TacticalCombat.Player.PlayerController>(out var player))
             {
-                MatchManager.Instance?.NotifyPlayerDeath(player.playerId);
+                MatchManager.Instance?.NotifyPlayerDeath(player.netId, killerId);
                 
                 // Drop any cores the player was carrying
                 var objectiveManager = Core.ObjectiveManager.Instance;

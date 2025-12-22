@@ -172,6 +172,8 @@ namespace TacticalCombat.Audio
                 musicSource.Play();
             }
         }
+
+        public void PlayBuildMusic() => PlayBuildModeMusic();
         
         public void PlayCombatMusic()
         {

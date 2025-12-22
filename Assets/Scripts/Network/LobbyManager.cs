@@ -1412,28 +1412,27 @@ namespace TacticalCombat.Network
             return localConnectionId;
         }
 
+        private float lastLocalPlayerErrorTime = 0f;
+
         public LobbyPlayerData? GetLocalPlayer()
         {
             if (!NetworkClient.active)
             {
-                Debug.LogWarning("[LobbyManager] GetLocalPlayer: NetworkClient not active!");
+                // Only log if active in lobby to avoid spam during scene transitions
+                if (TacticalCombat.UI.LobbyUIController.Instance != null && TacticalCombat.UI.LobbyUIController.Instance.IsLobbyVisible())
+                {
+                    Debug.LogWarning("[LobbyManager] GetLocalPlayer: NetworkClient not active!");
+                }
                 return null;
             }
 
-            // ✅ AAA FIX: Multiple fallback strategies to find local player
-
-            // Strategy 1: Use cached localConnectionId (set by server via RPC)
+            // Strategy 1: Use cached localConnectionId
             if (localConnectionId != 0)
             {
                 foreach (var player in players)
                 {
-                    if (player.connectionId == localConnectionId)
-                    {
-                        Debug.Log($"[LobbyManager] GetLocalPlayer: Found via localConnectionId ({localConnectionId}): {player.playerName}");
-                        return player;
-                    }
+                    if (player.connectionId == localConnectionId) return player;
                 }
-                Debug.LogWarning($"[LobbyManager] GetLocalPlayer: localConnectionId ({localConnectionId}) set but player not found in list!");
             }
 
             // Strategy 2: If we're hosting, find the host player
@@ -1441,43 +1440,18 @@ namespace TacticalCombat.Network
             {
                 foreach (var player in players)
                 {
-                    if (player.isHost)
-                    {
-                        Debug.Log($"[LobbyManager] GetLocalPlayer: Found host player: {player.playerName}");
-                        return player;
-                    }
+                    if (player.isHost || player.connectionId == 0) return player;
                 }
+            }
 
-                // ✅ FIX: Fallback for host - if no host flag set, connection ID 0 is always host
-                if (players.Count > 0)
+            // Throttled error logging
+            if (Time.time - lastLocalPlayerErrorTime > 5f)
+            {
+                if (TacticalCombat.UI.LobbyUIController.Instance != null && TacticalCombat.UI.LobbyUIController.Instance.IsLobbyVisible())
                 {
-                    foreach (var player in players)
-                    {
-                        if (player.connectionId == 0)
-                        {
-                            Debug.LogWarning($"[LobbyManager] GetLocalPlayer: Using fallback - ConnectionID 0 is host: {player.playerName}");
-                            return player;
-                        }
-                    }
+                    Debug.LogWarning($"[LobbyManager] GetLocalPlayer: Local player not identified yet (Players: {players.Count})");
+                    lastLocalPlayerErrorTime = Time.time;
                 }
-
-                Debug.LogWarning("[LobbyManager] GetLocalPlayer: We're server but no host player found!");
-            }
-
-            // Strategy 3: Try to get connection ID from NetworkClient
-            // ✅ FIX: NetworkClient.connection is NetworkConnectionToServer (client-side), doesn't have connectionId
-            // Client doesn't know its own connection ID directly - must be set by server via RPC
-            // If we reach here, localConnectionId is 0 and we're not server, so we can't determine local player
-            if (NetworkClient.connection != null && !NetworkServer.active)
-            {
-                Debug.LogWarning($"[LobbyManager] GetLocalPlayer: Client-side, but localConnectionId not set yet (RPC may not have arrived)");
-                Debug.LogWarning($"[LobbyManager]   Waiting for RpcSetLocalConnectionId from server...");
-            }
-
-            Debug.LogError($"[LobbyManager] GetLocalPlayer: Could not find local player! Players in lobby: {players.Count}");
-            for (int i = 0; i < players.Count; i++)
-            {
-                Debug.LogError($"  [{i}] {players[i].playerName} (ID: {players[i].connectionId}, Host: {players[i].isHost}, Ready: {players[i].isReady})");
             }
 
             return null;

@@ -109,6 +109,18 @@ namespace TacticalCombat.Core
         Officer,    // Can invite/kick members
         Leader      // Full control (create/delete clan, assign ranks)
     }
+
+    /// <summary>
+    /// Surface types for impact effects
+    /// </summary>
+    public enum SurfaceType
+    {
+        Generic,
+        Flesh,
+        Wood,
+        Metal,
+        Stone
+    }
 }
 
 

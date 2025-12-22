@@ -122,6 +122,8 @@ namespace TacticalCombat.Player
             }
         }
         
+        public void SetTeamColor(Team team) => UpdateTeamColor(team);
+
         /// <summary>
         /// Update team color based on team assignment
         /// </summary>
