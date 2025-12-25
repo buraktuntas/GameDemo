@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Mirror;
 using TacticalCombat.UI;
 using TacticalCombat.Building;
+using TacticalCombat.Player;
 using static TacticalCombat.Core.GameLogger;
 
 namespace TacticalCombat.Core
@@ -171,8 +172,87 @@ namespace TacticalCombat.Core
                 return;
             }
 
-            LogInfo("Starting Match -> Transitioning to Build Phase");
+            LogInfo("Starting Match -> Performing Authoritative Teleport");
+            
+            // ✅ CRITICAL: Teleport players BEFORE changing phase
+            ServerTeleportAllPlayers();
+            
+            LogInfo("Transitioning to Build Phase");
             TransitionToBuild();
+        }
+
+        [Server]
+        private void ServerTeleportAllPlayers()
+        {
+            // ✅ FIX: Only teleport players if match is starting or resetting
+            if (currentPhase == Phase.Lobby)
+            {
+                 // Don't teleport in lobby - let players spawn at lobby points naturally
+                 return;
+            }
+
+            // ✅ FIX: Use NetworkStartPosition instead of Tag for Mirror compatibility
+
+            var spawnPoints = FindObjectsByType<NetworkStartPosition>(FindObjectsSortMode.None);
+
+            bool hasSpawns = spawnPoints.Length > 0;
+            if (!hasSpawns)
+            {
+                LogWarning("[MatchManager] No NetworkStartPosition found! Using Circle Formation fallback.");
+            }
+
+            // ✅ PERFORMANCE: Use component cache instead of FindObjectsByType
+            var players = ComponentCache.GetPlayerControllers(includeInactive: true);
+            int spawnIndex = 0;
+            float circleRadius = 5f; // Radius for fallback circle
+
+            foreach (var pc in players)
+            {
+                if (pc == null) continue; // ✅ SAFETY: Skip null entries
+
+                Vector3 targetPos;
+                Quaternion targetRot = Quaternion.identity;
+
+                if (hasSpawns)
+                {
+                    // Use existing spawn points roughly in order (round robin)
+                    var spawn = spawnPoints[spawnIndex % spawnPoints.Length];
+                    targetPos = spawn.transform.position;
+                    targetRot = spawn.transform.rotation;
+                }
+                else
+                {
+                    // ✅ FIX: Circle Formation to prevent stacking at (0,0,0)
+                    float angle = (360f / players.Count) * spawnIndex;
+                    float x = Mathf.Cos(angle * Mathf.Deg2Rad) * circleRadius;
+                    float z = Mathf.Sin(angle * Mathf.Deg2Rad) * circleRadius;
+                    targetPos = new Vector3(x, 1f, z); // 1m high to prevent falling through floor
+                    
+                    // Face center (Flattened to Y-axis only to prevent tilting/falling feeling)
+                    Vector3 lookDir = Vector3.zero - targetPos;
+                    lookDir.y = 0; 
+                    if (lookDir != Vector3.zero)
+                    {
+                        targetRot = Quaternion.LookRotation(lookDir);
+                    }
+                }
+
+                // (Redundant block removed)
+                spawnIndex++;
+
+                // ✅ CRITICAL: Force position on server
+                pc.transform.position = targetPos;
+                pc.transform.rotation = targetRot;
+
+                // ✅ CRITICAL: Force clients to snap to this position (teleport)
+                var fps = pc.GetComponent<FPSController>();
+                if (fps != null)
+                {
+                    fps.RpcSetPosition(targetPos, targetRot.eulerAngles.y);
+                }
+                
+                LogInfo($"[MatchManager] Teleported {pc.name} to {targetPos}");
+            }
         }
 
         [Server]
@@ -307,7 +387,10 @@ namespace TacticalCombat.Core
             // Notify phase change
             RpcOnPhaseChanged(currentPhase);
             
-            // Enable player controls (movement only, combat disabled by phase check in PlayerController)
+            // ✅ NEW: Explicitly show all players on match start
+            RpcShowAllPlayers();
+            
+            // Enable player controls
             RpcEnablePlayerControls(true);
             
             // Start build phase timer
@@ -377,13 +460,27 @@ namespace TacticalCombat.Core
             }
             catch { }
 
-            // ✅ CRITICAL FIX: Late Join Handling
-            // If joining a match already in progress (Build or Combat), show all players immediately
+            // ✅ CRITICAL FIX: Late Join Handling with SyncVar race condition fix
+            // Wait for SyncVars to sync before checking phase (prevent race condition)
+            StartCoroutine(LateJoinCheck());
+        }
+
+        /// <summary>
+        /// ✅ RACE CONDITION FIX: Wait for SyncVars to sync before late join handling
+        /// Prevents checking currentPhase before it has synced from server
+        /// </summary>
+        private System.Collections.IEnumerator LateJoinCheck()
+        {
+            // Wait 2 frames for SyncVars to sync
+            yield return null;
+            yield return null;
+
+            // Now check if we're in an active phase (not Lobby)
             if (currentPhase != Phase.Lobby)
             {
                 LogInfo($"[MatchManager] Late join detected (Phase: {currentPhase}) - Showing all players");
                 ShowAllPlayersLocal();
-                
+
                 // Also ensure GameHUD is active
                 var gameHUD = FindFirstObjectByType<TacticalCombat.UI.GameHUD>(FindObjectsInactive.Include);
                 if (gameHUD != null)
@@ -391,9 +488,11 @@ namespace TacticalCombat.Core
                     gameHUD.gameObject.SetActive(true);
                 }
             }
+            else
+            {
+                LogInfo($"[MatchManager] Client joined during Lobby phase - waiting for match start");
+            }
         }
-
-        // ... (InitializeMatch and other methods remain unchanged) ...
 
         /// <summary>
         /// ✅ NEW: Show all players when match starts (they were hidden in Lobby phase)
@@ -409,10 +508,9 @@ namespace TacticalCombat.Core
         /// </summary>
         private void ShowAllPlayersLocal()
         {
-            // Find all player GameObjects and show them
-            // ✅ CRITICAL: Use FindObjectsInactive to find inactive players too!
-            var players = FindObjectsByType<Player.PlayerController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            LogInfo($"[MatchManager] Found {players.Length} PlayerController(s) in scene (including inactive)");
+            // ✅ PERFORMANCE: Use component cache instead of FindObjectsByType
+            var players = ComponentCache.GetPlayerControllers(includeInactive: true);
+            LogInfo($"[MatchManager] Found {players.Count} PlayerController(s) in scene (including inactive)");
             
             // ✅ CRITICAL FIX: Find local player using NetworkClient.localPlayer (more reliable)
             Player.PlayerController localPlayerController = null;
@@ -566,7 +664,8 @@ namespace TacticalCombat.Core
                 LogError("[MatchManager] ❌ Local player NOT FOUND! Cannot activate camera!");
                 
                 // ✅ LAST RESORT: Try to find ANY FPSController with a camera (including inactive)
-                var allFPS = FindObjectsByType<Player.FPSController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+                // ✅ PERFORMANCE: Use component cache
+                var allFPS = ComponentCache.GetFPSControllers(includeInactive: true);
                 foreach (var fps in allFPS)
                 {
                     // ✅ CRITICAL: Activate FPSController GameObject first
@@ -1206,22 +1305,19 @@ namespace TacticalCombat.Core
         }
 
         // Client-side phase change handler
-        // ✅ CRITICAL FIX: SyncVar hook - only invoke event, don't duplicate RPC logic
         private void OnPhaseChanged(Phase oldPhase, Phase newPhase)
         {
             LogInfo($"Phase changed: {oldPhase} -> {newPhase}");
-            // ✅ FIX: SyncVar hook already fires on all clients, RPC is redundant
-            // But we keep RPC for explicit synchronization in case SyncVar is delayed
-            // Only invoke event once to prevent double-fire
             OnPhaseChangedEvent?.Invoke(newPhase);
-            
-            // ✅ NEW: Update audio based on phase
             UpdatePhaseAudio(newPhase);
             
-            // ✅ CRITICAL FIX: Update cursor state based on phase (client-side)
             if (isClient)
             {
                 UpdateCursorForPhase(newPhase);
+                
+                // ✅ NEW: Automatically refresh visuals on phase changes to ensure everyone is visible
+                var visuals = GetComponent<MatchPlayerVisualsController>();
+                if (visuals != null) visuals.ForceRefreshAllVisuals();
             }
         }
         
@@ -1362,9 +1458,13 @@ namespace TacticalCombat.Core
             else
             {
                 // ✅ FIX: EndGameScoreboard not found - provide helpful error message (only in development builds)
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                LogError("[MatchManager] ❌ EndGameScoreboard not found! Cannot show end screen. Please add EndGameScoreboard prefab to scene. Match ended but players won't see results!");
-                #endif
+                // If UIFlowManager exists, it might handle it, so we downgrade to Warning or verify flow manager first
+                if (UI.UIFlowManager.Instance == null) 
+                {
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    LogWarning("[MatchManager] ⚠️ EndGameScoreboard not found and no UIFlowManager. Results might not be shown.");
+                    #endif
+                }
             }
             
             // ✅ NEW: Notify UIFlowManager
@@ -1532,15 +1632,9 @@ namespace TacticalCombat.Core
         [Server]
         public GameObject FindPlayerByNetId(ulong netId)
         {
-            var allPlayers = FindObjectsByType<Player.PlayerController>(FindObjectsSortMode.None);
-            foreach (var player in allPlayers)
-            {
-                if (player != null && player.netId == netId)
-                {
-                    return player.gameObject;
-                }
-            }
-            return null;
+            // ✅ PERFORMANCE: Use component cache
+            var player = ComponentCache.FindPlayerByNetId(netId);
+            return player != null ? player.gameObject : null;
         }
         
         /// <summary>
@@ -1787,6 +1881,8 @@ namespace TacticalCombat.Core
                 RankingSystem.Instance.UpdateMMR(playerId, won, performanceScore);
             }
         }
+
+        // End of file
     }
 }
 

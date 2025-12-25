@@ -1182,17 +1182,17 @@ namespace TacticalCombat.UI
                 waitingPanel.SetActive(false);
             }
 
-            // ✅ CRITICAL: Update ready status directly before refresh
-            UpdateReadyStatusDirectly();
-            
-            // Refresh player list
+            // ✅ AAA FIX: Refresh list first to ensure items exist
             RefreshPlayerList();
+            
+            // Then update ready status (though refresh already does it, this ensures precision if items weren't recreated)
+            UpdateReadyStatusDirectly(true); // Added 'silent' parameter
         }
 
         /// <summary>
         /// ✅ CRITICAL: Update ready status directly without full refresh
         /// </summary>
-        private void UpdateReadyStatusDirectly()
+        private void UpdateReadyStatusDirectly(bool silent = false)
         {
             if (lobbyManager == null || playerListContainer == null)
             {
@@ -1218,7 +1218,10 @@ namespace TacticalCombat.UI
                 
                 if (item == null)
                 {
-                    Debug.LogWarning($"⚠️ [LobbyUIController] Item not found for player {playerData.playerName} (ID: {playerData.connectionId})");
+                    if (!silent)
+                    {
+                        Debug.LogWarning($"⚠️ [LobbyUIController] Item not found for player {playerData.playerName} (ID: {playerData.connectionId})");
+                    }
                     continue;
                 }
                 
@@ -1466,17 +1469,16 @@ namespace TacticalCombat.UI
                          $"Child count: {containerRect.childCount}, " +
                          $"Items list count: {playerListItems.Count}");
                 
-                // ✅ CRITICAL: Also rebuild parent ScrollView if exists
+                // ✅ AAA FIX: Find ScrollRect more reliably
                 ScrollRect scrollRect = playerListContainer.GetComponentInParent<ScrollRect>();
+                if (scrollRect == null && lobbyPanel != null)
+                {
+                    scrollRect = lobbyPanel.GetComponentInChildren<ScrollRect>(true);
+                }
+
                 if (scrollRect != null && scrollRect.content != null)
                 {
                     LayoutRebuilder.ForceRebuildLayoutImmediate(scrollRect.content);
-                    Debug.Log($"🔍 [LobbyUIController] ScrollRect content size: {scrollRect.content.sizeDelta}, " +
-                             $"Viewport: {scrollRect.viewport?.name}");
-                }
-                else
-                {
-                    Debug.LogWarning("⚠️ [LobbyUIController] ScrollRect not found!");
                 }
                 
                 // ✅ CRITICAL: Force canvas update to ensure all items are visible
@@ -1892,7 +1894,10 @@ namespace TacticalCombat.UI
             {
                 if (!cameraWasActive)
                 {
-                    Debug.LogWarning("⚠️ [LobbyUIController] No camera found! Creating fallback camera...");
+                    // ✅ AAA SILENCE: Only log if we actually need to create one and it's not a common occurrence
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log("[LobbyUIController] EnsureCameraActive: Creating fallback camera");
+                    #endif
                     CreateFallbackCamera();
                 }
                 cameraWasActive = false;

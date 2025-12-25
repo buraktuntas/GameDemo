@@ -239,6 +239,12 @@ namespace TacticalCombat.Network
                 return;
             }
 
+            // ✅ LATE JOIN HANDLING: Check if match is already in progress
+            if (MatchManager.Instance != null && MatchManager.Instance.GetCurrentPhase() != Phase.Lobby)
+            {
+                 LogNetwork($"[Late Join] Spawning player {conn.connectionId} directly into active game (Phase: {MatchManager.Instance.GetCurrentPhase()})");
+            }
+
             // ✅ FIX: Ensure playerPrefab is valid
             if (playerPrefab == null)
             {
@@ -886,7 +892,7 @@ namespace TacticalCombat.Network
                 fpsController.transform.rotation = rotation;
                 
                 // Sync to all clients via RPC
-                fpsController.RpcSetPosition(position, rotation);
+                fpsController.RpcSetPosition(position, rotation.eulerAngles.y);
                 
                 // ✅ AAA FIX: Update spawn time on client (prevents false speed warnings)
                 fpsController.SetSpawnTime(Time.time);

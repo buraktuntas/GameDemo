@@ -112,14 +112,8 @@ namespace TacticalCombat.Building
         {
             base.OnStartLocalPlayer();
             
-            // ✅ CRITICAL FIX: Force buildModeKey to B (prefab might have F5 or wrong key)
-            if (buildModeKey != Key.B)
-            {
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"[SimpleBuildMode] ⚠️ buildModeKey was {buildModeKey}, forcing to Key.B");
-                #endif
-                buildModeKey = Key.B;
-            }
+            // ✅ AAA FIX: Force buildModeKey silently to avoid console noise
+            buildModeKey = Key.B;
             
             // ✅ CRITICAL: Ensure component is enabled
             if (!enabled)
@@ -355,7 +349,7 @@ namespace TacticalCombat.Building
         
         private void HandleBuildModeToggle()
         {
-            // ✅ FIX: Reentrant guard prevents state corruption from recursive calls
+            // ✅ THREAD SAFETY: Reentrant guard prevents state corruption from recursive calls or simultaneous inputs
             if (isTogglingBuildMode)
             {
                 return;
@@ -371,9 +365,16 @@ namespace TacticalCombat.Building
             // ✅ CRITICAL FIX: Check for B key press DIRECTLY from InputSystem
             // This bypasses any InputManager blocking logic for the toggle itself
             bool togglePressed = Keyboard.current[buildModeKey].wasPressedThisFrame;
-            
+
             // ESC also exits build mode
             bool escapePressed = Keyboard.current.escapeKey.wasPressedThisFrame;
+
+            // ✅ RACE CONDITION FIX: Only process ONE input per frame (prioritize ESC if both pressed)
+            if (escapePressed && togglePressed)
+            {
+                // Both keys pressed same frame - only process ESC (exit)
+                togglePressed = false;
+            }
 
             if ((togglePressed || (isBuildModeActive && escapePressed)) && Time.time - lastToggleTime > TOGGLE_COOLDOWN)
             {
@@ -402,9 +403,13 @@ namespace TacticalCombat.Building
                     #endif
                 }
 
+                // ✅ ATOMIC: Set flag and time BEFORE any state changes
                 isTogglingBuildMode = true;
                 lastToggleTime = Time.time;
-                
+
+                // ✅ STATE VALIDATION: Capture current state for validation
+                bool stateBeforeToggle = isBuildModeActive;
+
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.Log($"🏗️ [SimpleBuildMode] Toggle Input Detected! Current State: {isBuildModeActive}, Key: {(togglePressed ? "B" : "ESC")}");
                 #endif
@@ -419,15 +424,36 @@ namespace TacticalCombat.Building
                     {
                         EnterBuildMode();
                     }
+
+                    // ✅ VALIDATION: Verify state actually changed as expected
+                    if (stateBeforeToggle == isBuildModeActive)
+                    {
+                        Debug.LogWarning($"⚠️ [SimpleBuildMode] State did not change! Before: {stateBeforeToggle}, After: {isBuildModeActive}");
+                    }
                 }
                 catch (System.Exception e)
                 {
                     Debug.LogError($"❌ [SimpleBuildMode] Error toggling build mode: {e.Message}\n{e.StackTrace}");
-                    // Force exit on error to prevent getting stuck
-                    if (isBuildModeActive) ExitBuildMode();
+
+                    // ✅ RECOVERY: Force consistent state on error
+                    // If we were trying to exit, ensure we're fully exited
+                    // If we were trying to enter, ensure we're fully in default state
+                    if (stateBeforeToggle)
+                    {
+                        // Was trying to exit - force exit
+                        try { ExitBuildMode(); }
+                        catch { /* Ignore nested errors */ }
+                    }
+                    else
+                    {
+                        // Was trying to enter - ensure clean state
+                        isBuildModeActive = false;
+                        if (ghostPreview != null) DestroyGhostPreview();
+                    }
                 }
                 finally
                 {
+                    // ✅ ATOMIC: Always clear flag
                     isTogglingBuildMode = false;
                 }
             }
@@ -932,6 +958,7 @@ namespace TacticalCombat.Building
         
         // ✅ CRITICAL FIX: Per-player rate limiting (prevents budget bypass exploit)
         private static Dictionary<ulong, Queue<float>> playerPlacementTimes = new Dictionary<ulong, Queue<float>>();
+        private static readonly object placementLock = new object(); // ✅ THREAD SAFETY: Lock for dictionary access
         private const float RATE_LIMIT_WINDOW = 5f; // 5 second window
         private const int MAX_PLACEMENTS_PER_WINDOW = 10; // Max 10 structures per 5 seconds
         private const float SERVER_PLACEMENT_COOLDOWN = 0.25f; // 250ms minimum between placements
@@ -942,12 +969,16 @@ namespace TacticalCombat.Building
         [Server]
         public static void CleanupPlayerPlacementTimes(ulong playerId)
         {
-            if (playerPlacementTimes.ContainsKey(playerId))
+            // ✅ THREAD SAFETY: Lock dictionary access
+            lock (placementLock)
             {
-                playerPlacementTimes.Remove(playerId);
-                #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.Log($"[SimpleBuildMode] Cleaned up placement times for disconnected player {playerId}");
-                #endif
+                if (playerPlacementTimes.ContainsKey(playerId))
+                {
+                    playerPlacementTimes.Remove(playerId);
+                    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    Debug.Log($"[SimpleBuildMode] Cleaned up placement times for disconnected player {playerId}");
+                    #endif
+                }
             }
         }
         
@@ -1012,31 +1043,48 @@ namespace TacticalCombat.Building
             }
             
             // ✅ CRITICAL FIX: Per-player rate limiting (prevents spam exploit)
-            if (!playerPlacementTimes.ContainsKey(netId))
+            // ✅ THREAD SAFETY: ALL queue operations inside lock to prevent race conditions
+            float currentTime = Time.time;
+            bool rateLimitExceeded = false;
+
+            lock (placementLock)
             {
-                playerPlacementTimes[netId] = new Queue<float>();
+                // Get or create queue for this player
+                if (!playerPlacementTimes.ContainsKey(netId))
+                {
+                    playerPlacementTimes[netId] = new Queue<float>();
+                }
+                Queue<float> placementTimes = playerPlacementTimes[netId];
+
+                // ✅ CRITICAL FIX: Remove old placements INSIDE lock (thread-safe)
+                while (placementTimes.Count > 0 && currentTime - placementTimes.Peek() > RATE_LIMIT_WINDOW)
+                {
+                    placementTimes.Dequeue();
+                }
+
+                // Check rate limit
+                if (placementTimes.Count >= MAX_PLACEMENTS_PER_WINDOW)
+                {
+                    rateLimitExceeded = true;
+                }
+                else
+                {
+                    // Add new placement timestamp
+                    placementTimes.Enqueue(currentTime);
+                }
             }
 
-            Queue<float> placementTimes = playerPlacementTimes[netId];
-
-            // Remove old placements outside the time window
-            while (placementTimes.Count > 0 && Time.time - placementTimes.Peek() > RATE_LIMIT_WINDOW)
-            {
-                placementTimes.Dequeue();
-            }
-
-            // Check rate limit
-            if (placementTimes.Count >= MAX_PLACEMENTS_PER_WINDOW)
+            // Handle rate limit rejection outside lock
+            if (rateLimitExceeded)
             {
                 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Player {netId} exceeded rate limit: {placementTimes.Count}/{MAX_PLACEMENTS_PER_WINDOW} in {RATE_LIMIT_WINDOW}s");
+                Debug.LogWarning($"🚨 [SimpleBuildMode SERVER] Player {netId} exceeded rate limit: Max {MAX_PLACEMENTS_PER_WINDOW} placements per {RATE_LIMIT_WINDOW}s");
                 #endif
                 RpcPlacementRejected($"Rate limit: Max {MAX_PLACEMENTS_PER_WINDOW} placements per {RATE_LIMIT_WINDOW}s");
                 return;
             }
 
-            // Add this placement to history
-            placementTimes.Enqueue(Time.time);
+            // ✅ Placement timestamp already added inside lock above
 
             // ✅ MEDIUM PRIORITY: Snap point validation (ensure client sent snapped position)
             Vector3 snappedPosition = SnapToGrid(position);

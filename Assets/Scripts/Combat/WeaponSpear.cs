@@ -67,10 +67,14 @@ namespace TacticalCombat.Combat
             Vector3 origin = stabPoint != null ? stabPoint.position : transform.position;
             Vector3 direction = clientDirection.sqrMagnitude > 0.0001f ? clientDirection.normalized : transform.forward;
 
+            // clamp extreme aim spoofing
+            // \u2705 FIX: Use relaxed angle (110 deg) to allow looking up/down while preventing hitting backwards
             float angle = Vector3.Angle(transform.forward, direction);
-            if (angle > maxClientAimAngle && angle > 0.001f)
+            float allowedAngle = 110f;
+
+            if (angle > allowedAngle && angle > 0.001f)
             {
-                float t = maxClientAimAngle / angle;
+                float t = allowedAngle / angle;
                 direction = Vector3.Slerp(transform.forward, direction, Mathf.Clamp01(t)).normalized;
             }
 

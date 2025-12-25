@@ -15,8 +15,14 @@ namespace TacticalCombat.Core
     {
         public void ShowAllPlayersLocal()
         {
+            ForceRefreshAllVisuals();
+        }
+
+        public void ForceRefreshAllVisuals()
+        {
+            // Find all player GameObjects (including inactive)
             var players = FindObjectsByType<PlayerController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            LogInfo($"[VisualsController] Found {players.Length} PlayerController(s)");
+            LogInfo($"[VisualsController] Force refreshing {players.Length} PlayerController(s)");
 
             PlayerController localPlayerController = GetLocalPlayer(players);
 
@@ -33,15 +39,19 @@ namespace TacticalCombat.Core
             }
             else
             {
-                LogError("[VisualsController] Local player NOT FOUND! Attempting last resort camera activation.");
-                ActivateLastResortCamera();
+                // Only log if we are actually in a game phase where we expect a local player
+                if (MatchManager.Instance != null && MatchManager.Instance.GetCurrentPhase() != Phase.Lobby)
+                {
+                    LogWarning("[VisualsController] Local player NOT FOUND during game phase! Attempting last resort camera activation.");
+                    ActivateLastResortCamera();
+                }
             }
 
             // 3. UI and Bootstrap Environment
             DisableBootstrapCamera();
             EnableGameHUD();
 
-            LogInfo("[VisualsController] All players and visuals initialized");
+            LogInfo("[VisualsController] All players and visuals refreshed");
         }
 
         private PlayerController GetLocalPlayer(PlayerController[] players)
@@ -63,6 +73,14 @@ namespace TacticalCombat.Core
             GameObject player = pc.gameObject;
             if (!player.activeSelf) player.SetActive(true);
 
+            // ✅ CRITICAL: Ensure all parents are also active
+            Transform parent = player.transform.parent;
+            while (parent != null)
+            {
+                if (!parent.gameObject.activeSelf) parent.gameObject.SetActive(true);
+                parent = parent.parent;
+            }
+
             // Enable renderers and colliders
             foreach (var r in player.GetComponentsInChildren<Renderer>(true)) r.enabled = true;
             foreach (var c in player.GetComponentsInChildren<Collider>(true)) c.enabled = true;
@@ -71,8 +89,28 @@ namespace TacticalCombat.Core
             Transform weaponHolder = pc.transform.Find("WeaponHolder") ?? pc.transform.Find("PlayerVisual/WeaponHolder");
             if (weaponHolder != null)
             {
-                Transform currentWeapon = weaponHolder.Find("CurrentWeapon");
-                if (currentWeapon != null) currentWeapon.gameObject.SetActive(true);
+                foreach (Transform child in weaponHolder)
+                {
+                    // If it's the current weapon or has "Weapon" in name, activate it
+                    if (child.name == "CurrentWeapon" || child.name.Contains("Weapon"))
+                    {
+                        child.gameObject.SetActive(true);
+                    }
+                }
+            }
+
+            // ✅ NEW: Trigger CharacterSelector if present
+            var characterSelector = pc.GetComponent<CharacterSelector>();
+            if (characterSelector != null && !characterSelector.IsCharacterSpawned())
+            {
+                characterSelector.SpawnCharacter();
+            }
+            
+            // ✅ NEW: Tell FPSController to refresh its state
+            var fps = pc.GetComponent<FPSController>();
+            if (fps != null)
+            {
+                fps.CheckGroundState();
             }
         }
 

@@ -132,13 +132,39 @@ namespace TacticalCombat.Player
 
         private void Update()
         {
-            if (!isLocalPlayer) return;
             if (characterAnimator == null) return;
 
-            UpdateMovementAnimation();
-            UpdateWeaponAnimations();
-            UpdateGroundedState();
-            UpdateJumpAnimation();
+            if (isLocalPlayer)
+            {
+                UpdateMovementAnimation();
+                UpdateWeaponAnimations();
+                UpdateGroundedState();
+                UpdateJumpAnimation();
+            }
+            else
+            {
+                // ✅ AAA FIX: For remote players, update movement animation based on actual position delta
+                UpdateRemoteMovementAnimation();
+            }
+        }
+
+        private Vector3 lastPosition;
+        private void UpdateRemoteMovementAnimation()
+        {
+            if (characterAnimator == null) return;
+
+            // Calculate speed from position change since last frame
+            float speed = (transform.position - lastPosition).magnitude / Time.deltaTime;
+            lastPosition = transform.position;
+
+            // Smooth the speed to avoid jitter in legacy animations
+            float smoothSpeed = Mathf.Lerp(lastSpeed, speed, Time.deltaTime * 10f);
+            lastSpeed = smoothSpeed;
+
+            if (HasParameter(speedHash, AnimatorControllerParameterType.Float))
+            {
+                characterAnimator.SetFloat(speedHash, smoothSpeed);
+            }
         }
 
         /// <summary>
@@ -256,8 +282,29 @@ namespace TacticalCombat.Player
                 characterAnimator.SetBool(isGroundedHash, isGrounded);
             }
             
+            // ✅ AAA FIX: Notify server of grounded state if it changed
+            if (isGrounded != wasGrounded)
+            {
+                CmdNotifyGrounded(isGrounded);
+            }
+
             // Track grounded state for jump detection
             wasGrounded = isGrounded;
+        }
+
+        [Command]
+        private void CmdNotifyGrounded(bool grounded)
+        {
+            RpcSetGrounded(grounded);
+        }
+
+        [ClientRpc]
+        private void RpcSetGrounded(bool grounded)
+        {
+            if (!isLocalPlayer && characterAnimator != null && HasParameter(isGroundedHash, AnimatorControllerParameterType.Bool))
+            {
+                characterAnimator.SetBool(isGroundedHash, grounded);
+            }
         }
 
         /// <summary>
@@ -283,15 +330,29 @@ namespace TacticalCombat.Player
             // Trigger jump animation when player leaves ground (was grounded, now not grounded)
             if (wasGrounded && !isGrounded)
             {
-                if (HasParameter(jumpTriggerHash, AnimatorControllerParameterType.Trigger))
-                {
-                    characterAnimator.SetTrigger(jumpTriggerHash);
-                    
-                    if (showDebugInfo)
-                    {
-                        Debug.Log("[BattleRoyaleAnimationController] Jump trigger activated");
-                    }
-                }
+                if (isLocalPlayer) CmdNotifyJump();
+                PlayJumpAnimation();
+            }
+        }
+
+        [Command]
+        private void CmdNotifyJump()
+        {
+            RpcOnJump();
+        }
+
+        [ClientRpc]
+        private void RpcOnJump()
+        {
+            if (!isLocalPlayer) PlayJumpAnimation();
+        }
+
+        private void PlayJumpAnimation()
+        {
+            if (characterAnimator == null) return;
+            if (HasParameter(jumpTriggerHash, AnimatorControllerParameterType.Trigger))
+            {
+                characterAnimator.SetTrigger(jumpTriggerHash);
             }
         }
 
@@ -300,23 +361,39 @@ namespace TacticalCombat.Player
         /// </summary>
         private void OnWeaponFired()
         {
-            // Set TriggerFire trigger
+            if (isLocalPlayer)
+            {
+                // Send to server to broadcast to all clients
+                CmdNotifyWeaponFired();
+            }
+            
+            PlayFireAnimation();
+        }
+
+        [Command]
+        private void CmdNotifyWeaponFired()
+        {
+            RpcOnWeaponFired();
+        }
+
+        [ClientRpc]
+        private void RpcOnWeaponFired()
+        {
+            if (!isLocalPlayer) PlayFireAnimation();
+        }
+
+        private void PlayFireAnimation()
+        {
+            if (characterAnimator == null) return;
+
             if (HasParameter(fireTriggerHash, AnimatorControllerParameterType.Trigger))
             {
                 characterAnimator.SetTrigger(fireTriggerHash);
-                
-                if (showDebugInfo)
-                {
-                    Debug.Log("[BattleRoyaleAnimationController] Fire trigger activated");
-                }
             }
 
-            // ✅ NEW: Also set IsShooting bool to true (for transition conditions)
             if (HasParameter(isShootingHash, AnimatorControllerParameterType.Bool))
             {
                 characterAnimator.SetBool(isShootingHash, true);
-                
-                // Reset after a short delay (animation will handle the rest)
                 StartCoroutine(ResetShootingState());
             }
         }
@@ -339,17 +416,35 @@ namespace TacticalCombat.Player
         /// </summary>
         private void OnReloadStarted()
         {
+            if (isLocalPlayer)
+            {
+                CmdNotifyReloadStarted();
+            }
+            
+            PlayReloadAnimation();
+        }
+
+        [Command]
+        private void CmdNotifyReloadStarted()
+        {
+            RpcOnReloadStarted();
+        }
+
+        [ClientRpc]
+        private void RpcOnReloadStarted()
+        {
+            if (!isLocalPlayer) PlayReloadAnimation();
+        }
+
+        private void PlayReloadAnimation()
+        {
+            if (characterAnimator == null) return;
+
             if (HasParameter(reloadTriggerHash, AnimatorControllerParameterType.Trigger))
             {
                 characterAnimator.SetTrigger(reloadTriggerHash);
-                
-                if (showDebugInfo)
-                {
-                    Debug.Log("[BattleRoyaleAnimationController] Reload trigger activated");
-                }
             }
 
-            // Also set IsReloading bool
             if (HasParameter(isReloadingHash, AnimatorControllerParameterType.Bool))
             {
                 characterAnimator.SetBool(isReloadingHash, true);
@@ -361,15 +456,33 @@ namespace TacticalCombat.Player
         /// </summary>
         private void OnReloadComplete()
         {
-            // Set IsReloading bool to false
+            if (isLocalPlayer)
+            {
+                CmdNotifyReloadComplete();
+            }
+
+            StopReloadAnimation();
+        }
+
+        [Command]
+        private void CmdNotifyReloadComplete()
+        {
+            RpcOnReloadComplete();
+        }
+
+        [ClientRpc]
+        private void RpcOnReloadComplete()
+        {
+            if (!isLocalPlayer) StopReloadAnimation();
+        }
+
+        private void StopReloadAnimation()
+        {
+            if (characterAnimator == null) return;
+
             if (HasParameter(isReloadingHash, AnimatorControllerParameterType.Bool))
             {
                 characterAnimator.SetBool(isReloadingHash, false);
-                
-                if (showDebugInfo)
-                {
-                    Debug.Log("[BattleRoyaleAnimationController] Reload complete");
-                }
             }
         }
 

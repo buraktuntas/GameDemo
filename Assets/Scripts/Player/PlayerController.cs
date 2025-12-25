@@ -7,11 +7,19 @@ namespace TacticalCombat.Player
 {
     public class PlayerController : NetworkBehaviour
     {
+        /// <summary>
+        /// Global reference to the local player.
+        /// NOTE: Assumes a single local player (no split-screen support).
+        /// </summary>
         public static PlayerController LocalPlayer { get; private set; }
 
         [Header("Network State")]
-        [SyncVar] public Team team = Team.TeamA;
-        [SyncVar] public RoleId role = RoleId.Builder;
+        [SyncVar(hook = nameof(OnTeamChanged))] 
+        public Team team = Team.TeamA;
+        
+        [SyncVar(hook = nameof(OnRoleChanged))] 
+        public RoleId role = RoleId.Builder;
+        
         [SyncVar] public ulong playerId;
         
         [SyncVar] private bool isCarryingCore = false;
@@ -24,13 +32,17 @@ namespace TacticalCombat.Player
         {
             playerVisuals = GetComponent<PlayerVisuals>();
             fpsController = GetComponent<FPSController>();
-            playerId = netId;
         }
 
         public override void OnStartServer()
         {
             base.OnStartServer();
+            playerId = netId; // ✅ FIX: Correct timing for netId assignment
+            
             RegisterWithMatchManager();
+
+            // ✅ PERFORMANCE: Invalidate cache when new player joins
+            Core.ComponentCache.InvalidateAll();
         }
         
         public override void OnStartLocalPlayer()
@@ -39,10 +51,36 @@ namespace TacticalCombat.Player
             LocalPlayer = this;
             UpdateTeamColor();
         }
+        
+        private void OnTeamChanged(Team oldTeam, Team newTeam)
+        {
+            UpdateTeamColor();
+            // Optional: Notify UI or other systems
+        }
+
+        private void OnRoleChanged(RoleId oldRole, RoleId newRole)
+        {
+            // Optional: Update visuals based on role
+        }
 
         private void OnDestroy()
         {
             if (isLocalPlayer && LocalPlayer == this) LocalPlayer = null;
+
+            // ✅ PERFORMANCE: Invalidate cache when player leaves
+            Core.ComponentCache.InvalidateAll();
+
+            // ✅ FIX: Unregister from MatchManager to prevent crash
+            if (isServer && MatchManager.Instance != null)
+            {
+                MatchManager.Instance.UnregisterPlayer(netId);
+            }
+
+            // ✅ MEMORY LEAK FIX: Cleanup placement times dictionary
+            if (isServer)
+            {
+                Building.SimpleBuildMode.CleanupPlayerPlacementTimes(netId);
+            }
         }
 
         private void RegisterWithMatchManager() 
@@ -67,10 +105,5 @@ namespace TacticalCombat.Player
         }
 
         public bool IsCarryingCore() => isCarryingCore;
-        
-        public void CheckAndUpdatePlayerControls()
-        {
-            // Placeholder for state refresh logic
-        }
     }
 }

@@ -42,6 +42,41 @@ namespace TacticalCombat.Combat
             }
         }
 
+        /// <summary>
+        /// ✅ MEMORY LEAK FIX: Clear all event subscriptions and stop coroutines on destroy
+        /// Prevents memory leaks from orphaned event handlers and active coroutines
+        /// </summary>
+        private void OnDestroy()
+        {
+            // ✅ CRITICAL FIX: Stop active invulnerability coroutine to prevent leak
+            if (activeInvulnerabilityCoroutine != null)
+            {
+                StopCoroutine(activeInvulnerabilityCoroutine);
+                activeInvulnerabilityCoroutine = null;
+            }
+
+            // Clear all event subscriptions to prevent memory leaks
+            if (OnHealthChangedEvent != null)
+            {
+                foreach (System.Delegate d in OnHealthChangedEvent.GetInvocationList())
+                {
+                    OnHealthChangedEvent -= (System.Action<int, int>)d;
+                }
+            }
+
+            if (OnDeathEvent != null)
+            {
+                foreach (System.Delegate d in OnDeathEvent.GetInvocationList())
+                {
+                    OnDeathEvent -= (System.Action)d;
+                }
+            }
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log("[Health] OnDestroy - Event subscriptions and coroutines cleared");
+            #endif
+        }
+
         public override void OnStartClient()
         {
             base.OnStartClient();

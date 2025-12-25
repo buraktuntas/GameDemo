@@ -72,13 +72,19 @@ namespace TacticalCombat.Combat
             Vector3 origin = arrowSpawnPoint != null ? arrowSpawnPoint.position : transform.position;
             Vector3 direction = clientDirection.sqrMagnitude > 0.0001f ? clientDirection.normalized : transform.forward;
 
-            // clamp extreme aim spoofing to a sane cone relative to server forward
+            // clamp extreme aim spoofing
+            // \u2705 FIX: Use relaxed angle (110 deg) to allow looking up/down (Pitch) while preventing shooting backwards
+            // transform.forward only has Yaw. Up/Down is 90 deg. 
+            // We allow up to 110 degrees to account for movement lag and steep angles.
             float angle = Vector3.Angle(transform.forward, direction);
-            if (angle > maxClientAimAngle && angle > 0.001f)
+            float allowedAngle = 110f; // Force allow vertical play
+
+            if (angle > allowedAngle && angle > 0.001f)
             {
-                float t = maxClientAimAngle / angle;
+                float t = allowedAngle / angle;
                 direction = Vector3.Slerp(transform.forward, direction, Mathf.Clamp01(t)).normalized;
-            }
+            } 
+
 
             // nudge origin forward slightly to avoid self-hit
             origin += direction * 0.1f;

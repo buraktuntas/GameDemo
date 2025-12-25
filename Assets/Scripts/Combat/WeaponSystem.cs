@@ -37,6 +37,8 @@ namespace TacticalCombat.Combat
         private bool isAiming;
         private InputManager inputManager;
         private Animator weaponAnimator;
+        private bool hasFireParam;
+        private bool hasReloadParam;
         
         // Changed to method for compatibility
         public bool IsReloading() => isReloading;
@@ -54,19 +56,73 @@ namespace TacticalCombat.Combat
             
             if (weaponHolder == null) weaponHolder = transform.Find("WeaponHolder") ?? transform.Find("Camera/WeaponHolder") ?? transform;
             weaponAnimator = GetComponent<Animator>() ?? (weaponHolder != null ? weaponHolder.GetComponent<Animator>() : null);
+
+            // ✅ FIX: Check if Animator actually has the parameters to prevent "Parameter X does not exist" warnings
+            if (weaponAnimator != null)
+            {
+                foreach (var param in weaponAnimator.parameters)
+                {
+                    if (param.nameHash == FireHash) hasFireParam = true;
+                    if (param.nameHash == ReloadHash) hasReloadParam = true;
+                }
+            }
         }
 
         private void Start()
         {
             inputManager = GetComponent<InputManager>();
             TryAssignCamera();
-            
+
             if (isServer && currentWeapon != null)
             {
                 currentAmmo = currentWeapon.magazineSize;
                 reserveAmmo = currentWeapon.maxAmmo;
                 OnAmmoChanged?.Invoke(currentAmmo, reserveAmmo);
             }
+        }
+
+        /// <summary>
+        /// ✅ MEMORY LEAK FIX: Clear all event subscriptions on destroy
+        /// Prevents memory leaks from orphaned event handlers
+        /// </summary>
+        private void OnDestroy()
+        {
+            // Clear all event subscriptions to prevent memory leaks
+            if (OnAmmoChanged != null)
+            {
+                foreach (System.Delegate d in OnAmmoChanged.GetInvocationList())
+                {
+                    OnAmmoChanged -= (System.Action<int, int>)d;
+                }
+            }
+
+            if (OnReloadStarted != null)
+            {
+                foreach (System.Delegate d in OnReloadStarted.GetInvocationList())
+                {
+                    OnReloadStarted -= (System.Action)d;
+                }
+            }
+
+            if (OnReloadComplete != null)
+            {
+                foreach (System.Delegate d in OnReloadComplete.GetInvocationList())
+                {
+                    OnReloadComplete -= (System.Action)d;
+                }
+            }
+
+            if (OnWeaponFired != null)
+            {
+                foreach (System.Delegate d in OnWeaponFired.GetInvocationList())
+                {
+                    OnWeaponFired -= (System.Action)d;
+                }
+            }
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log("[WeaponSystem] OnDestroy - Event subscriptions cleared");
+            #endif
         }
 
         private void Update()
@@ -133,7 +189,7 @@ namespace TacticalCombat.Combat
         {
             vfxController?.PlayMuzzleFlashAt(pos, dir);
             audioController?.PlayFireSoundAt(pos, !isLocalPlayer);
-            if (weaponAnimator != null) weaponAnimator.SetTrigger(FireHash);
+            if (weaponAnimator != null && hasFireParam) weaponAnimator.SetTrigger(FireHash);
         }
 
         private void PlayLocalFireEffects()
@@ -148,7 +204,7 @@ namespace TacticalCombat.Combat
         private void StartReload() { if (isServer) StartReloadServer(); else CmdStartReload(); }
         [Command] private void CmdStartReload() => StartReloadServer();
         [Server] private void StartReloadServer() { if (isReloading) return; StartCoroutine(ReloadCoroutine()); RpcOnReloadStarted(); }
-        [ClientRpc] private void RpcOnReloadStarted() { if (weaponAnimator != null) weaponAnimator.SetTrigger(ReloadHash); audioController?.PlayReloadSound(); OnReloadStarted?.Invoke(); }
+        [ClientRpc] private void RpcOnReloadStarted() { if (weaponAnimator != null && hasReloadParam) weaponAnimator.SetTrigger(ReloadHash); audioController?.PlayReloadSound(); OnReloadStarted?.Invoke(); }
 
         private IEnumerator ReloadCoroutine()
         {

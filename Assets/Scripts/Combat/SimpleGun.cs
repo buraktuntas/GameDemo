@@ -24,8 +24,11 @@ namespace TacticalCombat.Combat
         [SerializeField] private AudioClip hitSound;
         [SerializeField] private Transform muzzleTransform; // Silahın ucundaki transform
         
-        private float nextFireTime = 0f;
-        private float lastServerFireTime = 0f;
+        // ✅ DOUBLE PRECISION: Use double for timestamps to prevent precision loss over time
+        // float loses precision after ~7 hours of gameplay (single precision limit)
+        // double maintains precision for years (MirrorUnityFPS pattern)
+        private double nextFireTime = 0.0;
+        private double lastServerFireTime = 0.0;
         private Camera playerCamera;
 
         private void Start()
@@ -75,20 +78,36 @@ namespace TacticalCombat.Combat
             // Client tarafında görsel feedback
             Debug.Log("🔫 Fired!");
             
+            // ✅ DOUBLE PRECISION: Send client timestamp for lag compensation
+            double clientTimestamp = Mirror.NetworkTime.time;
+
             // Server'a kamera bilgisini gönder
-            CmdFire(shootOrigin, shootDirection);
+            CmdFire(shootOrigin, shootDirection, clientTimestamp);
         }
 
         [Command]
-        private void CmdFire(Vector3 clientOrigin, Vector3 clientDirection)
+        private void CmdFire(Vector3 clientOrigin, Vector3 clientDirection, double clientTimestamp)
         {
-            // 1️⃣ Fire rate check
-            if (Time.time < lastServerFireTime + fireRate)
+            // 1️⃣ Fire rate check - ✅ DOUBLE PRECISION
+            double currentTime = Mirror.NetworkTime.time;
+            if (currentTime < lastServerFireTime + fireRate)
             {
                 Debug.LogWarning($"🚨 Fire rate exceeded by {netId}");
                 return;
             }
-            lastServerFireTime = Time.time;
+            lastServerFireTime = currentTime;
+
+            // ✅ LAG COMPENSATION: Calculate client's ping/latency (DOUBLE PRECISION)
+            double currentServerTime = Mirror.NetworkTime.time;
+            double clientLatency = currentServerTime - clientTimestamp;
+            double rewindTime = clientTimestamp; // Rewind to when client fired
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (clientLatency > 0.5f)
+            {
+                Debug.Log($"🌐 [LAG COMP] Client latency: {clientLatency * 1000f:F0}ms, rewinding to {rewindTime:F3}s");
+            }
+            #endif
             
             // 2️⃣ Origin validation - FPS oyunlarda client kamera pozisyonu güvenilir
             // Client'ın kamera pozisyonu tamamen güvenilir (FPS standard)
@@ -112,7 +131,55 @@ namespace TacticalCombat.Combat
                 Debug.Log($"🎯 Shot direction angle: {angleDbg:F1}° (server: {serverForward}, client: {clientDirection})");
             }
             
-            // 4️⃣ Server raycast (use server player head position for security)
+            // 4️⃣ LAG COMPENSATION: Rewind all players to client's fire time
+            var allPlayers = TacticalCombat.Core.ComponentCache.GetPlayerControllers(includeInactive: false);
+            var rewindData = new System.Collections.Generic.List<(TacticalCombat.Player.FPSController fps, Vector3 origPos, Quaternion origRot, CharacterController cc, bool wasEnabled)>();
+
+            foreach (var player in allPlayers)
+            {
+                if (player == null || player.netId == netId) continue; // Skip shooter
+
+                var fpsController = player.GetComponent<TacticalCombat.Player.FPSController>();
+                if (fpsController != null)
+                {
+                    // Store original position
+                    Vector3 originalPos = player.transform.position;
+                    Quaternion originalRot = player.transform.rotation;
+
+                    // ✅ STABILITY: Disable CharacterController to prevent conflicts during teleport
+                    var cc = player.GetComponent<CharacterController>();
+                    bool wasEnabled = cc != null && cc.enabled;
+                    if (cc != null) cc.enabled = false;
+
+                    rewindData.Add((fpsController, originalPos, originalRot, cc, wasEnabled));
+
+                    // Get position history and rewind
+                    var posHistory = fpsController.GetPositionHistory();
+                    if (posHistory != null && posHistory.GetPositionAtTime(rewindTime, out Vector3 rewindPos, out Quaternion rewindRot, out Bounds rewindBounds))
+                    {
+                        // ✅ SAFETY: Null check before teleport (disconnect protection)
+                        if (player != null && player.transform != null)
+                        {
+                            player.transform.position = rewindPos;
+                            player.transform.rotation = rewindRot;
+
+                            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                            float rewindDistance = Vector3.Distance(originalPos, rewindPos);
+                            if (rewindDistance > 0.1f)
+                            {
+                                Debug.Log($"🔄 [LAG COMP] Rewound {player.name} by {rewindDistance:F2}m");
+                            }
+                            #endif
+                        }
+                    }
+                }
+            }
+
+            // ✅ CRITICAL: Sync transforms to physics engine immediately
+            // Without this, Physics.Raycast will use old collider positions!
+            Physics.SyncTransforms();
+
+            // 5️⃣ Server raycast (use server player head position for security)
             Vector3 validatedOrigin = serverPlayerHead;
             Vector3 clampedDirection = clientDirection.sqrMagnitude > 0.0001f ? clientDirection.normalized : transform.forward;
             float angle = Vector3.Angle(transform.forward, clampedDirection);
@@ -122,9 +189,10 @@ namespace TacticalCombat.Combat
                 clampedDirection = Vector3.Slerp(transform.forward, clampedDirection, Mathf.Clamp01(t)).normalized;
             }
             Vector3 validatedDirection = clampedDirection;
-            
+
             Debug.Log($"🎯 [SERVER] Raycast from {validatedOrigin} direction {validatedDirection}");
-            
+
+            // Perform raycast against rewound positions
             if (Physics.Raycast(validatedOrigin, validatedDirection, out RaycastHit hit, range, hitLayers, QueryTriggerInteraction.Ignore))
             {
                 Debug.Log($"🎯 [SERVER] Hit: {hit.collider.name} at {hit.point}");
@@ -160,6 +228,26 @@ namespace TacticalCombat.Combat
             {
                 Debug.Log("❌ [SERVER] Missed!");
             }
+
+            // 6️⃣ LAG COMPENSATION: Restore all players to original positions
+            foreach (var (fps, origPos, origRot, cc, wasEnabled) in rewindData)
+            {
+                if (fps != null && fps.gameObject != null)
+                {
+                    fps.transform.position = origPos;
+                    fps.transform.rotation = origRot;
+
+                    // ✅ STABILITY: Restore CharacterController state
+                    if (cc != null && wasEnabled) cc.enabled = true;
+                }
+            }
+
+            // ✅ CRITICAL: Sync restored positions to physics engine
+            Physics.SyncTransforms();
+
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.Log($"✅ [LAG COMP] Restored {rewindData.Count} players to current positions");
+            #endif
         }
 
         [ClientRpc]
